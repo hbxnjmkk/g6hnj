@@ -1375,6 +1375,20 @@ const DBX = {
       setSync("ok");
     }catch(e){ setSync("err"); if(manual)toast("Ошибка загрузки из Dropbox"); console.warn(e); }
   },
+  async syncNow(manual){
+    if(!this.linked){ if(manual)go("settings"); return; }
+    try{ setSync("dirty");
+      const r=await this.api("https://content.dropboxapi.com/2/files/download",{method:"POST",headers:{"Dropbox-API-Arg":JSON.stringify({path:"/famfin.json"})}});
+      if(r.status===409){ await this.push(); setSync("ok"); if(manual)toast("Отправлено в Dropbox"); return; }
+      if(!r.ok) throw new Error("download "+r.status);
+      const remote=JSON.parse(await r.text());
+      if(remote&&remote.updatedAt){
+        if(remote.updatedAt>state.updatedAt){ state=migrate(remote); save(false); setSync("ok"); render_current(); if(manual)toast("Обновлено из Dropbox"); return; }
+        if(remote.updatedAt<state.updatedAt){ await this.push(); setSync("ok"); if(manual)toast("Отправлено в Dropbox"); return; }
+      }
+      setSync("ok"); if(manual)toast("Уже синхронно");
+    }catch(e){ setSync("err"); if(manual)toast("Ошибка синхронизации"); console.warn(e); }
+  },
   unlink(){ if(!confirm("Отключить Dropbox? Локальные данные останутся."))return; this.token=this.refresh=this.account=null; this.linked=false; localStorage.removeItem(LS_DBX); setSync(null); toast("Dropbox отключён"); render_current(); }
 };
 function setSync(st){ const b=document.getElementById("syncBtn"),i=document.getElementById("syncIco"); b.classList.remove("ok","dirty","err"); if(st)b.classList.add(st); i.textContent = st==="dirty"?"⟳":(st==="err"?"⚠":"☁"); }
@@ -1389,7 +1403,7 @@ document.getElementById("view").addEventListener("click",e=>{
 });
 document.getElementById("mPrev").onclick=()=>{curMonth=clampMonth(addMonths(curMonth,-1));render_current();};
 document.getElementById("mNext").onclick=()=>{curMonth=clampMonth(addMonths(curMonth,1));render_current();};
-document.getElementById("syncBtn").onclick=()=>{ if(DBX.linked)DBX.pull(true); else go("settings"); };
+document.getElementById("syncBtn").onclick=()=>{ DBX.syncNow(true); };
 document.getElementById("meBtn").onclick=openMemberPicker;
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet(); });
 
@@ -1421,7 +1435,15 @@ function bootApp(){
   document.getElementById("gate").classList.remove("show");
   document.getElementById("app").style.visibility="visible";
   renderNav(); renderMe(); render_current();
-  if(DBX.linked){ setSync("ok"); setTimeout(()=>DBX.pull(false),400); }
+  if(DBX.linked){ setSync("ok"); setTimeout(()=>DBX.syncNow(false),400); }
+  setupAutoSync();
+}
+let autoSyncSet=false;
+function setupAutoSync(){
+  if(autoSyncSet)return; autoSyncSet=true;
+  document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="visible"&&DBX.linked)DBX.syncNow(false); });
+  window.addEventListener("focus",()=>{ if(DBX.linked)DBX.syncNow(false); });
+  setInterval(()=>{ if(DBX.linked&&document.visibilityState!=="hidden")DBX.syncNow(false); },20000);
 }
 function showGate(mode){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
