@@ -50,6 +50,9 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
   border:1px solid var(--line2);font-size:15px;position:relative}
 .sync .badge{position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:999px;background:var(--ink3);border:2px solid var(--bg2)}
 .sync.ok .badge{background:var(--green)} .sync.dirty .badge{background:var(--amber)} .sync.err .badge{background:var(--red)}
+.me{height:34px;min-width:34px;padding:0 8px;border-radius:999px;display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line2);font-size:15px;font-weight:600;color:var(--ink);flex:none;max-width:120px}
+.me .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mbadge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid transparent;white-space:nowrap}
 
 .shell{flex:1;display:flex;min-height:0}
 .sidebar{display:none}
@@ -201,6 +204,7 @@ small.hint{color:var(--ink3);font-size:11.5px}
       <div class="lbl num" id="mLbl">—</div>
       <button id="mNext" aria-label="Следующий месяц">›</button>
     </div>
+    <button class="me" id="meBtn" title="Кто ведёт учёт"><span id="meIco">👤</span></button>
     <button class="sync" id="syncBtn" title="Синхронизация"><span id="syncIco">☁</span><span class="badge"></span></button>
   </div>
   <div class="shell">
@@ -235,6 +239,7 @@ small.hint{color:var(--ink3);font-size:11.5px}
 }catch(e){} })();
 const LS_KEY = "famfin.v1";
 const LS_DBX = "famfin.dbx";
+const LS_ME  = "famfin.me";   // текущий участник — локально на устройстве, НЕ синхронизируется
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
 const nowISO = () => new Date().toISOString();
@@ -318,6 +323,7 @@ function seedState(){
     txns:[], plans:{}, recurring:[],
     assets, liabilities:liab, incomeSources:income,
     goals:[], netWorthHistory:[],
+    members:[],
     freq:{}
   };
 }
@@ -328,7 +334,7 @@ function load(){
   try{ const raw=localStorage.getItem(LS_KEY); if(raw){ const s=JSON.parse(raw); return migrate(s);} }catch(e){}
   const s=seedState(); try{localStorage.setItem(LS_KEY,JSON.stringify(s));}catch(e){} return s;
 }
-function migrate(s){ s.freq=s.freq||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
+function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
 let saveTimer=null, dbxTimer=null;
 function save(pushCloud=true){
   state.updatedAt=nowISO();
@@ -348,6 +354,14 @@ const expenseGroups=()=>state.groups.filter(g=>g.kind!=="income");
 const expenseCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind!=="income";});
 const incomeCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind==="income";});
 function catColor(cid){const g=groupOf(cid);return g?g.color:"var(--ink3)";}
+
+/* ---------- члены семьи (участники) ---------- */
+const MEMBER_COLORS=["#3D7BE0","#2E9E6B","#C68A12","#9163C9","#2494B0","#D6743E","#C74B84","#4B9E52"];
+const memberById=id=>byId(state.members,id);
+function curMember(){ let id=null; try{id=localStorage.getItem(LS_ME);}catch(e){} if(id&&memberById(id))return id; return state.members[0]?state.members[0].id:null; }
+function setCurMember(id){ try{localStorage.setItem(LS_ME,id||"");}catch(e){} }
+function memberBadge(id,mini){ const m=memberById(id); if(!m)return ""; return '<span class="mbadge" style="background:'+tint(m.color,16)+';color:'+m.color+';border-color:'+tint(m.color,40)+'">'+(m.emoji||"👤")+(mini?"":" "+esc(m.name))+'</span>'; }
+function memberSpend(k,mid,type){ return txnsOfMonth(k).filter(t=>t.memberId===mid&&(type?t.type===type:true)).reduce((a,t)=>a+(+t.amount||0),0); }
 
 function txnsOfMonth(k){ return state.txns.filter(t=>ym(t.date)===k); }
 function sumTxns(list,type){ return list.filter(t=>type?t.type===type:true).reduce((a,t)=>a+(Number(t.amount)||0),0); }
@@ -395,14 +409,31 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;"
 
 /* ---------- sheet system ---------- */
 const scrim=document.getElementById("scrim"), sheetEl=document.getElementById("sheet");
-let sheetOpen=false;
+let sheetOpen=false, vvHandler=null;
+function isMobile(){ return window.matchMedia("(max-width:899px)").matches; }
+function fitSheet(){
+  if(!window.visualViewport) return;
+  if(!isMobile()){ sheetEl.style.maxHeight=""; sheetEl.style.bottom=""; return; }
+  const vv=window.visualViewport;
+  const kb=Math.max(0, window.innerHeight - vv.height - vv.offsetTop); // высота клавиатуры
+  sheetEl.style.bottom = kb + "px";               // поднять окно над клавиатурой
+  sheetEl.style.maxHeight = (vv.height - 6) + "px"; // вписать в видимую область
+}
 function openSheet(innerHTML,onMount){
   sheetEl.innerHTML='<div class="grab"></div>'+innerHTML;
   scrim.classList.add("show"); sheetEl.classList.add("show"); sheetOpen=true;
   document.body.style.overflow="hidden";
+  if(window.visualViewport){ vvHandler=()=>fitSheet();
+    window.visualViewport.addEventListener("resize",vvHandler);
+    window.visualViewport.addEventListener("scroll",vvHandler); }
+  (window.requestAnimationFrame||function(f){setTimeout(f,16);})(fitSheet); setTimeout(fitSheet,60); setTimeout(fitSheet,300);
   if(onMount) onMount(sheetEl);
 }
-function closeSheet(){ scrim.classList.remove("show"); sheetEl.classList.remove("show"); sheetOpen=false; document.body.style.overflow=""; }
+function closeSheet(){
+  scrim.classList.remove("show"); sheetEl.classList.remove("show"); sheetOpen=false; document.body.style.overflow="";
+  if(window.visualViewport && vvHandler){ window.visualViewport.removeEventListener("resize",vvHandler); window.visualViewport.removeEventListener("scroll",vvHandler); vvHandler=null; }
+  sheetEl.style.maxHeight=""; sheetEl.style.bottom="";
+}
 scrim.addEventListener("click",closeSheet);
 
 /* ---------- navigation ---------- */
@@ -452,6 +483,41 @@ function openMore(){
     '</div>', el=>{ el.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{closeSheet();go(b.dataset.go);}); });
 }
 
+/* ---------- участник: индикатор в шапке + выбор «кто я» на этом устройстве ---------- */
+function renderMe(){
+  const btn=document.getElementById("meBtn"), ico=document.getElementById("meIco");
+  const m=memberById(curMember());
+  if(m){ ico.textContent=m.emoji||"👤"; btn.style.borderColor=tint(m.color,45);
+    if(!btn.querySelector(".nm")){ const s=document.createElement("span"); s.className="nm"; btn.appendChild(s); }
+    btn.querySelector(".nm").textContent=m.name; }
+  else { ico.textContent="👤"; const nm=btn.querySelector(".nm"); if(nm)nm.remove(); btn.style.borderColor=""; }
+}
+function openMemberPicker(){
+  if(!state.members.length){
+    openSheet('<h3>Кто ведёт учёт</h3><div class="infobox">Участников пока нет. Добавьте членов семьи — и сможете отмечать, кто сделал каждый расход или доход.</div><button class="btn primary block" id="toMembers">Добавить участников</button>',
+      el=>{ el.querySelector("#toMembers").onclick=()=>{closeSheet();go("settings");setTimeout(()=>editMember(),150);}; });
+    return;
+  }
+  const cur=curMember();
+  openSheet('<h3>Кто я на этом устройстве</h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Выбор запоминается только на этом устройстве и не меняет его у других.</p><div class="opts" style="flex-direction:column">'+
+    state.members.map(m=>'<button class="btn block '+(m.id===cur?'':'')+'" style="justify-content:flex-start;gap:10px;'+(m.id===cur?'border-color:'+m.color+';color:'+m.color:'')+'" data-m="'+m.id+'"><span style="font-size:18px">'+(m.emoji||"👤")+'</span>'+esc(m.name)+(m.id===cur?' ✓':'')+'</button>').join("")+
+    '</div>', el=>{ el.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{ setCurMember(b.dataset.m); closeSheet(); renderMe(); toast("Теперь вы: "+memberById(b.dataset.m).name); }); });
+}
+function editMember(id){
+  const m=id?memberById(id):{id:null,name:"",emoji:"🙂",color:MEMBER_COLORS[state.members.length%MEMBER_COLORS.length]};
+  openSheet('<h3>'+(id?"Участник":"Новый участник")+'</h3>'+
+    '<div class="field"><label>Имя</label><input id="mn" value="'+esc(m.name)+'" placeholder="Напр. Муж, Жена, Даша"></div>'+
+    '<div class="field"><label>Значок (эмодзи)</label><input id="me_e" value="'+esc(m.emoji||"🙂")+'" maxlength="2" style="width:80px;text-align:center;font-size:22px"></div>'+
+    '<div class="field"><label>Цвет</label><div class="opts" id="mcol">'+MEMBER_COLORS.map(c=>'<button class="opt" data-c="'+c+'" style="width:34px;height:34px;padding:0;background:'+c+';border-color:'+(m.color===c?"#fff":"transparent")+'"></button>').join("")+'</div></div>'+
+    '<button class="btn primary block" id="save" style="padding:13px">Сохранить</button>'+
+    (id?'<button class="btn danger block" id="del" style="margin-top:8px">Удалить участника</button>':''),
+    el=>{ let color=m.color;
+      el.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{ color=b.dataset.c; el.querySelectorAll("[data-c]").forEach(x=>x.style.borderColor="transparent"); b.style.borderColor="#fff"; });
+      el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#mn").value.trim(),emoji:el.querySelector("#me_e").value.trim()||"🙂",color:color}; if(!o.name){toast("Введите имя");return;} if(id)Object.assign(m,o); else{ const nid=uid(); state.members.push({id:nid,...o}); if(!localStorage.getItem(LS_ME))setCurMember(nid); } save(); closeSheet(); renderMe(); render_current(); };
+      if(id)el.querySelector("#del").onclick=()=>{ if(confirm("Удалить участника «"+m.name+"»? Его прошлые операции останутся, но без автора.")){ state.members=state.members.filter(x=>x.id!==id); if(curMember()===id)setCurMember(state.members[0]?state.members[0].id:""); save(); closeSheet(); renderMe(); render_current(); } };
+    });
+}
+
 /* ============================================================
    ADD TRANSACTION — быстрый ввод (5 секунд)
    ============================================================ */
@@ -461,7 +527,7 @@ function frequentCats(type){
   return cats.slice().sort((a,b)=>(f[b.id]||0)-(f[a.id]||0));
 }
 function openAddTxn(preset){
-  let draft={type:"expense",date:todayISOdate(),amount:"",categoryId:null,subId:null,comment:"",...(preset||{})};
+  let draft={type:"expense",date:todayISOdate(),amount:"",categoryId:null,subId:null,comment:"",memberId:curMember(),...(preset||{})};
   const render=()=>{
     const cats=frequentCats(draft.type);
     const subs = draft.categoryId?subsOf(draft.categoryId):[];
@@ -485,6 +551,9 @@ function openAddTxn(preset){
           <button class="opt" data-sub="__add">＋ новая</button>
         </div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
+      ${state.members.length?`<div class="field"><label>Кто</label><div class="opts" id="whoOpts">
+          ${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${m.emoji||'👤'} ${esc(m.name)}</button>`).join("")}
+        </div></div>`:''}
       <div class="field"><label>Комментарий</label><input id="cm" placeholder="необязательно" value="${esc(draft.comment)}"></div>
       <button class="btn primary block" id="saveTxn" style="padding:14px;font-size:16px;margin-top:4px">Сохранить</button>
       <button class="btn ghost block" id="cancelTxn" style="margin-top:8px">Отмена</button>
@@ -492,12 +561,13 @@ function openAddTxn(preset){
       el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;render();});
       el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.categoryId=b.dataset.cat;const ss=subsOf(draft.categoryId);draft.subId=ss.length===1?ss[0].id:null;draft.comment=el.querySelector("#cm").value;render();});
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{ if(b.dataset.sub==="__add"){ const nm=prompt("Название новой подкатегории:"); if(nm&&nm.trim()){ const s={id:uid(),categoryId:draft.categoryId,name:nm.trim()}; state.subcategories.push(s); save(); draft.subId=s.id; } } else { draft.subId=b.dataset.sub; } draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value; render(); });
+      el.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{ draft.memberId=b.dataset.who; el.querySelectorAll("[data-who]").forEach(x=>x.classList.toggle("active",x.dataset.who===draft.memberId)); });
       el.querySelector("#amt").focus();
       el.querySelector("#saveTxn").onclick=()=>{
         const amount=parseFloat(String(el.querySelector("#amt").value).replace(/\s/g,"").replace(",","."));
         if(!amount||amount<=0){ toast("Введите сумму"); el.querySelector("#amt").focus(); return; }
         if(!draft.categoryId){ toast("Выберите категорию"); return; }
-        const t={id:uid(),type:draft.type,date:el.querySelector("#dt").value||todayISOdate(),amount,categoryId:draft.categoryId,subId:draft.subId,comment:el.querySelector("#cm").value.trim(),createdAt:nowISO()};
+        const t={id:uid(),type:draft.type,date:el.querySelector("#dt").value||todayISOdate(),amount,categoryId:draft.categoryId,subId:draft.subId,comment:el.querySelector("#cm").value.trim(),memberId:draft.memberId||curMember(),createdAt:nowISO()};
         state.txns.push(t); state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1; save();
         closeSheet(); toast((draft.type==="income"?"Доход":"Расход")+" добавлен: "+fmt(amount)); render_current();
       };
@@ -520,6 +590,7 @@ function editTxn(id){
       <div class="field"><label>Категория</label><div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${c.icon||'•'} ${esc(c.name)}</button>`).join("")}</div></div>
       ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts">${subs.map(s=>`<button class="opt ${draft.subId===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
+      ${state.members.length?`<div class="field"><label>Кто</label><div class="opts">${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${m.emoji||'👤'} ${esc(m.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Комментарий</label><input id="cm" value="${esc(draft.comment||'')}"></div>
       <button class="btn primary block" id="upd" style="padding:13px;margin-top:4px">Сохранить</button>
       <button class="btn danger block" id="del" style="margin-top:8px">Удалить операцию</button>
@@ -527,10 +598,11 @@ function editTxn(id){
       el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;render();});
       el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.categoryId=b.dataset.cat;draft.subId=null;render();});
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{draft.subId=b.dataset.sub;render();});
+      el.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{draft.memberId=b.dataset.who;el.querySelectorAll("[data-who]").forEach(x=>x.classList.toggle("active",x.dataset.who===draft.memberId));});
       el.querySelector("#upd").onclick=()=>{
         const amount=parseFloat(String(el.querySelector("#amt").value).replace(/\s/g,"").replace(",","."));
         if(!amount||amount<=0){toast("Введите сумму");return;} if(!draft.categoryId){toast("Выберите категорию");return;}
-        Object.assign(t,{type:draft.type,amount,categoryId:draft.categoryId,subId:draft.subId,date:el.querySelector("#dt").value,comment:el.querySelector("#cm").value.trim()});
+        Object.assign(t,{type:draft.type,amount,categoryId:draft.categoryId,subId:draft.subId,date:el.querySelector("#dt").value,comment:el.querySelector("#cm").value.trim(),memberId:draft.memberId});
         save(); closeSheet(); toast("Сохранено"); render_current();
       };
       el.querySelector("#del").onclick=()=>{ if(confirm("Удалить операцию?")){ state.txns=state.txns.filter(x=>x.id!==id); save(); closeSheet(); toast("Удалено"); render_current(); } };
@@ -545,6 +617,7 @@ function editTxn(id){
 function render(){ render_current(); }
 function render_current(){
   document.getElementById("mLbl").textContent=ymShort(curMonth);
+  if(typeof renderMe==="function") renderMe();
   const v=document.getElementById("view"); v.innerHTML="";
   ({today:pgToday,ops:pgOps,plan:pgPlan,fact:pgFact,dash:pgDash,cashflow:pgCashflow,forecast:pgForecast,balance:pgBalance,debts:pgDebts,goals:pgGoals,settings:pgSettings}[route]||pgToday)(v);
 }
@@ -610,7 +683,7 @@ function txnRow(t){
   const inc=t.type==="income";
   const row=h(`<div class="lrow"><div class="ic" style="background:${tint(catColor(t.categoryId),13)};color:${catColor(t.categoryId)}">${inc?'⬆':catIcon(t.categoryId)}</div>
     <div style="min-width:0"><div class="t1">${esc(catName(t.categoryId))}${t.subId?' · '+esc(subName(t.subId)):''}</div>
-    <div class="t2">${esc(fmtDate(t.date))}${t.comment?' · '+esc(t.comment):''}</div></div>
+    <div class="t2">${t.memberId?memberBadge(t.memberId)+' · ':''}${esc(fmtDate(t.date))}${t.comment?' · '+esc(t.comment):''}</div></div>
     <div class="amt num ${inc?'inc':'exp'}">${inc?'+':'−'}${fmt(t.amount,{bare:true})}</div></div>`);
   row.onclick=()=>editTxn(t.id); row.style.cursor="pointer"; return row;
 }
@@ -790,6 +863,22 @@ function pgDash(v){
     <div class="legend">${grpData.map(d=>`<div class="li"><span class="sw" style="background:${d.color}"></span>${esc(d.label)}<span class="lv num">${fmt(d.value,{bare:true})}</span></div>`).join("")}</div></div>`)); }
   else dcard.appendChild(h(`<div class="empty">Нет расходов за ${ymShort(k)}. Добавьте операции — появится структура.</div>`));
   v.appendChild(dcard);
+
+  // breakdown by member
+  if(state.members.length){
+    const rows=state.members.map(m=>({m,exp:memberSpend(k,m.id,"expense"),inc:memberSpend(k,m.id,"income")}));
+    const un={exp:txnsOfMonth(k).filter(t=>t.type==="expense"&&!t.memberId).reduce((a,t)=>a+ +t.amount,0),inc:txnsOfMonth(k).filter(t=>t.type==="income"&&!t.memberId).reduce((a,t)=>a+ +t.amount,0)};
+    const any=rows.some(r=>r.exp||r.inc)||un.exp||un.inc;
+    const mc=h(`<div class="card"><h3>По участникам <span class="tag">${ymShort(k)}</span></h3></div>`);
+    if(any){
+      const tbl=h(`<table class="tbl"><thead><tr><th>Кто</th><th class="right">Расход</th><th class="right">Доход</th></tr></thead><tbody></tbody></table>`);
+      const tb=tbl.querySelector("tbody");
+      rows.filter(r=>r.exp||r.inc).forEach(r=>tb.appendChild(h(`<tr><td><span style="color:${r.m.color}">${r.m.emoji||'👤'}</span> ${esc(r.m.name)}</td><td class="right num">${r.exp?fmt(r.exp,{bare:true}):'—'}</td><td class="right num" style="color:var(--green)">${r.inc?fmt(r.inc,{bare:true}):'—'}</td></tr>`)));
+      if(un.exp||un.inc)tb.appendChild(h(`<tr><td class="dim">автор не указан</td><td class="right num dim">${un.exp?fmt(un.exp,{bare:true}):'—'}</td><td class="right num dim">${un.inc?fmt(un.inc,{bare:true}):'—'}</td></tr>`));
+      mc.appendChild(tbl);
+    } else mc.appendChild(h(`<div class="empty" style="padding:16px">Пока нет операций с автором за ${ymShort(k)}. Отмечайте «Кто» при вводе — здесь появится разбивка.</div>`));
+    v.appendChild(mc);
+  }
 
   // net worth 6-month history + assets vs liab
   const nwCard=h(`<div class="card"><h3>Чистый капитал</h3></div>`);
@@ -1077,7 +1166,20 @@ function suggestPlanFromGoals(){
    PAGE: НАСТРОЙКА (статьи, доходы, данные, синхронизация)
    ============================================================ */
 function pgSettings(v){
-  v.appendChild(h(`<div class="page-title">Настройка</div><div class="page-sub">Статьи, доходы, данные и синхронизация</div>`));
+  v.appendChild(h(`<div class="page-title">Настройка</div><div class="page-sub">Участники, статьи, доходы, данные и синхронизация</div>`));
+
+  // participants
+  const pc=h(`<div class="card"><h3>Участники <span class="tag">кто ведёт учёт</span></h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Добавьте членов семьи — в операциях можно отмечать автора, а в дашборде видеть, кто сколько тратит и зарабатывает.</p></div>`);
+  state.members.forEach(m=>{
+    const row=h(`<div class="lrow"><div class="ic" style="background:${tint(m.color,16)};color:${m.color}">${m.emoji||'👤'}</div>
+      <div class="t1" style="flex:1">${esc(m.name)}${curMember()===m.id?' <span class="pill g" style="padding:1px 7px;font-size:10px">это я на этом устройстве</span>':''}</div>
+      <button class="iconbtn" data-edit>✎</button></div>`);
+    row.querySelector("[data-edit]").onclick=()=>editMember(m.id);
+    pc.appendChild(row);
+  });
+  pc.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" id="addMember">＋ Добавить участника</button>`));
+  pc.querySelector("#addMember").onclick=()=>editMember();
+  v.appendChild(pc);
 
   // income sources
   const ic=h(`<div class="card"><h3>Источники дохода <span class="tag num">${fmt(expectedIncome())}/мес</span></h3></div>`);
@@ -1231,10 +1333,12 @@ document.getElementById("view").addEventListener("click",e=>{
 document.getElementById("mPrev").onclick=()=>{curMonth=clampMonth(addMonths(curMonth,-1));render_current();};
 document.getElementById("mNext").onclick=()=>{curMonth=clampMonth(addMonths(curMonth,1));render_current();};
 document.getElementById("syncBtn").onclick=()=>{ if(DBX.linked)DBX.pull(true); else go("settings"); };
+document.getElementById("meBtn").onclick=openMemberPicker;
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet(); });
 
 DBX.boot();
 renderNav();
+renderMe();
 render_current();
 if(DBX.linked){ setSync("ok"); setTimeout(()=>DBX.pull(false),400); }
 console.log("Семейная финансовая ERP готова.");
