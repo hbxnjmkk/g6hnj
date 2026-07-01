@@ -1683,7 +1683,13 @@ function showGate(mode){
   setTimeout(()=>inp.focus(),120);
 }
 function afterGate(){ if(state.lock&&state.lock.enabled) showGate("lock"); else bootApp(); }
-function securityBoot(){ let g="1"; try{g=localStorage.getItem(LS_GATE);}catch(e){} if(g!=="1"){ showGate("gate"); } else afterGate(); }
+function securityBoot(){
+  let g="1"; try{g=localStorage.getItem(LS_GATE);}catch(e){}
+  if(g==="1"){ afterGate(); return; }
+  // Устройство уже доверенное: если Dropbox привязан, заглушку не спрашиваем
+  if(DBX.linked){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); return; }
+  showGate("gate");
+}
 
 DBX.boot();
 securityBoot();
