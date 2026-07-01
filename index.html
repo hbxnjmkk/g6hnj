@@ -274,7 +274,7 @@ const LS_DBX = "famfin.dbx";
 const LS_ME  = "famfin.me";   // текущий участник — локально на устройстве, НЕ синхронизируется
 const LS_GATE= "famfin.gate"; // заглушка пройдена на этом браузере
 const LS_FACEID="famfin.faceid"; // id ключа Face ID для этого браузера
-const GATE_HASH="2861504904edd2b7"; // хеш пароля-заглушки (сам пароль в файле не хранится)
+const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
@@ -1663,7 +1663,7 @@ function setupAutoSync(){
 function showGate(mode){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show");
-  box.innerHTML='<input id="gpass" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="go"'+(mode==="lock"?' placeholder="код"':'')+'>'+
+  box.innerHTML='<input id="gpass" type="text" inputmode="'+(mode==="gate"?"numeric":"text")+'" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="go" placeholder="код">'+
     '<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:2px"><button class="gface" id="gshow" type="button">показать</button><button class="gbtn" id="gok">→</button></div>'+
     (mode==="lock"?'<button class="gface" id="gface" style="display:none">Face ID</button>':'');
   const inp=box.querySelector("#gpass"), ok=box.querySelector("#gok"), shw=box.querySelector("#gshow");
