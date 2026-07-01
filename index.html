@@ -1301,14 +1301,32 @@ const DBX = {
   async b64url(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); },
   async challenge(verifier){ if(window.crypto&&crypto.subtle){ try{ const dig=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(verifier)); return {method:"S256",challenge:await this.b64url(dig)}; }catch(e){} } return {method:"plain",challenge:verifier}; },
   async startLink(){
-    const key=prompt("Вставьте App key вашего приложения Dropbox\n(создаётся бесплатно на dropbox.com/developers → Create app → Scoped access → App folder):");
-    if(!key||!key.trim())return; DBX.key=key.trim();
-    const verifier=(await DBX.b64url(crypto.getRandomValues(new Uint8Array(48)).buffer)); DBX.verifier=verifier;
-    const {method,challenge}=await DBX.challenge(verifier);
-    localStorage.setItem("famfin.dbx.pk",JSON.stringify({key:DBX.key,verifier}));
-    const url="https://www.dropbox.com/oauth2/authorize?client_id="+encodeURIComponent(DBX.key)+"&response_type=code&token_access_type=offline&code_challenge="+encodeURIComponent(challenge)+"&code_challenge_method="+method;
-    window.open(url,"_blank","noopener");
-    setTimeout(()=>{ const code=prompt("В открывшейся вкладке Dropbox подтвердите доступ и скопируйте показанный КОД. Вставьте его сюда:"); if(code&&code.trim())DBX.exchange(code.trim()); },600);
+    openSheet(`<h3>Подключить Dropbox</h3>
+      <div class="field"><label>App key приложения Dropbox</label><input id="dbxKey" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="например a1b2c3d4e5f6g7h"></div>
+      <p class="muted" style="font-size:12.5px;margin-top:-4px">Создаётся бесплатно: dropbox.com/developers → Create app → Scoped access → App folder. В разделе Permissions включите files.content.read и files.content.write и нажмите Submit. App key — во вкладке Settings.</p>
+      <button class="btn primary block" id="dbxNext" style="padding:13px">Далее</button>
+      <button class="btn ghost block" id="dbxCancel" style="margin-top:8px">Отмена</button>`,
+    el=>{
+      el.querySelector("#dbxCancel").onclick=closeSheet;
+      el.querySelector("#dbxNext").onclick=async()=>{
+        const key=el.querySelector("#dbxKey").value.trim(); if(!key){ toast("Введите App key"); return; }
+        DBX.key=key;
+        const verifier=await DBX.b64url(crypto.getRandomValues(new Uint8Array(48)).buffer); DBX.verifier=verifier;
+        const {method,challenge}=await DBX.challenge(verifier);
+        try{ localStorage.setItem("famfin.dbx.pk",JSON.stringify({key,verifier})); }catch(e){}
+        const url="https://www.dropbox.com/oauth2/authorize?client_id="+encodeURIComponent(key)+"&response_type=code&token_access_type=offline&code_challenge="+encodeURIComponent(challenge)+"&code_challenge_method="+method;
+        openSheet(`<h3>Подтвердите доступ</h3>
+          <p class="muted" style="font-size:13px">1. Нажмите кнопку — откроется Dropbox, разрешите доступ.<br>2. Dropbox покажет код — скопируйте его.<br>3. Вернитесь сюда и вставьте код.</p>
+          <a class="btn primary block" href="${url}" target="_blank" rel="noopener" style="text-decoration:none;padding:13px;margin-bottom:14px">Открыть страницу Dropbox ↗</a>
+          <div class="field"><label>Код из Dropbox</label><input id="dbxCode" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="вставьте код сюда"></div>
+          <button class="btn primary block" id="dbxDone" style="padding:13px">Подключить</button>
+          <button class="btn ghost block" id="dbxCancel2" style="margin-top:8px">Отмена</button>`,
+        el2=>{
+          el2.querySelector("#dbxCancel2").onclick=closeSheet;
+          el2.querySelector("#dbxDone").onclick=()=>{ const code=el2.querySelector("#dbxCode").value.trim(); if(!code){ toast("Вставьте код из Dropbox"); return; } closeSheet(); toast("Подключаю…"); DBX.exchange(code); };
+        });
+      };
+    });
   },
   async exchange(code){
     try{
