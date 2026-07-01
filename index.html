@@ -165,7 +165,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 #gate{position:fixed;inset:0;z-index:200;background:var(--bg);display:none;align-items:center;justify-content:center;padding:24px}
 #gate.show{display:flex}
 #gate .gbox{width:100%;max-width:300px;display:flex;flex-direction:column;gap:14px;align-items:center}
-#gate input{text-align:center;font-size:17px;letter-spacing:1px;padding:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2)}
+#gate input{text-align:center;font-size:17px;letter-spacing:1px;padding:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);-webkit-text-security:disc;text-security:disc}
 #gate .gbtn{width:46px;height:46px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);display:grid;place-items:center;font-size:20px;color:var(--ink2)}
 #gate .gface{font-size:14px;color:var(--ink3);background:none;border:none;text-decoration:underline}
 #gate.shake .gbox{animation:shk .35s}
@@ -1269,7 +1269,7 @@ function pgSettings(v){
       :`<button class="btn primary block" id="lockOn">Включить защиту входа</button>`}
   </div>`);
   if(state.lock.enabled){
-    lk.querySelector("#chgCode").onclick=()=>{ const c=prompt("Новый резервный код:"); if(!c)return; const c2=prompt("Повторите код:"); if(c!==c2){toast("Коды не совпали");return;} state.lock.codeHash=simpleHash(c); save(); toast("Код изменён"); };
+    lk.querySelector("#chgCode").onclick=()=>{ const c=prompt("Новый резервный код:"); if(!c)return; const c2=prompt("Повторите код:"); if(c!==c2){toast("Коды не совпали");return;} state.lock.codeHash=simpleHash(c.trim()); save(); toast("Код изменён"); };
     lk.querySelector("#lockOff").onclick=()=>{ if(confirm("Выключить защиту входа?")){ state.lock={enabled:false,codeHash:null}; save(); render_current(); } };
     lk.querySelector("#faceBtn").onclick=async()=>{
       if(faceLinked){ localStorage.removeItem(LS_FACEID); toast("Face ID отключён на устройстве"); render_current(); return; }
@@ -1277,7 +1277,7 @@ function pgSettings(v){
       try{ await faceIdRegister(); toast("Face ID подключён"); render_current(); }catch(e){ toast("Не удалось подключить Face ID"); }
     };
   } else {
-    lk.querySelector("#lockOn").onclick=()=>{ const c=prompt("Придумайте резервный код (цифры или буквы):"); if(!c)return; const c2=prompt("Повторите код:"); if(c!==c2){toast("Коды не совпали");return;} state.lock={enabled:true,codeHash:simpleHash(c)}; save(); toast("Защита входа включена"); render_current(); };
+    lk.querySelector("#lockOn").onclick=()=>{ const c=prompt("Придумайте резервный код (цифры или буквы):"); if(!c)return; const c2=prompt("Повторите код:"); if(c!==c2){toast("Коды не совпали");return;} state.lock={enabled:true,codeHash:simpleHash(c.trim())}; save(); toast("Защита входа включена"); render_current(); };
   }
   v.appendChild(lk);
 
@@ -1448,12 +1448,12 @@ function setupAutoSync(){
 function showGate(mode){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show");
-  box.innerHTML='<input id="gpass" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><button class="gbtn" id="gok">→</button>'+
+  box.innerHTML='<input id="gpass" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"'+(mode==="lock"?' placeholder="код"':'')+'><button class="gbtn" id="gok">→</button>'+
     (mode==="lock"?'<button class="gface" id="gface" style="display:none">Face ID</button>':'');
   const inp=box.querySelector("#gpass"), ok=box.querySelector("#gok");
   function fail(){ g.classList.add("shake"); inp.value=""; setTimeout(()=>g.classList.remove("shake"),400); inp.focus(); }
   function submit(){
-    const v=inp.value;
+    const v=(inp.value||"").trim();
     if(mode==="gate"){ if(simpleHash(v)===GATE_HASH){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
     else { if(state.lock&&state.lock.codeHash&&simpleHash(v)===state.lock.codeHash) bootApp(); else fail(); }
   }
