@@ -5,17 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#0E1620">
+<meta name="theme-color" content="#EEF2F7">
 <title>Семейная финансовая ERP</title>
 <style>
 :root{
-  --bg:#0E1620; --bg2:#131E2A; --panel:#17232F; --panel2:#1C2A38;
-  --line:#263644; --line2:#324556;
-  --ink:#E9EFF4; --ink2:#9FB2C0; --ink3:#6C8092;
-  --gold:#E3B23C; --gold2:#C9992A;
-  --teal:#4FB0CE; --green:#3FB07B; --amber:#E0A63C; --red:#E5544E; --violet:#8B7FD6;
-  --grp1:#5B8DEF; --grp2:#4FB0CE; --grp3:#3FB07B; --grp4:#C79BE0; --grp5:#E3B23C; --grpI:#5AC08C;
-  --shadow:0 10px 30px rgba(0,0,0,.35);
+  --bg:#EEF2F7; --bg2:#FFFFFF; --panel:#FFFFFF; --panel2:#F1F5F9;
+  --line:#E4EAF1; --line2:#D2DBE6;
+  --ink:#1E2B3A; --ink2:#566472; --ink3:#8A98A7;
+  --gold:#C68A12; --gold2:#AD7810;
+  --teal:#2A8CAE; --green:#2E9E6B; --amber:#D68A1E; --red:#D64541; --violet:#8A6FD0;
+  --grp1:#3D7BE0; --grp2:#2494B0; --grp3:#2E9E6B; --grp4:#9163C9; --grp5:#C68A12; --grpI:#33A972;
+  --shadow:0 10px 30px rgba(30,45,66,.14);
   --r:16px; --r2:12px; --r3:10px;
   --nav-h:64px; --top-h:56px; --sidebar-w:236px;
   --f-num:"SF Mono",ui-monospace,"Roboto Mono",Menlo,Consolas,monospace;
@@ -38,7 +38,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 /* ---------- Layout shell ---------- */
 #app{min-height:100dvh;display:flex;flex-direction:column}
 .topbar{position:sticky;top:0;z-index:40;height:var(--top-h);display:flex;align-items:center;gap:10px;
-  padding:0 14px;background:linear-gradient(180deg,#111C27,#101A24);border-bottom:1px solid var(--line);
+  padding:0 14px;background:linear-gradient(180deg,#FFFFFF,#F6F9FC);border-bottom:1px solid var(--line);
   padding-top:env(safe-area-inset-top)}
 .topbar .brand{font-weight:700;letter-spacing:.3px;font-size:15px;display:flex;align-items:center;gap:9px}
 .brand .dot{width:11px;height:11px;border-radius:3px;background:var(--gold);box-shadow:0 0 12px rgba(227,178,60,.7)}
@@ -57,7 +57,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 
 /* ---------- Bottom nav (mobile) ---------- */
 .bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:45;height:calc(var(--nav-h) + env(safe-area-inset-bottom));
-  padding-bottom:env(safe-area-inset-bottom);background:linear-gradient(180deg,#131E2A,#0E1620);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom);background:linear-gradient(180deg,#FFFFFF,#F6F9FC);border-top:1px solid var(--line);
   display:flex;align-items:stretch;justify-content:space-around}
 .bottomnav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--ink3);font-size:10px;font-weight:600}
 .bottomnav button .ic{font-size:19px;line-height:1}
@@ -127,7 +127,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .tbl .right{text-align:right}
 
 /* Sheet / modal */
-.scrim{position:fixed;inset:0;background:rgba(5,9,13,.6);backdrop-filter:blur(3px);z-index:60;opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim{position:fixed;inset:0;background:rgba(24,34,47,.42);backdrop-filter:blur(3px);z-index:60;opacity:0;pointer-events:none;transition:opacity .2s}
 .scrim.show{opacity:1;pointer-events:auto}
 .sheet{position:fixed;left:0;right:0;bottom:0;z-index:61;background:var(--bg2);border-top-left-radius:22px;border-top-right-radius:22px;
   border:1px solid var(--line);border-bottom:none;padding:8px 18px calc(20px + env(safe-area-inset-bottom));
@@ -146,9 +146,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .opt.active{border-color:var(--gold);color:var(--gold);background:rgba(227,178,60,.12)}
 .amount-big{font-size:34px;font-weight:750;text-align:center;letter-spacing:-1px;padding:6px;background:transparent;border:none;border-bottom:2px solid var(--line2);border-radius:0}
 .amount-big:focus{border-color:var(--gold)}
+.sheet-sticky{position:sticky;top:0;z-index:4;background:var(--bg2);margin:0 -18px 12px;padding:2px 18px 12px;box-shadow:0 8px 12px -10px rgba(0,0,0,.45)}
+.sheet-sticky h3{margin:2px 0 12px}
 
 .toast{position:fixed;left:50%;transform:translateX(-50%) translateY(20px);bottom:calc(var(--nav-h) + 30px);z-index:80;
-  background:#0a1119;border:1px solid var(--line2);border-radius:12px;padding:11px 16px;font-size:13px;font-weight:600;
+  background:#22303F;color:#F4F7FA;border:1px solid var(--line2);border-radius:12px;padding:11px 16px;font-size:13px;font-weight:600;
   box-shadow:var(--shadow);opacity:0;transition:.25s;pointer-events:none;max-width:90vw}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 .empty{text-align:center;padding:30px 16px;color:var(--ink3)}
@@ -160,9 +162,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .legend .sw{width:10px;height:10px;border-radius:3px;flex:none}
 .legend .lv{margin-left:auto;font-weight:600}
 .divider{height:1px;background:var(--line);margin:14px 0}
-.warnbox{background:rgba(229,84,78,.08);border:1px solid rgba(229,84,78,.3);border-radius:12px;padding:12px 14px;font-size:13px;color:#f0b6b3;margin-bottom:12px}
-.okbox{background:rgba(63,176,123,.08);border:1px solid rgba(63,176,123,.3);border-radius:12px;padding:12px 14px;font-size:13px;color:#a9e0c6;margin-bottom:12px}
-.infobox{background:rgba(79,176,206,.07);border:1px solid rgba(79,176,206,.28);border-radius:12px;padding:12px 14px;font-size:13px;color:#bfe3ef;margin-bottom:12px}
+.warnbox{background:rgba(229,84,78,.08);border:1px solid rgba(229,84,78,.3);border-radius:12px;padding:12px 14px;font-size:13px;color:#B23A36;margin-bottom:12px}
+.okbox{background:rgba(63,176,123,.08);border:1px solid rgba(63,176,123,.3);border-radius:12px;padding:12px 14px;font-size:13px;color:#1F7A50;margin-bottom:12px}
+.infobox{background:rgba(79,176,206,.07);border:1px solid rgba(79,176,206,.28);border-radius:12px;padding:12px 14px;font-size:13px;color:#276B86;margin-bottom:12px}
 small.hint{color:var(--ink3);font-size:11.5px}
 
 /* ---------- Desktop / tablet ---------- */
@@ -170,12 +172,12 @@ small.hint{color:var(--ink3);font-size:11.5px}
   .topbar{height:60px;padding:0 22px}
   .bottomnav,.fab{display:none}
   .shell{}
-  .sidebar{display:flex;flex-direction:column;width:var(--sidebar-w);flex:none;background:linear-gradient(180deg,#111C27,#0F1822);
+  .sidebar{display:flex;flex-direction:column;width:var(--sidebar-w);flex:none;background:linear-gradient(180deg,#FFFFFF,#F4F7FB);
     border-right:1px solid var(--line);padding:14px 12px;position:sticky;top:60px;height:calc(100dvh - 60px);overflow-y:auto;gap:3px}
   .sidebar .navi{display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:11px;color:var(--ink2);font-weight:600;font-size:14px}
   .sidebar .navi .ic{font-size:18px;width:22px;text-align:center}
   .sidebar .navi.active{background:rgba(227,178,60,.12);color:var(--gold)}
-  .sidebar .navi:hover:not(.active){background:var(--panel)}
+  .sidebar .navi:hover:not(.active){background:var(--panel2)}
   .sidebar .sgroup{font-size:10px;letter-spacing:1.2px;text-transform:uppercase;color:var(--ink3);font-weight:700;padding:14px 13px 6px}
   .sidebar .desk-add{margin:6px 4px 10px}
   .main{padding:24px 28px 60px}
@@ -464,12 +466,14 @@ function openAddTxn(preset){
     const cats=frequentCats(draft.type);
     const subs = draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
+      <div class="sheet-sticky">
       <h3>Новая операция</h3>
-      <div class="seg" style="margin-bottom:14px">
+      <div class="seg" style="margin-bottom:12px">
         <button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button>
         <button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button>
       </div>
-      <div class="field"><input class="amount-big num" id="amt" inputmode="decimal" placeholder="0 ${CUR}" value="${draft.amount?esc(String(draft.amount)):''}"></div>
+      <input class="amount-big num" id="amt" inputmode="decimal" placeholder="0 ${CUR}" value="${draft.amount?esc(String(draft.amount)):''}">
+      </div>
       <div class="field">
         <label>Категория</label>
         <div class="opts" id="catOpts">
@@ -508,9 +512,11 @@ function editTxn(id){
   const render=()=>{
     const cats=frequentCats(draft.type); const subs=draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
+      <div class="sheet-sticky">
       <h3>Операция</h3>
-      <div class="seg" style="margin-bottom:14px"><button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button><button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button></div>
-      <div class="field"><input class="amount-big num" id="amt" inputmode="decimal" value="${esc(String(draft.amount))}"></div>
+      <div class="seg" style="margin-bottom:12px"><button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button><button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button></div>
+      <input class="amount-big num" id="amt" inputmode="decimal" value="${esc(String(draft.amount))}">
+      </div>
       <div class="field"><label>Категория</label><div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${c.icon||'•'} ${esc(c.name)}</button>`).join("")}</div></div>
       ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts">${subs.map(s=>`<button class="opt ${draft.subId===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
