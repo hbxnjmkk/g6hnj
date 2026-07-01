@@ -229,7 +229,7 @@ small.hint{color:var(--ink3);font-size:11.5px}
 <div id="app">
   <div class="topbar">
     <div class="brand"><span class="dot"></span><span>Финдиректор</span></div>
-    <div class="month">
+    <div class="month" id="monthNav">
       <button id="mPrev" aria-label="Предыдущий месяц">‹</button>
       <div class="lbl num" id="mLbl">—</div>
       <button id="mNext" aria-label="Следующий месяц">›</button>
@@ -388,10 +388,12 @@ const incomeSrcById=id=>byId(state.incomeSources,id);
 const catName=cid=>{const c=byId(state.categories,cid);if(c)return c.name;const s=incomeSrcById(cid);return s?s.name:"—";};
 const catIcon=cid=>{const c=byId(state.categories,cid);if(c)return c.icon||"•";return incomeSrcById(cid)?"💰":"•";};
 const subName=sid=>{const s=byId(state.subcategories,sid);return s?s.name:"";};
-const subsOf=cid=>state.subcategories.filter(s=>s.categoryId===cid);
-const catsOf=gid=>state.categories.filter(c=>c.groupId===gid);
+const subsOf=cid=>state.subcategories.filter(s=>s.categoryId===cid && !s.deleted);
+const subsOfAll=cid=>state.subcategories.filter(s=>s.categoryId===cid);
+const catsOf=gid=>state.categories.filter(c=>c.groupId===gid && !c.deleted);
+const catsOfAll=gid=>state.categories.filter(c=>c.groupId===gid);
 const expenseGroups=()=>state.groups.filter(g=>g.kind!=="income");
-const expenseCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind!=="income";});
+const expenseCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind!=="income"&&!c.deleted;});
 const incomeCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind==="income";});
 function catColor(cid){const g=groupOf(cid);if(g)return g.color;return incomeSrcById(cid)?"var(--grpI)":"var(--ink3)";}
 
@@ -412,6 +414,8 @@ function monthExpense(k){ // consumption only = expense-type txns whose group is
 function monthCapital(k){ return txnsOfMonth(k).filter(t=>t.type==="expense" && (groupOf(t.categoryId)||{}).kind==="capital").reduce((a,t)=>a+(+t.amount||0),0); }
 function groupSpend(k,gid){ return txnsOfMonth(k).filter(t=>t.type==="expense" && (byId(state.categories,t.categoryId)||{}).groupId===gid).reduce((a,t)=>a+(+t.amount||0),0); }
 function catSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid).reduce((a,t)=>a+(+t.amount||0),0); }
+function subSpend(k,sid){ return txnsOfMonth(k).filter(t=>t.subId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
+function catDirectSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid && !t.subId).reduce((a,t)=>a+(+t.amount||0),0); }
 function fixedSpend(k){ return groupSpend(k,"g1"); }
 
 const totalAssets=()=>state.assets.reduce((a,x)=>a+(+x.value||0),0);
@@ -582,6 +586,7 @@ function performClose(k){
   const fixed=fixedSpend(k), liquid=liquidAssets();
   state.snapshots=state.snapshots||{};
   state.snapshots[k]={ closedAt:nowISO(), assets:totalAssets(), liab:totalLiab(), net:netWorth(),
+    assetsList:JSON.parse(JSON.stringify(state.assets)), liabList:JSON.parse(JSON.stringify(state.liabilities)),
     income:inc, expense:exp, capital:cap, debtPay, interest,
     savingsRate: inc>0?(cap+debtPrincipal)/inc:0,
     debtLoad: inc>0?debtPay/inc:0,
@@ -742,6 +747,7 @@ function editTxn(id){
 function render(){ render_current(); }
 function render_current(){
   document.getElementById("mLbl").textContent=ymShort(curMonth);
+  const mn=document.getElementById("monthNav"); if(mn) mn.style.visibility=(route==="cashflow"||route==="forecast")?"hidden":"visible";
   if(typeof renderMe==="function") renderMe();
   const v=document.getElementById("view"); v.innerHTML="";
   ({today:pgToday,ops:pgOps,plan:pgPlan,fact:pgFact,dash:pgDash,cashflow:pgCashflow,forecast:pgForecast,balance:pgBalance,debts:pgDebts,goals:pgGoals,settings:pgSettings}[route]||pgToday)(v);
@@ -892,18 +898,28 @@ function pgPlan(v){
   });
   v.appendChild(incCard);
 
+  const wirePlan=(row)=>{ const inp=row.querySelector("input"); inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; const id=inp.dataset.plan; state.plans[k]=state.plans[k]||{}; if(val)state.plans[k][id]=val; else delete state.plans[k][id]; save(); render_current(); }; };
   expenseGroups().forEach(g=>{
     const cats=catsOf(g.id); if(!cats.length)return;
-    const gTot=cats.reduce((a,c)=>a+(+plan[c.id]||0),0);
+    let gTot=0; cats.forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>gTot+=(+plan[su.id]||0)); else gTot+=(+plan[c.id]||0); });
     const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}<span class="tag num">${fmt(gTot)}</span></h3></div>`);
     cats.forEach(c=>{
-      const row=h(`<div class="lrow"><div class="ic" style="background:${tint(g.color,13)};color:${g.color}">${c.icon||'•'}</div>
-        <div class="t1" style="flex:1">${esc(c.name)}</div>
-        <input class="num right" style="width:130px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[c.id]?plan[c.id]:''}" data-cat="${c.id}">
-      </div>`);
-      const inp=row.querySelector("input");
-      inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; state.plans[k]=state.plans[k]||{}; if(val)state.plans[k][c.id]=val; else delete state.plans[k][c.id]; save(); render_current(); };
-      card.appendChild(row);
+      const subs=subsOf(c.id);
+      if(subs.length){
+        const cTot=subs.reduce((a,su)=>a+(+plan[su.id]||0),0);
+        card.appendChild(h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600"><span>${c.icon||'•'} ${esc(c.name)}</span><span class="num dim" style="font-size:12px">${fmt(cTot)}</span></div>`));
+        subs.forEach(su=>{
+          const row=h(`<div class="lrow" style="padding-left:8px"><div class="ic" style="width:24px;height:24px;font-size:11px;background:${tint(g.color,10)};color:${g.color}">•</div>
+            <div class="t1" style="flex:1">${esc(su.name)}</div>
+            <input class="num right" style="width:126px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[su.id]?plan[su.id]:''}" data-plan="${su.id}"></div>`);
+          wirePlan(row); card.appendChild(row);
+        });
+      } else {
+        const row=h(`<div class="lrow"><div class="ic" style="background:${tint(g.color,13)};color:${g.color}">${c.icon||'•'}</div>
+          <div class="t1" style="flex:1">${esc(c.name)}</div>
+          <input class="num right" style="width:130px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[c.id]?plan[c.id]:''}" data-plan="${c.id}"></div>`);
+        wirePlan(row); card.appendChild(row);
+      }
     });
     v.appendChild(card);
   });
@@ -935,16 +951,33 @@ function pgFact(v){
     ${kpiCard("Факт",fmt(factT),"","")}
     ${kpiCard("Остаток",fmt(planT-factT,{plus:true}),planT?pct(planT?factT/planT:0)+" бюджета":"плана нет",planT-factT>=0?"pos":"neg")}
   </div>`));
-  if(planT===0){ v.appendChild(h(`<div class="card"><div class="empty"><div class="big">🎚️</div>Плановый бюджет не задан.<br>Откройте «План», чтобы поставить лимиты, — здесь появится план/факт со светофором.<br><button class="btn primary sm" style="margin-top:12px" data-nav="plan">К плану →</button></div></div>`)); return; }
+  if(planT===0 && factT===0){ v.appendChild(h(`<div class="card"><div class="empty"><div class="big">🎚️</div>Плановый бюджет не задан и расходов пока нет.<br>Откройте «План», чтобы поставить лимиты, — здесь появится план/факт со светофором.<br><button class="btn primary sm" style="margin-top:12px" data-nav="plan">К плану →</button></div></div>`)); return; }
+  if(planT===0){ v.appendChild(h(`<div class="infobox">Плановый бюджет на месяц не задан — ниже показан только факт по категориям. Лимиты можно поставить во вкладке «План».</div>`)); }
   expenseGroups().forEach(g=>{
-    const cats=catsOf(g.id).filter(c=>(plan[c.id]||0)>0 || catSpend(k,c.id)>0);
-    if(!cats.length)return;
-    const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}</h3></div>`);
+    const cats=catsOfAll(g.id);
+    const lines=[];
     cats.forEach(c=>{
-      const pl=+plan[c.id]||0, fc=catSpend(k,c.id), rest=pl-fc, ratio=pl?fc/pl:(fc>0?1.5:0);
-      const cls=ratio>1?"bad":(ratio>0.9?"warn":"");
-      card.appendChild(h(`<div style="padding:10px 2px;border-bottom:1px solid var(--line)">
-        <div class="linrow"><span>${c.icon||'•'} ${esc(c.name)}</span><span class="num ${rest<0?'':''}" style="color:${rest<0?'var(--red)':'var(--ink2)'};font-weight:600">${rest<0?'−'+fmt(-rest,{bare:true}):'осталось '+fmt(rest,{bare:true})}</span></div>
+      const subs=subsOfAll(c.id);
+      if(subs.length){
+        const relevant=subs.filter(su=>(plan[su.id]||0)>0 || subSpend(k,su.id)>0);
+        const catPl=+plan[c.id]||0, catDirect=catDirectSpend(k,c.id);
+        if(relevant.length || catPl>0 || catDirect>0){
+          lines.push({header:true,label:(c.icon||'•')+' '+c.name+(c.deleted?' (удалена)':'')});
+          relevant.forEach(su=>lines.push({label:su.name+(su.deleted?' (удалена)':''),pl:+plan[su.id]||0,fc:subSpend(k,su.id),sub:true}));
+          if(catPl>0||catDirect>0) lines.push({label:'без подкатегории',pl:catPl,fc:catDirect,sub:true});
+        }
+      } else {
+        const pl=+plan[c.id]||0, fc=catSpend(k,c.id);
+        if(pl>0||fc>0) lines.push({label:(c.icon||'•')+' '+c.name+(c.deleted?' (удалена)':''),pl,fc});
+      }
+    });
+    if(!lines.length)return;
+    const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}</h3></div>`);
+    lines.forEach(ln=>{
+      if(ln.header){ card.appendChild(h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600"><span>${esc(ln.label)}</span></div>`)); return; }
+      const pl=ln.pl, fc=ln.fc, rest=pl-fc, ratio=pl?fc/pl:(fc>0?1.5:0), cls=ratio>1?"bad":(ratio>0.9?"warn":"");
+      card.appendChild(h(`<div style="padding:9px 2px;${ln.sub?'padding-left:8px;':''}border-bottom:1px solid var(--line)">
+        <div class="linrow"><span>${esc(ln.label)}</span><span class="num" style="color:${rest<0?'var(--red)':'var(--ink2)'};font-weight:600">${rest<0?'−'+fmt(-rest,{bare:true}):'осталось '+fmt(rest,{bare:true})}</span></div>
         <div class="meter ${cls}"><span style="width:${clamp(ratio*100,0,100)}%"></span></div>
         <div class="linrow" style="margin-top:5px;font-size:11.5px"><span class="dim num">Факт ${fmt(fc)}</span><span class="dim num">План ${fmt(pl)} · ${pct(ratio)}</span></div>
       </div>`));
@@ -1045,7 +1078,7 @@ function pgDash(v){
   nwCard.appendChild(h(`<div class="grid g2" style="margin-bottom:10px">${kpiCard("Активы",fmtK(totalAssets()),state.assets.length+" позиций","pos")}${kpiCard("Пассивы",fmtK(totalLiab()),state.liabilities.length+" долгов","neg")}</div>`));
   const hist=(state.netWorthHistory||[]).slice(-8);
   if(hist.length>=2) nwCard.appendChild(h(lineChart(hist.map(x=>({label:ymShort(ym(x.date)),v:x.net})))));
-  else nwCard.appendChild(h(`<div class="infobox" style="margin-bottom:0">Динамика капитала появится, когда накопится история. Снимок сохраняется во вкладке «Баланс» кнопкой «Зафиксировать капитал».</div>`));
+  else nwCard.appendChild(h(`<div class="infobox" style="margin-bottom:0">Динамика капитала появится, когда накопится история. Точка за месяц добавляется, когда вы <b>закрываете месяц</b> (кнопка «Закрыть месяц» на «Сегодня» или в «Балансе»): тогда фиксируются капитал, остатки по долгам и стоимость активов.</div>`));
   v.appendChild(nwCard);
 
   // 12-month cashflow mini
@@ -1111,36 +1144,45 @@ function estimatedMonthlyExpense(){
    PAGE: БАЛАНС / NET WORTH
    ============================================================ */
 function pgBalance(v){
-  v.appendChild(h(`<div class="page-title">Баланс семьи</div><div class="page-sub">Активы − Пассивы = Чистый капитал</div>`));
-  const A=totalAssets(),L=totalLiab(),N=A-L;
-  v.appendChild(h(`<div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--grp5) 12%,transparent),var(--panel));border-color:color-mix(in srgb,var(--grp5) 30%,transparent)">
-    <div class="eyebrow" style="margin:0">Чистый капитал семьи</div>
+  const k=curMonth; const snap=(state.snapshots||{})[k]; const closed=!!snap;
+  const hasList=closed && snap.assetsList && snap.liabList;
+  const A=closed?snap.assets:totalAssets(), L=closed?snap.liab:totalLiab(), N=closed?snap.net:(A-L);
+  const assetsArr=hasList?snap.assetsList:state.assets, liabArr=hasList?snap.liabList:state.liabilities;
+  const editable=!closed;
+  v.appendChild(h(`<div><div class="page-title">Баланс семьи</div><div class="page-sub">${ymLabel(k)}${closed?' · <span style="color:var(--gold);font-weight:600">зафиксировано на конец месяца</span>':' · Активы − Пассивы = Чистый капитал'}</div></div>`));
+  const nw=h(`<div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--grp5) 12%,transparent),var(--panel));border-color:color-mix(in srgb,var(--grp5) 30%,transparent)">
+    <div class="eyebrow" style="margin:0">Чистый капитал${closed?' (на конец '+ymShort(k)+')':' семьи'}</div>
     <div class="num" style="font-size:32px;font-weight:800;letter-spacing:-1px;margin:6px 0;color:var(--gold)">${fmt(N)}</div>
     <div class="row" style="gap:10px"><span class="pill g">Активы ${fmtK(A)}</span><span class="pill r">Пассивы ${fmtK(L)}</span></div>
-    <button class="btn sm block" id="fixNW" style="margin-top:12px">📌 ${monthToClose()?('Закрыть месяц '+ymShort(monthToClose())):'Пересчитать прошлый месяц'}</button>
-  </div>`));
-  v.querySelector("#fixNW").onclick=()=>openMonthClose(monthToClose()||addMonths(realMonth(),-1));
+    ${editable?`<button class="btn sm block" id="fixNW" style="margin-top:12px">📌 ${monthToClose()?('Закрыть месяц '+ymShort(monthToClose())):'Пересчитать прошлый месяц'}</button>`:`<div class="muted" style="font-size:12px;margin-top:10px">Исторические данные закрытого месяца. Текущие значения — на месяце «${ymShort(realMonth())}».</div>`}
+  </div>`);
+  if(editable) nw.querySelector("#fixNW").onclick=()=>openMonthClose(monthToClose()||addMonths(realMonth(),-1));
+  v.appendChild(nw);
 
-  // ASSETS
+  if(closed && !hasList){ v.appendChild(h(`<div class="infobox">Детали по активам и пассивам за этот месяц не сохранялись (месяц закрыт в старой версии). Показан итог. Начиная с закрытий в新 версии, история по каждому активу и долгу будет видна здесь.</div>`)); return; }
+
   const ac=h(`<div class="card"><h3>Активы<span class="tag num">${fmt(A)}</span></h3></div>`);
-  state.assets.forEach(a=>{
+  assetsArr.forEach(a=>{
     const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--green) 13%,transparent);color:var(--green)">${a.liquid?'💵':'🏛'}</div>
       <div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">${esc(a.kind||'')}${a.liquid?' · ликвидный':''}</div></div>
       <div class="amt num">${fmt(a.value,{bare:true})}</div></div>`);
-    row.style.cursor="pointer"; row.onclick=()=>editAsset(a.id); ac.appendChild(row);
+    if(editable){ row.style.cursor="pointer"; row.onclick=()=>editAsset(a.id); }
+    ac.appendChild(row);
   });
-  ac.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" data-open="asset">＋ Добавить актив</button>`));
+  if(!assetsArr.length) ac.appendChild(h(`<div class="empty" style="padding:14px">Активов нет</div>`));
+  if(editable) ac.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" data-open="asset">＋ Добавить актив</button>`));
   v.appendChild(ac);
 
-  // LIABILITIES
   const lc=h(`<div class="card"><h3>Пассивы<span class="tag num">${fmt(L)}</span></h3></div>`);
-  state.liabilities.slice().sort((a,b)=>b.balance-a.balance).forEach(x=>{
+  liabArr.slice().sort((a,b)=>b.balance-a.balance).forEach(x=>{
     const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--red) 13%,transparent);color:var(--red)">🔻</div>
       <div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">${esc(x.kind||'')}${x.rate?' · '+pct(x.rate)+' годовых':''}${x.minPayment?' · '+fmt(x.minPayment,{bare:true})+'/мес':''}</div></div>
       <div class="amt num">${fmt(x.balance,{bare:true})}</div></div>`);
-    row.style.cursor="pointer"; row.onclick=()=>editLiab(x.id); lc.appendChild(row);
+    if(editable){ row.style.cursor="pointer"; row.onclick=()=>editLiab(x.id); }
+    lc.appendChild(row);
   });
-  lc.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" data-open="liab">＋ Добавить пассив</button>`));
+  if(!liabArr.length) lc.appendChild(h(`<div class="empty" style="padding:14px">Пассивов нет</div>`));
+  if(editable) lc.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" data-open="liab">＋ Добавить пассив</button>`));
   v.appendChild(lc);
 }
 function editAsset(id){
@@ -1176,16 +1218,18 @@ function editLiab(id){
    ============================================================ */
 let debtMethod="avalanche";
 function pgDebts(v){
-  v.appendChild(h(`<div class="page-title">Управление долгами</div><div class="page-sub">Стратегия выхода из долга и календарь платежей</div>`));
-  const L=totalLiab(), pay=totalMinPayment(), interest=liabInterestMonthly();
+  const k=curMonth; const snap=(state.snapshots||{})[k]; const closed=!!(snap&&snap.liabList);
+  const liabArr=closed?snap.liabList:state.liabilities;
+  v.appendChild(h(`<div><div class="page-title">Управление долгами</div><div class="page-sub">${ymLabel(k)}${closed?' · <span style="color:var(--gold);font-weight:600">на конец месяца</span>':' · стратегия выхода и календарь'}</div></div>`));
+  const L=liabArr.reduce((a,x)=>a+(+x.balance||0),0), pay=liabArr.reduce((a,x)=>a+(+x.minPayment||0),0), interest=liabArr.reduce((a,x)=>a+((+x.balance||0)*(+x.rate||0)/12),0);
   v.appendChild(h(`<div class="grid g3">
-    ${kpiCard("Всего долгов",fmtK(L),state.liabilities.length+" обязательств","neg")}
+    ${kpiCard("Всего долгов",fmtK(L),liabArr.length+" обязательств","neg")}
     ${kpiCard("Платежи/мес",fmt(pay),"минимальные","")}
     ${kpiCard("Проценты/мес",fmt(interest),"сгорает впустую","neg")}
   </div>`));
 
   // method toggle
-  const withRate=state.liabilities.filter(x=>x.balance>0);
+  const withRate=liabArr.filter(x=>x.balance>0);
   const ordered = withRate.slice().sort((a,b)=> debtMethod==="avalanche" ? (b.rate-a.rate)||(a.balance-b.balance) : (a.balance-b.balance));
   const card=h(`<div class="card"><h3>Порядок гашения</h3>
     <div class="seg" style="margin-bottom:12px"><button data-m="avalanche" class="${debtMethod==='avalanche'?'active':''}">Лавина (по ставке)</button><button data-m="snowball" class="${debtMethod==='snowball'?'active':''}">Снежный ком (по сумме)</button></div>
@@ -1228,7 +1272,7 @@ function pgDebts(v){
 
   // payment calendar
   const cal=h(`<div class="card"><h3>Календарь платежей (в месяц)</h3></div>`);
-  const payList=state.liabilities.filter(x=>x.minPayment>0).sort((a,b)=>b.minPayment-a.minPayment);
+  const payList=liabArr.filter(x=>x.minPayment>0).slice().sort((a,b)=>b.minPayment-a.minPayment);
   if(payList.length){ payList.forEach(x=>cal.appendChild(h(`<div class="linrow" style="padding:9px 2px;border-bottom:1px solid var(--line)"><span>${esc(x.name)}</span><span class="num" style="font-weight:600">${fmt(x.minPayment)}</span></div>`)));
     cal.appendChild(h(`<div class="linrow" style="padding:11px 2px;font-weight:700"><span>Итого в месяц</span><span class="num" style="color:var(--gold)">${fmt(pay)}</span></div>`)); }
   else cal.appendChild(h(`<div class="empty">Укажите минимальные платежи у долгов в «Баланс», чтобы построить календарь.</div>`));
@@ -1315,7 +1359,7 @@ function suggestPlanFromGoals(){
   openSheet(html,el=>{
     el.querySelector("#applyPlan").onclick=()=>{
       const k=curMonth; state.plans[k]=state.plans[k]||{};
-      expenseGroups().forEach(g=>{ const cats=catsOf(g.id); if(!cats.length)return; const per=Math.round((alloc[g.id]||0)/cats.length); cats.forEach(c=>{ if(per>0)state.plans[k][c.id]=per; }); });
+      expenseGroups().forEach(g=>{ const cats=catsOf(g.id); if(!cats.length)return; const per=Math.round((alloc[g.id]||0)/cats.length); cats.forEach(c=>{ const subs=subsOf(c.id); if(subs.length){ const pp=Math.round(per/subs.length); subs.forEach(su=>{ if(pp>0)state.plans[k][su.id]=pp; }); } else { if(per>0)state.plans[k][c.id]=per; } }); });
       save(); closeSheet(); toast("План собран — проверьте во вкладке «План»"); go("plan");
     };
     el.querySelector("#cancelPlan").onclick=closeSheet;
@@ -1370,9 +1414,9 @@ function pgSettings(v){
           <button class="pill" data-addsub style="border-style:dashed;cursor:pointer">＋ подкатегория</button>
         </div></div>`);
       row.querySelector("[data-editcat]").onclick=()=>{const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){c.name=nm.trim();save();render_current();}};
-      row.querySelector("[data-delcat]").onclick=()=>{ if(state.txns.some(t=>t.categoryId===c.id)){toast("Есть операции в этой категории — сначала перенесите их");return;} if(confirm("Удалить категорию «"+c.name+"»?")){state.categories=state.categories.filter(x=>x.id!==c.id);state.subcategories=state.subcategories.filter(x=>x.categoryId!==c.id);save();render_current();}};
+      row.querySelector("[data-delcat]").onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); render_current(); } };
       row.querySelector("[data-addsub]").onclick=()=>{const nm=prompt("Новая подкатегория:"); if(nm&&nm.trim()){state.subcategories.push({id:uid(),categoryId:c.id,name:nm.trim()});save();render_current();}};
-      row.querySelectorAll("[data-sub]").forEach(p=>p.onclick=()=>{ if(confirm("Удалить подкатегорию «"+subName(p.dataset.sub)+"»?")){state.subcategories=state.subcategories.filter(x=>x.id!==p.dataset.sub);save();render_current();}});
+      row.querySelectorAll("[data-sub]").forEach(p=>p.onclick=()=>{ if(confirm("Удалить подкатегорию «"+subName(p.dataset.sub)+"»? История сохранится.")){ const su=byId(state.subcategories,p.dataset.sub); if(su)su.deleted=true; save(); render_current(); } });
       gEl.appendChild(row);
     });
     gEl.querySelector("[data-addcat]").onclick=()=>{const nm=prompt("Название новой категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){const id=uid();state.categories.push({id,groupId:g.id,name:nm.trim(),icon:"•"});save();render_current();}};
