@@ -2,7 +2,9 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="format-detection" content="telephone=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#EEF2F7">
@@ -23,7 +25,7 @@
   font-synthesis:none;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);overflow-x:hidden;max-width:100%;width:100%;touch-action:manipulation;-webkit-text-size-adjust:100%;
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,Inter,sans-serif;
   font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
 body{min-height:100dvh}
@@ -40,13 +42,14 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 #app{min-height:100dvh;display:flex;flex-direction:column}
 .topbar{position:sticky;top:0;z-index:40;height:var(--top-h);display:flex;align-items:center;gap:10px;
   padding:0 14px;background:linear-gradient(180deg,#FFFFFF,#F6F9FC);border-bottom:1px solid var(--line);
-  padding-top:env(safe-area-inset-top)}
-.topbar .brand{font-weight:700;letter-spacing:.3px;font-size:15px;display:flex;align-items:center;gap:9px}
-.brand .dot{width:11px;height:11px;border-radius:3px;background:var(--gold);box-shadow:0 0 12px rgba(227,178,60,.7)}
+  padding-top:env(safe-area-inset-top);overflow:hidden;max-width:100%;box-sizing:border-box}
+.topbar .brand{font-weight:700;letter-spacing:.3px;font-size:15px;display:flex;align-items:center;gap:9px;min-width:0;overflow:hidden;flex-shrink:1}
+.topbar .brand span:not(.dot){overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.brand .dot{width:11px;height:11px;border-radius:3px;background:var(--gold);box-shadow:0 0 12px rgba(227,178,60,.7);flex:none}
 .topbar .month{margin-left:auto;display:flex;align-items:center;gap:4px;background:var(--panel);border:1px solid var(--line2);
-  border-radius:999px;padding:4px 6px}
-.topbar .month button{width:30px;height:30px;border-radius:999px;font-size:17px;color:var(--ink2)}
-.topbar .month .lbl{min-width:104px;text-align:center;font-weight:600;font-size:13px}
+  border-radius:999px;padding:4px 6px;flex:none}
+.topbar .month button{width:30px;height:30px;border-radius:999px;font-size:17px;color:var(--ink2);flex:none}
+.topbar .month .lbl{min-width:96px;text-align:center;font-weight:600;font-size:13px}
 .topbar .sync{width:34px;height:34px;border-radius:999px;display:grid;place-items:center;background:var(--panel);
   border:1px solid var(--line2);font-size:15px;position:relative}
 .sync .badge{position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:999px;background:var(--ink3);border:2px solid var(--bg2)}
@@ -203,6 +206,15 @@ small.hint{color:var(--ink3);font-size:11.5px}
 }
 @media(min-width:900px) and (max-width:1200px){ .dg4{grid-template-columns:repeat(2,1fr)} }
 @media(max-width:400px){ .g4{grid-template-columns:repeat(2,1fr)} .k-val{font-size:20px} }
+@media(max-width:600px){
+  .topbar{gap:6px;padding-left:10px;padding-right:10px}
+  .topbar .brand span:not(.dot){display:none}
+  .topbar .month{margin-left:auto}
+  .topbar .month .lbl{min-width:70px;font-size:12.5px}
+  .topbar .month button{width:26px;height:26px;font-size:16px}
+  .me{padding:0 7px}
+  .me .nm{display:none}
+}
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -470,7 +482,8 @@ const NAV=[
 ];
 const BOTTOM=["today","ops","dash","goals"]; // + more
 let route="today";
-let curMonth = clampMonth(ym(new Date()) < state.settings.startMonth ? state.settings.startMonth : ym(new Date()));
+let curMonth = ym(new Date());
+function horizonStart(){ return ym(new Date()); }
 function clampMonth(k){ const s=state.settings.startMonth,e=addMonths(s,state.settings.horizon-1); if(k<s)return s; if(k>e)return e; return k; }
 
 function go(r){ route=r; renderNav(); render(); window.scrollTo(0,0); }
@@ -908,7 +921,7 @@ function pgDash(v){
 
   // 12-month cashflow mini
   const cfCard=h(`<div class="card"><h3>Денежный поток, 12 мес <span class="tag" style="cursor:pointer" data-nav="cashflow">детально →</span></h3></div>`);
-  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(state.settings.startMonth,i));
+  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
   const rows=months.map(mm=>({label:ymShort(mm),values:[{v:incomeForMonth(mm)&&monthIncome(mm)?monthIncome(mm):0,color:"var(--grpI)"},{v:monthExpense(mm)+monthCapital(mm),color:"var(--grp2)"}]}));
   cfCard.appendChild(h(barsChart(rows,{stacked:false})));
   cfCard.appendChild(h(`<div class="row" style="gap:14px;justify-content:center;margin-top:8px;font-size:12px"><span class="li"><span class="sw" style="background:var(--grpI);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Доход</span><span><span class="sw" style="background:var(--grp2);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Расход</span></div>`));
@@ -919,8 +932,8 @@ function pgDash(v){
    PAGE: ДЕНЕЖНЫЙ ПОТОК (Cash Flow)
    ============================================================ */
 function pgCashflow(v){
-  v.appendChild(h(`<div class="page-title">Денежный поток</div><div class="page-sub">Скользящие 12 месяцев · ${ymShort(state.settings.startMonth)} – ${ymShort(addMonths(state.settings.startMonth,state.settings.horizon-1))}</div>`));
-  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(state.settings.startMonth,i));
+  v.appendChild(h(`<div class="page-title">Денежный поток</div><div class="page-sub">Скользящие 12 месяцев · ${ymShort(horizonStart())} – ${ymShort(addMonths(horizonStart(),state.settings.horizon-1))}</div>`));
+  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
   let cum=0;
   const card=h(`<div class="card" style="overflow-x:auto"><h3>Операционный, кредитный и капитальный потоки</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Приход</th><th class="right">Потребление</th><th class="right">В капитал</th><th class="right">Δ месяца</th><th class="right">Накоплено</th></tr></thead><tbody id="cfBody"></tbody></table></div>`);
   const body=card.querySelector("#cfBody");
@@ -935,7 +948,7 @@ function pgCashflow(v){
    ============================================================ */
 function pgForecast(v){
   v.appendChild(h(`<div class="page-title">Прогноз денег</div><div class="page-sub">12 месяцев вперёд · раннее предупреждение о кассовых разрывах</div>`));
-  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(state.settings.startMonth,i));
+  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
   const startCash=liquidAssets();
   let cum=startCash; const proj=[]; let firstGap=null;
   const goalsMonthly=(state.goals||[]).reduce((a,g)=>a+(+g.monthlyNeeded||0),0);
@@ -1252,11 +1265,11 @@ function pgSettings(v){
   const linked=DBX.linked;
   const sc=h(`<div class="card"><h3>Синхронизация Dropbox ${linked?'<span class="pill g" style="margin-left:auto">подключено</span>':'<span class="pill" style="margin-left:auto">выключено</span>'}</h3>
     <p class="muted" style="font-size:12.5px;margin-top:-4px">Автосинхронизация между телефоном, планшетом и компьютером. Данные хранятся файлом в вашем Dropbox, вход подтверждаете лично — секретных паролей в приложении нет.</p>
-    ${linked?`<div class="okbox">Подключено${DBX.account?' · '+esc(DBX.account):''}. Изменения улетают в Dropbox автоматически.</div>
+    ${linked?`<div class="okbox">Аккаунт: <b>${DBX.account?esc(DBX.account):'—'}</b><br>Приложение: <b>#${simpleHash(DBX.key||"").slice(0,6)}</b><br><span class="muted" style="font-size:11.5px">Сравните эти два значения на обоих устройствах — они должны совпадать. Если различаются — устройства пишут в разные базы, и это причина рассинхрона.</span></div>
       <div class="row" style="gap:8px"><button class="btn" id="dbxPull">⟳ Загрузить из Dropbox</button><button class="btn" id="dbxPush">↑ Отправить сейчас</button><button class="btn danger" id="dbxOff">Отключить</button></div>`
     :`<button class="btn primary block" id="dbxOn" style="padding:13px">Подключить Dropbox</button>`}
   </div>`);
-  if(linked){ sc.querySelector("#dbxPull").onclick=()=>DBX.pull(true); sc.querySelector("#dbxPush").onclick=()=>DBX.push(true); sc.querySelector("#dbxOff").onclick=()=>DBX.unlink(); }
+  if(linked){ sc.querySelector("#dbxPull").onclick=()=>DBX.forcePull(); sc.querySelector("#dbxPush").onclick=()=>DBX.push(true); sc.querySelector("#dbxOff").onclick=()=>DBX.unlink(); }
   else sc.querySelector("#dbxOn").onclick=DBX.startLink;
   v.appendChild(sc);
 
@@ -1335,7 +1348,23 @@ const DBX = {
       const r=await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
       if(!r.ok) throw new Error("token "+r.status);
       const d=await r.json(); DBX.key=pk.key||DBX.key; DBX.token=d.access_token; DBX.refresh=d.refresh_token; DBX.linked=true; DBX.persist();
-      await DBX.getAccount(); await DBX.pull(true); toast("Dropbox подключён"); render_current();
+      await DBX.getAccount();
+      const dr=await DBX.api("https://content.dropboxapi.com/2/files/download",{method:"POST",headers:{"Dropbox-API-Arg":JSON.stringify({path:"/famfin.json"})}});
+      if(dr.status===409){ await DBX.push(); toast("Dropbox подключён — данные этого устройства сохранены в Dropbox"); render_current(); return; }
+      if(!dr.ok) throw new Error("download "+dr.status);
+      const remote=JSON.parse(await dr.text());
+      const acc=DBX.account?esc(DBX.account):"—"; const fp=simpleHash(DBX.key||"").slice(0,6);
+      openSheet(`<h3>Dropbox подключён</h3>
+        <div class="okbox" style="margin-bottom:12px">Аккаунт: <b>${acc}</b> · приложение <b>#${fp}</b></div>
+        <p class="muted" style="font-size:13px">В этом Dropbox уже есть сохранённая база. Что сделать на этом устройстве?</p>
+        <button class="btn primary block" id="useCloud" style="padding:13px">Загрузить данные из Dropbox</button>
+        <p class="muted" style="font-size:12px;margin:6px 0 12px">Рекомендуется, если это второе устройство — возьмёт общую базу.</p>
+        <button class="btn block" id="usePhone" style="padding:13px">Заменить данными этого устройства</button>
+        <p class="muted" style="font-size:12px;margin-top:6px">Перезапишет базу в Dropbox тем, что сейчас на этом устройстве.</p>`,
+      el=>{
+        el.querySelector("#useCloud").onclick=()=>{ state=migrate(remote); save(false); closeSheet(); render_current(); toast("Загружено из Dropbox"); };
+        el.querySelector("#usePhone").onclick=async()=>{ closeSheet(); await DBX.push(); render_current(); toast("Отправлено в Dropbox"); };
+      });
     }catch(e){ toast("Не удалось подключить Dropbox"); console.warn(e); }
   },
   async refreshToken(){
@@ -1375,6 +1404,17 @@ const DBX = {
       setSync("ok");
     }catch(e){ setSync("err"); if(manual)toast("Ошибка загрузки из Dropbox"); console.warn(e); }
   },
+  async forcePull(){
+    if(!this.linked)return;
+    try{ setSync("dirty");
+      const r=await this.api("https://content.dropboxapi.com/2/files/download",{method:"POST",headers:{"Dropbox-API-Arg":JSON.stringify({path:"/famfin.json"})}});
+      if(r.status===409){ setSync("ok"); toast("В Dropbox ещё нет данных"); return; }
+      if(!r.ok) throw new Error("dl "+r.status);
+      const remote=JSON.parse(await r.text());
+      if(remote&&remote.updatedAt){ state=migrate(remote); save(false); setSync("ok"); render_current(); toast("Загружено из Dropbox"); }
+      else { setSync("ok"); toast("В Dropbox пустая база"); }
+    }catch(e){ setSync("err"); toast("Ошибка загрузки"); console.warn(e); }
+  },
   async syncNow(manual){
     if(!this.linked){ if(manual)go("settings"); return; }
     try{ setSync("dirty");
@@ -1401,11 +1441,12 @@ document.getElementById("view").addEventListener("click",e=>{
   const nv=e.target.closest("[data-nav]"); if(nv){ go(nv.dataset.nav); return; }
   const op=e.target.closest("[data-open]"); if(op){ ({asset:editAsset,liab:editLiab,goal:editGoal}[op.dataset.open]||(()=>{}))(); return; }
 });
-document.getElementById("mPrev").onclick=()=>{curMonth=clampMonth(addMonths(curMonth,-1));render_current();};
-document.getElementById("mNext").onclick=()=>{curMonth=clampMonth(addMonths(curMonth,1));render_current();};
+document.getElementById("mPrev").onclick=()=>{curMonth=addMonths(curMonth,-1);render_current();};
+document.getElementById("mNext").onclick=()=>{curMonth=addMonths(curMonth,1);render_current();};
 document.getElementById("syncBtn").onclick=()=>{ DBX.syncNow(true); };
 document.getElementById("meBtn").onclick=openMemberPicker;
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet(); });
+["gesturestart","gesturechange","gestureend"].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
 
 /* ---------- защита входа: заглушка + опциональная блокировка + Face ID ---------- */
 function bufToB64(buf){ return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
