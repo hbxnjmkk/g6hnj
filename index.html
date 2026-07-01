@@ -57,6 +57,13 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 .me{height:34px;min-width:34px;padding:0 8px;border-radius:999px;display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line2);font-size:15px;font-weight:600;color:var(--ink);flex:none;max-width:120px}
 .me .nm{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mbadge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;border:1px solid transparent;white-space:nowrap}
+.topbar .month .lbl{cursor:pointer}
+.mpick-year{display:flex;align-items:center;justify-content:center;gap:22px;margin:6px 0 16px;font-size:18px;font-weight:800}
+.mpick-year button{width:40px;height:40px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);font-size:18px;color:var(--ink)}
+.mp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+.mp-cell{padding:15px 0;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);font-weight:600;font-size:14.5px;color:var(--ink)}
+.mp-cell.now{border-color:var(--gold);color:var(--gold)}
+.mp-cell.sel{background:var(--gold);color:#1a1204;border-color:var(--gold)}
 
 .shell{flex:1;display:flex;min-height:0}
 .sidebar{display:none}
@@ -354,6 +361,7 @@ function seedState(){
     goals:[], netWorthHistory:[],
     members:[],
     lock:{enabled:false,codeHash:null},
+    snapshots:{},
     freq:{}
   };
 }
@@ -364,7 +372,7 @@ function load(){
   try{ const raw=localStorage.getItem(LS_KEY); if(raw){ const s=JSON.parse(raw); return migrate(s);} }catch(e){}
   const s=seedState(); try{localStorage.setItem(LS_KEY,JSON.stringify(s));}catch(e){} return s;
 }
-function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
+function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
 let saveTimer=null, dbxTimer=null;
 function save(pushCloud=true){
   state.updatedAt=nowISO();
@@ -412,7 +420,32 @@ const totalMinPayment=()=>state.liabilities.reduce((a,x)=>a+(+x.minPayment||0),0
 const expectedIncome=()=>state.incomeSources.reduce((a,x)=>a+(+x.amount||0),0);
 function incomeForMonth(k){ const real=monthIncome(k); return real>0?real:expectedIncome(); }
 
+/* ---------- закрытие месяца ---------- */
+function realMonth(){ return ym(new Date()); }
+function firstDataMonth(){ const ms=state.txns.map(t=>ym(t.date)).filter(Boolean).sort(); return ms.length?ms[0]:addMonths(realMonth(),-1); }
+function unclosedMonths(){
+  const end=addMonths(realMonth(),-1);
+  const haveBal=state.assets.length||state.liabilities.length;
+  let start=firstDataMonth(); if(!state.txns.length){ if(!haveBal) return []; start=end; }
+  const res=[]; let m=start,g=0;
+  while(m<=end && g<240){ if(!(state.snapshots||{})[m]) res.push(m); m=addMonths(m,1); g++; }
+  return res;
+}
+function monthToClose(){ const u=unclosedMonths(); return u.length?u[0]:null; }
+function isClosed(k){ return !!(state.snapshots||{})[k]; }
+function suggestBalance(x){ const b=+x.balance||0,r=+x.rate||0,p=+x.minPayment||0; return Math.max(0,Math.round(b + b*r/12 - p)); }
+
 function metrics(k){
+  const snap=(state.snapshots||{})[k];
+  if(snap){
+    return {
+      income:snap.income, expense:snap.expense, capital:snap.capital,
+      balance: snap.income - snap.expense - snap.capital,
+      savingsRate: snap.savingsRate, debtLoad: snap.debtLoad, fixedShare: snap.fixedShare,
+      freeCashFlow: snap.income - snap.expense,
+      cushionMonths: snap.cushionMonths, netWorth: snap.net, closed:true
+    };
+  }
   const inc=incomeForMonth(k), exp=monthExpense(k), cap=monthCapital(k);
   const debtPay=totalMinPayment();
   const fixed=fixedSpend(k);
@@ -426,7 +459,7 @@ function metrics(k){
     fixedShare: inc>0? (fixed+liabInterestMonthly())/inc : 0,
     freeCashFlow: inc - exp,
     cushionMonths: fixed>0? liquidAssets()/ (fixed||1) : (liquidAssets()>0?99:0),
-    netWorth: netWorth()
+    netWorth: netWorth(), closed:false
   };
 }
 function liabInterestMonthly(){ return state.liabilities.reduce((a,x)=>a+((+x.balance||0)*(+x.rate||0)/12),0); }
@@ -522,6 +555,61 @@ function renderMe(){
     if(!btn.querySelector(".nm")){ const s=document.createElement("span"); s.className="nm"; btn.appendChild(s); }
     btn.querySelector(".nm").textContent=m.name; }
   else { ico.textContent="👤"; const nm=btn.querySelector(".nm"); if(nm)nm.remove(); btn.style.borderColor=""; }
+}
+function openMonthPicker(){
+  let year=(+curMonth.split("-")[0]); const nowK=ym(new Date());
+  function cells(){ return MONTHS_RU_SHORT.map((mn,i)=>{ const k=year+"-"+String(i+1).padStart(2,"0"); return `<button class="mp-cell${k===curMonth?' sel':''}${k===nowK?' now':''}" data-k="${k}">${mn}</button>`; }).join(""); }
+  openSheet(`<h3 style="text-align:center">Месяц</h3>
+    <div class="mpick-year"><button class="mp-nav" data-y="-1">‹</button><span id="mpY">${year}</span><button class="mp-nav" data-y="1">›</button></div>
+    <div class="mp-grid" id="mpGrid">${cells()}</div>
+    <button class="btn ghost block" id="mpToday" style="margin-top:14px">Текущий месяц (${ymShort(nowK)})</button>`,
+  el=>{
+    function bind(){ el.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ curMonth=b.dataset.k; closeSheet(); render_current(); }); }
+    el.querySelectorAll(".mp-nav").forEach(b=>b.onclick=()=>{ year+=(+b.dataset.y); el.querySelector("#mpY").textContent=year; el.querySelector("#mpGrid").innerHTML=cells(); bind(); });
+    el.querySelector("#mpToday").onclick=()=>{ curMonth=nowK; closeSheet(); render_current(); };
+    bind();
+  });
+}
+function performClose(k){
+  const inc=incomeForMonth(k), exp=monthExpense(k), cap=monthCapital(k);
+  const debtPay=totalMinPayment(), interest=liabInterestMonthly();
+  const debtPrincipal=Math.max(0,debtPay-interest);
+  const fixed=fixedSpend(k), liquid=liquidAssets();
+  state.snapshots=state.snapshots||{};
+  state.snapshots[k]={ closedAt:nowISO(), assets:totalAssets(), liab:totalLiab(), net:netWorth(),
+    income:inc, expense:exp, capital:cap, debtPay, interest,
+    savingsRate: inc>0?(cap+debtPrincipal)/inc:0,
+    debtLoad: inc>0?debtPay/inc:0,
+    fixedShare: inc>0?(fixed+interest)/inc:0,
+    cushionMonths: fixed>0?liquid/fixed:(liquid>0?99:0), liquid };
+  state.netWorthHistory=(state.netWorthHistory||[]).filter(x=>ym(x.date)!==k);
+  state.netWorthHistory.push({date:k+"-15T12:00:00.000Z", assets:totalAssets(), liabilities:totalLiab(), net:netWorth()});
+  state.netWorthHistory.sort((a,b)=>a.date.localeCompare(b.date));
+  save();
+}
+function openMonthClose(k){
+  k=k||monthToClose(); if(!k){ toast("Нет месяцев для закрытия"); return; }
+  const liabs=state.liabilities, assetRows=state.assets;
+  openSheet(`<div class="sheet-sticky"><h3>Закрытие месяца · ${ymLabel(k)}</h3></div>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Обновите остатки по долгам на конец месяца и зафиксируйте капитал. Показатели за этот месяц сохранятся в историю, и дашборд начнёт показывать динамику.</p>
+    ${liabs.length?`<div class="field"><label>Остатки по долгам на конец месяца</label>
+      <div id="clDebts">${liabs.map(x=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">было ${fmt(x.balance,{bare:true})}${x.minPayment?' · платёж '+fmt(x.minPayment,{bare:true}):''}</div></div>
+        <input class="num" data-lb="${x.id}" inputmode="numeric" value="${suggestBalance(x)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join("")}</div>
+      <small class="hint">Предложены расчётные остатки (проценты минус платёж). Поправьте, если платёж был другим или долг не уменьшился.</small></div>`:`<div class="infobox">Долгов нет — просто зафиксируем капитал за месяц.</div>`}
+    <div class="field"><button class="btn ghost block" id="clAssetsToggle" style="text-align:left">▸ Обновить стоимость активов (по желанию)</button>
+      <div id="clAssets" style="display:none;margin-top:10px">${assetRows.length?assetRows.map(a=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">сейчас ${fmt(a.value,{bare:true})}</div></div>
+        <input class="num" data-av="${a.id}" inputmode="numeric" value="${Math.round(+a.value||0)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join(""):'<div class="empty">Активов нет</div>'}</div></div>
+    <button class="btn primary block" id="clDo" style="padding:14px;font-size:16px;margin-top:6px">Закрыть месяц</button>`,
+  el=>{
+    const at=el.querySelector("#clAssetsToggle"), ab=el.querySelector("#clAssets");
+    at.onclick=()=>{ const open=ab.style.display!=="none"; ab.style.display=open?"none":"block"; at.textContent=(open?"▸":"▾")+" Обновить стоимость активов (по желанию)"; };
+    el.querySelector("#clDo").onclick=()=>{
+      el.querySelectorAll("[data-lb]").forEach(inp=>{ const x=byId(state.liabilities,inp.dataset.lb); if(x){ const v=parseFloat(String(inp.value).replace(/\s/g,""))||0; x.balance=Math.max(0,v); } });
+      if(ab.style.display!=="none") el.querySelectorAll("[data-av]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.av); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
+      performClose(k);
+      closeSheet(); render_current(); toast("Месяц "+ymShort(k)+" закрыт");
+    };
+  });
 }
 function openMemberPicker(){
   if(!state.members.length){
@@ -672,7 +760,14 @@ function pgToday(v){
   const leftValue = planTotal>0 ? planTotal-spent : m.income-spent;
   const leftLabel = planTotal>0 ? "Осталось в бюджете месяца" : "Приход минус расход в месяце";
 
-  v.appendChild(h(`<div class="page-title">Сегодня</div><div class="page-sub">${ymLabel(k)} · короткий взгляд на семейные финансы</div>`));
+  v.appendChild(h(`<div><div class="page-title">Сегодня</div><div class="page-sub">${ymLabel(k)}${isClosed(k)?' · <span style="color:var(--gold);font-weight:600">месяц закрыт</span>':' · короткий взгляд на семейные финансы'}</div></div>`));
+
+  const mtc=monthToClose();
+  if(mtc){ const rb=h(`<div class="warnbox" style="display:flex;align-items:center;gap:10px;background:${tint('var(--gold)',12)};border-color:${tint('var(--gold)',42)};color:var(--ink)">
+     <span style="font-size:20px">📌</span>
+     <div style="flex:1;font-size:13px">Закройте <b>${ymLabel(mtc)}</b>: обновите остатки по долгам и зафиксируйте капитал за месяц.</div>
+     <button class="btn sm" id="doClose" style="flex:none">Закрыть</button></div>`);
+    rb.querySelector("#doClose").onclick=()=>openMonthClose(mtc); v.appendChild(rb); }
 
   const hero=h(`<div class="card" style="background:linear-gradient(160deg,${tint(statusColor,14)},var(--panel));border-color:${tint(statusColor,42)}">
      <div class="row"><div class="eyebrow" style="margin:0">${statusIco} ${statusWord}</div>
@@ -866,7 +961,7 @@ function lineChart(points,opt){ // points:[{label,v}]
    ============================================================ */
 function pgDash(v){
   const k=curMonth, m=metrics(k);
-  v.appendChild(h(`<div class="page-title">Дашборд директора</div><div class="page-sub">${ymLabel(k)} · здоровье семьи как финансовой единицы</div>`));
+  v.appendChild(h(`<div><div class="page-title">Дашборд директора</div><div class="page-sub">${ymLabel(k)}${isClosed(k)?' · <span style="color:var(--gold);font-weight:600">месяц закрыт (зафиксировано)</span>':' · здоровье семьи как финансовой единицы'}</div></div>`));
   // top KPIs
   v.appendChild(h(`<div class="grid dg4 g2">
     ${kpiCard("Чистый капитал",fmtK(m.netWorth),"активы − долги","gold")}
@@ -988,9 +1083,9 @@ function pgBalance(v){
     <div class="eyebrow" style="margin:0">Чистый капитал семьи</div>
     <div class="num" style="font-size:32px;font-weight:800;letter-spacing:-1px;margin:6px 0;color:var(--gold)">${fmt(N)}</div>
     <div class="row" style="gap:10px"><span class="pill g">Активы ${fmtK(A)}</span><span class="pill r">Пассивы ${fmtK(L)}</span></div>
-    <button class="btn sm block" id="fixNW" style="margin-top:12px">📌 Зафиксировать капитал на сегодня</button>
+    <button class="btn sm block" id="fixNW" style="margin-top:12px">📌 ${monthToClose()?('Закрыть месяц '+ymShort(monthToClose())):'Пересчитать прошлый месяц'}</button>
   </div>`));
-  v.querySelector("#fixNW").onclick=()=>{ state.netWorthHistory=state.netWorthHistory||[]; const today=todayISOdate(); state.netWorthHistory=state.netWorthHistory.filter(x=>ym(x.date)!==ym(today)); state.netWorthHistory.push({date:nowISO(),assets:A,liabilities:L,net:N}); state.netWorthHistory.sort((a,b)=>a.date.localeCompare(b.date)); save(); toast("Снимок капитала сохранён"); render_current(); };
+  v.querySelector("#fixNW").onclick=()=>openMonthClose(monthToClose()||addMonths(realMonth(),-1));
 
   // ASSETS
   const ac=h(`<div class="card"><h3>Активы<span class="tag num">${fmt(A)}</span></h3></div>`);
@@ -1443,6 +1538,7 @@ document.getElementById("view").addEventListener("click",e=>{
 });
 document.getElementById("mPrev").onclick=()=>{curMonth=addMonths(curMonth,-1);render_current();};
 document.getElementById("mNext").onclick=()=>{curMonth=addMonths(curMonth,1);render_current();};
+document.getElementById("mLbl").onclick=openMonthPicker;
 document.getElementById("syncBtn").onclick=()=>{ DBX.syncNow(true); };
 document.getElementById("meBtn").onclick=openMemberPicker;
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet(); });
