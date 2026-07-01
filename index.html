@@ -1670,7 +1670,9 @@ function showGate(mode){
   let shown=false; shw.onclick=()=>{ shown=!shown; inp.style.webkitTextSecurity=shown?"none":"disc"; inp.style.textSecurity=shown?"none":"disc"; shw.textContent=shown?"скрыть":"показать"; inp.focus(); };
   function fail(){ g.classList.add("shake"); inp.value=""; setTimeout(()=>g.classList.remove("shake"),400); inp.focus(); }
   function submit(){
-    const v=(inp.value||"").replace(/\s+/g,"");
+    let v=(inp.value||"");
+    try{ v=v.normalize("NFKC"); }catch(e){}
+    v=v.replace(/[\s\u200B\u200C\u200D\uFEFF\u00A0]+/g,"");
     if(mode==="gate"){ if(simpleHash(v)===GATE_HASH || simpleHash(v.toLowerCase())===GATE_HASH){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
     else { if(state.lock&&state.lock.codeHash&&(simpleHash(v)===state.lock.codeHash||simpleHash(v.toLowerCase())===state.lock.codeHash)) bootApp(); else fail(); }
   }
