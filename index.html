@@ -362,6 +362,7 @@ function seedState(){
     members:[],
     lock:{enabled:false,codeHash:null},
     snapshots:{},
+    incomePlans:{},
     freq:{}
   };
 }
@@ -372,7 +373,7 @@ function load(){
   try{ const raw=localStorage.getItem(LS_KEY); if(raw){ const s=JSON.parse(raw); return migrate(s);} }catch(e){}
   const s=seedState(); try{localStorage.setItem(LS_KEY,JSON.stringify(s));}catch(e){} return s;
 }
-function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
+function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.incomePlans=s.incomePlans||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
 let saveTimer=null, dbxTimer=null;
 function save(pushCloud=true){
   state.updatedAt=nowISO();
@@ -383,15 +384,16 @@ function save(pushCloud=true){
 /* ---------- lookups & derived ---------- */
 const byId=(arr,id)=>arr.find(x=>x.id===id);
 const groupOf=cid=>{const c=byId(state.categories,cid);return c?byId(state.groups,c.groupId):null;};
-const catName=cid=>{const c=byId(state.categories,cid);return c?c.name:"—";};
-const catIcon=cid=>{const c=byId(state.categories,cid);return c?(c.icon||"•"):"•";};
+const incomeSrcById=id=>byId(state.incomeSources,id);
+const catName=cid=>{const c=byId(state.categories,cid);if(c)return c.name;const s=incomeSrcById(cid);return s?s.name:"—";};
+const catIcon=cid=>{const c=byId(state.categories,cid);if(c)return c.icon||"•";return incomeSrcById(cid)?"💰":"•";};
 const subName=sid=>{const s=byId(state.subcategories,sid);return s?s.name:"";};
 const subsOf=cid=>state.subcategories.filter(s=>s.categoryId===cid);
 const catsOf=gid=>state.categories.filter(c=>c.groupId===gid);
 const expenseGroups=()=>state.groups.filter(g=>g.kind!=="income");
 const expenseCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind!=="income";});
 const incomeCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind==="income";});
-function catColor(cid){const g=groupOf(cid);return g?g.color:"var(--ink3)";}
+function catColor(cid){const g=groupOf(cid);if(g)return g.color;return incomeSrcById(cid)?"var(--grpI)":"var(--ink3)";}
 
 /* ---------- члены семьи (участники) ---------- */
 const MEMBER_COLORS=["#3D7BE0","#2E9E6B","#C68A12","#9163C9","#2494B0","#D6743E","#C74B84","#4B9E52"];
@@ -418,7 +420,10 @@ const totalLiab=()=>state.liabilities.reduce((a,x)=>a+(+x.balance||0),0);
 const netWorth=()=>totalAssets()-totalLiab();
 const totalMinPayment=()=>state.liabilities.reduce((a,x)=>a+(+x.minPayment||0),0);
 const expectedIncome=()=>state.incomeSources.reduce((a,x)=>a+(+x.amount||0),0);
-function incomeForMonth(k){ const real=monthIncome(k); return real>0?real:expectedIncome(); }
+function incomeSrcPlanned(k,sid){ const p=state.incomePlans[k]; if(p && (sid in p)) return +p[sid]||0; const s=incomeSrcById(sid); return s?+s.amount||0:0; }
+function plannedIncome(k){ const p=state.incomePlans[k]; if(p) return Object.values(p).reduce((a,x)=>a+(+x||0),0); return expectedIncome(); }
+function monthIncomeBySource(k,sid){ return txnsOfMonth(k).filter(t=>t.type==="income"&&t.categoryId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
+function incomeForMonth(k){ const real=monthIncome(k); return real>0?real:plannedIncome(k); }
 
 /* ---------- закрытие месяца ---------- */
 function realMonth(){ return ym(new Date()); }
@@ -648,7 +653,7 @@ function frequentCats(type){
 function openAddTxn(preset){
   let draft={type:"expense",date:todayISOdate(),amount:"",categoryId:null,subId:null,comment:"",memberId:curMember(),...(preset||{})};
   const render=()=>{
-    const cats=frequentCats(draft.type);
+    const cats = draft.type==="income" ? state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'})) : frequentCats("expense");
     const subs = draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
       <div class="sheet-sticky">
@@ -660,9 +665,10 @@ function openAddTxn(preset){
       <input class="amount-big num" id="amt" inputmode="decimal" placeholder="0 ${CUR}" value="${draft.amount?esc(String(draft.amount)):''}">
       </div>
       <div class="field">
-        <label>Категория</label>
+        <label>${draft.type==='income'?'Источник дохода':'Категория'}</label>
         <div class="opts" id="catOpts">
           ${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${c.icon||'•'} ${esc(c.name)}</button>`).join("")}
+          ${draft.type==='income'?`<button class="opt" data-cat="__addsrc">＋ источник</button>`:''}
         </div>
       </div>
       ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts" id="subOpts">
@@ -678,7 +684,7 @@ function openAddTxn(preset){
       <button class="btn ghost block" id="cancelTxn" style="margin-top:8px">Отмена</button>
     `, el=>{
       el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;render();});
-      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.categoryId=b.dataset.cat;const ss=subsOf(draft.categoryId);draft.subId=ss.length===1?ss[0].id:null;draft.comment=el.querySelector("#cm").value;render();});
+      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value; if(b.dataset.cat==="__addsrc"){ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const s={id:uid(),name:nm.trim(),amount:0}; state.incomeSources.push(s); save(); draft.categoryId=s.id; } render(); return; } draft.categoryId=b.dataset.cat;const ss=subsOf(draft.categoryId);draft.subId=ss.length===1?ss[0].id:null;render();});
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{ if(b.dataset.sub==="__add"){ const nm=prompt("Название новой подкатегории:"); if(nm&&nm.trim()){ const s={id:uid(),categoryId:draft.categoryId,name:nm.trim()}; state.subcategories.push(s); save(); draft.subId=s.id; } } else { draft.subId=b.dataset.sub; } draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value; render(); });
       el.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{ draft.memberId=b.dataset.who; el.querySelectorAll("[data-who]").forEach(x=>x.classList.toggle("active",x.dataset.who===draft.memberId)); });
       el.querySelector("#amt").focus();
@@ -699,14 +705,14 @@ function editTxn(id){
   const t=byId(state.txns,id); if(!t)return;
   let draft={...t};
   const render=()=>{
-    const cats=frequentCats(draft.type); const subs=draft.categoryId?subsOf(draft.categoryId):[];
+    const cats = draft.type==="income" ? state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'})) : frequentCats("expense"); const subs=draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
       <div class="sheet-sticky">
       <h3>Операция</h3>
       <div class="seg" style="margin-bottom:12px"><button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button><button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button></div>
       <input class="amount-big num" id="amt" inputmode="decimal" value="${esc(String(draft.amount))}">
       </div>
-      <div class="field"><label>Категория</label><div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${c.icon||'•'} ${esc(c.name)}</button>`).join("")}</div></div>
+      <div class="field"><label>${draft.type==='income'?'Источник дохода':'Категория'}</label><div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${c.icon||'•'} ${esc(c.name)}</button>`).join("")}</div></div>
       ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts">${subs.map(s=>`<button class="opt ${draft.subId===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
       ${state.members.length?`<div class="field"><label>Кто</label><div class="opts">${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${m.emoji||'👤'} ${esc(m.name)}</button>`).join("")}</div></div>`:''}
@@ -781,7 +787,7 @@ function pgToday(v){
   v.appendChild(hero);
 
   v.appendChild(h(`<div class="grid g3">
-    ${kpiCard("Доход",fmt(m.income),m.income>0?"":"ожидаемый "+fmt(expectedIncome()),"gold")}
+    ${kpiCard("Доход",fmt(m.income),m.income>0?"":"план "+fmt(plannedIncome(k)),"gold")}
     ${kpiCard("Расход",fmt(spent),"потребление","")}
     ${kpiCard("В капитал",fmt(m.capital),"накопления+долг","pos")}
   </div>`));
@@ -807,7 +813,7 @@ function pgToday(v){
 function kpiCard(lbl,val,sub,cls){ return `<div class="kpi"><div class="k-lbl">${esc(lbl)}</div><div class="k-val ${cls||''} num">${val}</div><div class="k-sub">${esc(sub||'')}</div></div>`; }
 function txnRow(t){
   const inc=t.type==="income";
-  const row=h(`<div class="lrow"><div class="ic" style="background:${tint(catColor(t.categoryId),13)};color:${catColor(t.categoryId)}">${inc?'⬆':catIcon(t.categoryId)}</div>
+  const row=h(`<div class="lrow"><div class="ic" style="background:${tint(catColor(t.categoryId),13)};color:${catColor(t.categoryId)}">${catIcon(t.categoryId)}</div>
     <div style="min-width:0"><div class="t1">${esc(catName(t.categoryId))}${t.subId?' · '+esc(subName(t.subId)):''}</div>
     <div class="t2">${t.memberId?memberBadge(t.memberId)+' · ':''}${esc(fmtDate(t.date))}${t.comment?' · '+esc(t.comment):''}</div></div>
     <div class="amt num ${inc?'inc':'exp'}">${inc?'+':'−'}${fmt(t.amount,{bare:true})}</div></div>`);
@@ -866,11 +872,25 @@ function pgPlan(v){
        <button class="btn sm" id="copyPrev">⇦ Из прошлого месяца</button>
        <button class="btn sm primary" id="fromGoals">Собрать из целей</button>
      </div></div>
-     ${empty?`<div class="infobox" style="margin-top:12px;margin-bottom:0">Бюджет пуст — это правильный старт. Впишите лимиты вручную ниже, скопируйте прошлый месяц, или нажмите «Собрать из целей»: система разложит доход ${fmt(expectedIncome())} по группам так, чтобы ваши цели выполнялись, и покажет, что ужать.</div>`:
-       `<div class="linrow" style="margin-top:12px"><span class="dim">Ожидаемый доход ${fmt(expectedIncome())}</span><span class="${total>expectedIncome()?'':''}" style="color:${total>expectedIncome()?'var(--red)':'var(--green)'}">${total>expectedIncome()?'Дефицит '+fmt(total-expectedIncome()):'Свободно '+fmt(expectedIncome()-total)}</span></div>`}
+     ${empty?`<div class="infobox" style="margin-top:12px;margin-bottom:0">Бюджет пуст — это правильный старт. Впишите лимиты вручную ниже, скопируйте прошлый месяц, или нажмите «Собрать из целей»: система разложит доход ${fmt(plannedIncome(k))} по группам так, чтобы ваши цели выполнялись, и покажет, что ужать.</div>`:
+       `<div class="linrow" style="margin-top:12px"><span class="dim">Плановый доход ${fmt(plannedIncome(k))}</span><span style="color:${total>plannedIncome(k)?'var(--red)':'var(--green)'}">${total>plannedIncome(k)?'Расходы > дохода на '+fmt(total-plannedIncome(k)):'Свободно '+fmt(plannedIncome(k)-total)}</span></div>`}
   </div>`));
   v.querySelector("#copyPrev").onclick=()=>{ const prev=state.plans[addMonths(k,-1)]; if(!prev||!Object.keys(prev).length){toast("В прошлом месяце плана нет");return;} state.plans[k]=JSON.parse(JSON.stringify(prev)); save(); toast("Скопировано"); render_current(); };
   v.querySelector("#fromGoals").onclick=()=>suggestPlanFromGoals();
+
+  // ---- планирование дохода по источникам ----
+  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход (план)<span class="tag num">${fmt(plannedIncome(k))}</span></h3>
+    <p class="muted" style="font-size:12px;margin:-2px 0 4px">Сколько ждёте с каждого источника в этом месяце. По умолчанию — типовая сумма из «Настройки», меняйте под конкретный месяц.</p></div>`);
+  if(!state.incomeSources.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет. Добавьте их в «Настройке».<br><button class="btn sm" style="margin-top:10px" data-nav="settings">В настройку →</button></div>`)); }
+  state.incomeSources.forEach(s=>{
+    const row=h(`<div class="lrow"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">💰</div>
+      <div class="t1" style="flex:1">${esc(s.name)}</div>
+      <input class="num right" style="width:130px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${incomeSrcPlanned(k,s.id)||''}" data-inc="${s.id}"></div>`);
+    const inp=row.querySelector("input");
+    inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; state.incomePlans[k]=state.incomePlans[k]||{}; state.incomePlans[k][s.id]=val; save(); render_current(); };
+    incCard.appendChild(row);
+  });
+  v.appendChild(incCard);
 
   expenseGroups().forEach(g=>{
     const cats=catsOf(g.id); if(!cats.length)return;
@@ -895,6 +915,20 @@ function pgPlan(v){
 function pgFact(v){
   const k=curMonth; const plan=state.plans[k]||{};
   v.appendChild(h(`<div class="page-title">План / Факт</div><div class="page-sub">${ymLabel(k)} · выполнение бюджета по категориям</div>`));
+
+  // ---- доход: план / факт по источникам ----
+  const incPlan=plannedIncome(k), incFact=monthIncome(k);
+  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход · план/факт<span class="tag num" style="color:${incFact>=incPlan&&incPlan>0?'var(--green)':'var(--ink2)'}">${fmt(incFact)} / ${fmt(incPlan)}</span></h3></div>`);
+  if(!state.incomeSources.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет — добавьте в «Настройке».</div>`)); }
+  state.incomeSources.forEach(s=>{
+    const pl=incomeSrcPlanned(k,s.id), fc=monthIncomeBySource(k,s.id), rest=Math.max(0,pl-fc), ratio=pl?fc/pl:(fc>0?1:0);
+    incCard.appendChild(h(`<div style="padding:10px 2px;border-bottom:1px solid var(--line)">
+      <div class="linrow"><span>💰 ${esc(s.name)}</span><span class="num" style="color:${fc>=pl&&pl>0?'var(--green)':'var(--ink2)'};font-weight:600">${(fc>=pl&&pl>0)?'получено':'ждём ещё '+fmt(rest,{bare:true})}</span></div>
+      <div class="meter"><span style="width:${clamp(ratio*100,0,100)}%;background:var(--grpI)"></span></div>
+      <div class="linrow" style="margin-top:5px;font-size:11.5px"><span class="dim num">Факт ${fmt(fc)}</span><span class="dim num">План ${fmt(pl)} · ${pct(ratio)}</span></div>
+    </div>`));
+  });
+  v.appendChild(incCard);
   const planT=planMonthTotal(k), factT=monthExpense(k)+monthCapital(k);
   v.appendChild(h(`<div class="grid g3" style="margin-bottom:6px">
     ${kpiCard("План",fmt(planT),"","")}
@@ -1017,7 +1051,7 @@ function pgDash(v){
   // 12-month cashflow mini
   const cfCard=h(`<div class="card"><h3>Денежный поток, 12 мес <span class="tag" style="cursor:pointer" data-nav="cashflow">детально →</span></h3></div>`);
   const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
-  const rows=months.map(mm=>({label:ymShort(mm),values:[{v:incomeForMonth(mm)&&monthIncome(mm)?monthIncome(mm):0,color:"var(--grpI)"},{v:monthExpense(mm)+monthCapital(mm),color:"var(--grp2)"}]}));
+  const rows=months.map(mm=>({label:ymShort(mm),values:[{v:incomeForMonth(mm),color:"var(--grpI)"},{v:monthExpense(mm)+monthCapital(mm),color:"var(--grp2)"}]}));
   cfCard.appendChild(h(barsChart(rows,{stacked:false})));
   cfCard.appendChild(h(`<div class="row" style="gap:14px;justify-content:center;margin-top:8px;font-size:12px"><span class="li"><span class="sw" style="background:var(--grpI);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Доход</span><span><span class="sw" style="background:var(--grp2);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Расход</span></div>`));
   v.appendChild(cfCard);
@@ -1032,7 +1066,7 @@ function pgCashflow(v){
   let cum=0;
   const card=h(`<div class="card" style="overflow-x:auto"><h3>Операционный, кредитный и капитальный потоки</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Приход</th><th class="right">Потребление</th><th class="right">В капитал</th><th class="right">Δ месяца</th><th class="right">Накоплено</th></tr></thead><tbody id="cfBody"></tbody></table></div>`);
   const body=card.querySelector("#cfBody");
-  months.forEach(mm=>{ const inc=monthIncome(mm), exp=monthExpense(mm), cap=monthCapital(mm); const delta=inc-exp-cap; cum+=delta;
+  months.forEach(mm=>{ const inc=incomeForMonth(mm), exp=monthExpense(mm), cap=monthCapital(mm); const delta=inc-exp-cap; cum+=delta;
     body.appendChild(h(`<tr><td>${ymShort(mm)}</td><td class="right num" style="color:var(--green)">${inc?fmt(inc,{bare:true}):'—'}</td><td class="right num">${exp?fmt(exp,{bare:true}):'—'}</td><td class="right num" style="color:var(--gold)">${cap?fmt(cap,{bare:true}):'—'}</td><td class="right num" style="color:${delta<0?'var(--red)':'var(--ink)'}">${(inc||exp||cap)?fmt(delta,{bare:true,plus:true}):'—'}</td><td class="right num" style="color:${cum<0?'var(--red)':'var(--ink2)'}">${fmt(cum,{bare:true})}</td></tr>`)); });
   v.appendChild(card);
   v.appendChild(h(`<div class="infobox">Приход и расход берутся из реальных операций. Пустые месяцы заполнятся, как только вы начнёте вести учёт или зададите повторяющиеся платежи и план. Прогноз с учётом ожидаемого дохода и плана — во вкладке «Прогноз».</div>`));
@@ -1048,7 +1082,7 @@ function pgForecast(v){
   let cum=startCash; const proj=[]; let firstGap=null;
   const goalsMonthly=(state.goals||[]).reduce((a,g)=>a+(+g.monthlyNeeded||0),0);
   months.forEach(mm=>{ 
-    const inc = monthIncome(mm)>0?monthIncome(mm):expectedIncome();
+    const inc = monthIncome(mm)>0?monthIncome(mm):plannedIncome(mm);
     const planExp = planMonthTotal(mm);
     const realExp = monthExpense(mm)+monthCapital(mm);
     const exp = Math.max(planExp, realExp>0?realExp:0) || estimatedMonthlyExpense();
@@ -1254,7 +1288,7 @@ function editGoal(id){
 }
 /* Движок: разложить доход по группам с учётом целей */
 function suggestPlanFromGoals(){
-  const inc=expectedIncome();
+  const inc=plannedIncome(curMonth);
   const goalsMonthly=(state.goals||[]).reduce((a,g)=>a+goalMonthlyNeeded(g),0);
   const fixed=totalMinPayment(); // обязательные платежи по долгам как минимум
   // рекомендованные доли (после обязательных и целей — на переменные/семью/качество жизни)
@@ -1308,7 +1342,7 @@ function pgSettings(v){
   v.appendChild(pc);
 
   // income sources
-  const ic=h(`<div class="card"><h3>Источники дохода <span class="tag num">${fmt(expectedIncome())}/мес</span></h3></div>`);
+  const ic=h(`<div class="card"><h3>Источники дохода <span class="tag num">${fmt(expectedIncome())}/мес</span></h3><p class="muted" style="font-size:12px;margin:-2px 0 2px">Список источников и типовая месячная сумма. Точный план по месяцам задаётся на вкладке «План».</p></div>`);
   state.incomeSources.forEach(s=>{
     const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--grpI) 14%,transparent);color:var(--grpI)">💼</div>
       <input style="flex:1;background:transparent;border:none;padding:0;font-weight:600" value="${esc(s.name)}" data-n>
@@ -1325,7 +1359,7 @@ function pgSettings(v){
 
   // categories editor
   const cc=h(`<div class="card"><h3>Статьи и подкатегории</h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Добавляйте, переименовывайте и удаляйте категории и подкатегории. Всё, что вы настроите, появится в быстром вводе.</p></div>`);
-  state.groups.forEach(g=>{
+  expenseGroups().forEach(g=>{
     const gEl=h(`<div style="margin-bottom:10px"><div class="linrow" style="padding:8px 2px"><span style="font-weight:700;color:${g.color}">● ${esc(g.name)}</span><button class="btn sm ghost" data-addcat>＋ категория</button></div></div>`);
     catsOf(g.id).forEach(c=>{
       const row=h(`<div style="padding:8px 2px 8px 12px;border-left:2px solid var(--line2);margin-left:4px">
@@ -1585,14 +1619,16 @@ function setupAutoSync(){
 function showGate(mode){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show");
-  box.innerHTML='<input id="gpass" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"'+(mode==="lock"?' placeholder="код"':'')+'><button class="gbtn" id="gok">→</button>'+
+  box.innerHTML='<input id="gpass" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="go"'+(mode==="lock"?' placeholder="код"':'')+'>'+
+    '<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:2px"><button class="gface" id="gshow" type="button">показать</button><button class="gbtn" id="gok">→</button></div>'+
     (mode==="lock"?'<button class="gface" id="gface" style="display:none">Face ID</button>':'');
-  const inp=box.querySelector("#gpass"), ok=box.querySelector("#gok");
+  const inp=box.querySelector("#gpass"), ok=box.querySelector("#gok"), shw=box.querySelector("#gshow");
+  let shown=false; shw.onclick=()=>{ shown=!shown; inp.style.webkitTextSecurity=shown?"none":"disc"; inp.style.textSecurity=shown?"none":"disc"; shw.textContent=shown?"скрыть":"показать"; inp.focus(); };
   function fail(){ g.classList.add("shake"); inp.value=""; setTimeout(()=>g.classList.remove("shake"),400); inp.focus(); }
   function submit(){
-    const v=(inp.value||"").trim();
-    if(mode==="gate"){ if(simpleHash(v)===GATE_HASH){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
-    else { if(state.lock&&state.lock.codeHash&&simpleHash(v)===state.lock.codeHash) bootApp(); else fail(); }
+    const v=(inp.value||"").replace(/\s+/g,"");
+    if(mode==="gate"){ if(simpleHash(v)===GATE_HASH || simpleHash(v.toLowerCase())===GATE_HASH){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
+    else { if(state.lock&&state.lock.codeHash&&(simpleHash(v)===state.lock.codeHash||simpleHash(v.toLowerCase())===state.lock.codeHash)) bootApp(); else fail(); }
   }
   ok.onclick=submit; inp.addEventListener("keydown",e=>{ if(e.key==="Enter")submit(); });
   if(mode==="lock" && localStorage.getItem(LS_FACEID)){
