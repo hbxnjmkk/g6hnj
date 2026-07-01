@@ -6,7 +6,8 @@
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#EEF2F7">
-<title>Семейная финансовая ERP</title>
+<meta name="apple-mobile-web-app-title" content="Заметки">
+<title>Заметки</title>
 <style>
 :root{
   --bg:#EEF2F7; --bg2:#FFFFFF; --panel:#FFFFFF; --panel2:#F1F5F9;
@@ -159,6 +160,16 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .empty{text-align:center;padding:30px 16px;color:var(--ink3)}
 .empty .big{font-size:34px;margin-bottom:8px;opacity:.6}
 .hidden{display:none!important}
+/* --- экран-заглушка / блокировка --- */
+#app{visibility:hidden}
+#gate{position:fixed;inset:0;z-index:200;background:var(--bg);display:none;align-items:center;justify-content:center;padding:24px}
+#gate.show{display:flex}
+#gate .gbox{width:100%;max-width:300px;display:flex;flex-direction:column;gap:14px;align-items:center}
+#gate input{text-align:center;font-size:17px;letter-spacing:1px;padding:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2)}
+#gate .gbtn{width:46px;height:46px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);display:grid;place-items:center;font-size:20px;color:var(--ink2)}
+#gate .gface{font-size:14px;color:var(--ink3);background:none;border:none;text-decoration:underline}
+#gate.shake .gbox{animation:shk .35s}
+@keyframes shk{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}60%{transform:translateX(8px)}}
 .donut-wrap{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
 .legend{flex:1;min-width:160px;display:flex;flex-direction:column;gap:7px}
 .legend .li{display:flex;align-items:center;gap:8px;font-size:13px}
@@ -217,6 +228,7 @@ small.hint{color:var(--ink3);font-size:11.5px}
 <div class="scrim" id="scrim"></div>
 <div class="sheet" id="sheet"></div>
 <div class="toast" id="toast"></div>
+<div id="gate"><div class="gbox" id="gbox"></div></div>
 <script>
 /* ============================================================
    Семейная финансовая ERP — single-file app (vanilla JS)
@@ -228,7 +240,8 @@ small.hint{color:var(--ink3);font-size:11.5px}
   var _v=document.getElementById("view");
   if(_v) _v.innerHTML='<div style="padding:24px;color:#9FB2C0;font:15px system-ui">Загрузка…</div>';
   window.onerror=function(msg,src,line,col,err){
-    var v=document.getElementById("view");
+    var v=document.getElementById("view"), a=document.getElementById("app"), g=document.getElementById("gate");
+    if(a) a.style.visibility="visible"; if(g) g.classList.remove("show");
     if(v) v.innerHTML='<div style="padding:22px;color:#E5544E;font:14px/1.5 system-ui;word-break:break-word">'+
       '<b style="font-size:16px">Не удалось запустить приложение</b><br><br>'+
       '<span style="color:#E9EFF4">'+String(msg)+'</span><br>'+
@@ -240,6 +253,10 @@ small.hint{color:var(--ink3);font-size:11.5px}
 const LS_KEY = "famfin.v1";
 const LS_DBX = "famfin.dbx";
 const LS_ME  = "famfin.me";   // текущий участник — локально на устройстве, НЕ синхронизируется
+const LS_GATE= "famfin.gate"; // заглушка пройдена на этом браузере
+const LS_FACEID="famfin.faceid"; // id ключа Face ID для этого браузера
+const GATE_HASH="2861504904edd2b7"; // хеш пароля-заглушки (сам пароль в файле не хранится)
+function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
 const nowISO = () => new Date().toISOString();
@@ -324,6 +341,7 @@ function seedState(){
     assets, liabilities:liab, incomeSources:income,
     goals:[], netWorthHistory:[],
     members:[],
+    lock:{enabled:false,codeHash:null},
     freq:{}
   };
 }
@@ -334,7 +352,7 @@ function load(){
   try{ const raw=localStorage.getItem(LS_KEY); if(raw){ const s=JSON.parse(raw); return migrate(s);} }catch(e){}
   const s=seedState(); try{localStorage.setItem(LS_KEY,JSON.stringify(s));}catch(e){} return s;
 }
-function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
+function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
 let saveTimer=null, dbxTimer=null;
 function save(pushCloud=true){
   state.updatedAt=nowISO();
@@ -1242,6 +1260,27 @@ function pgSettings(v){
   else sc.querySelector("#dbxOn").onclick=DBX.startLink;
   v.appendChild(sc);
 
+  // login protection (optional)
+  const faceLinked=!!localStorage.getItem(LS_FACEID);
+  const lk=h(`<div class="card"><h3>Защита входа ${state.lock.enabled?'<span class="pill g" style="margin-left:auto">включена</span>':'<span class="pill" style="margin-left:auto">выключена</span>'}</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Дополнительный замок при открытии на ваших устройствах: резервный код и, по желанию, Face ID. Face ID работает только на сайте по HTTPS в Safari. Это не заменяет защиту Dropbox и блокировку устройства.</p>
+    ${state.lock.enabled?
+      `<div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="chgCode">Изменить код</button><button class="btn" id="faceBtn">${faceLinked?'Face ID подключён ✓ — отключить':'Включить Face ID на этом устройстве'}</button><button class="btn danger" id="lockOff">Выключить защиту</button></div>`
+      :`<button class="btn primary block" id="lockOn">Включить защиту входа</button>`}
+  </div>`);
+  if(state.lock.enabled){
+    lk.querySelector("#chgCode").onclick=()=>{ const c=prompt("Новый резервный код:"); if(!c)return; const c2=prompt("Повторите код:"); if(c!==c2){toast("Коды не совпали");return;} state.lock.codeHash=simpleHash(c); save(); toast("Код изменён"); };
+    lk.querySelector("#lockOff").onclick=()=>{ if(confirm("Выключить защиту входа?")){ state.lock={enabled:false,codeHash:null}; save(); render_current(); } };
+    lk.querySelector("#faceBtn").onclick=async()=>{
+      if(faceLinked){ localStorage.removeItem(LS_FACEID); toast("Face ID отключён на устройстве"); render_current(); return; }
+      if(!(await faceIdAvailable())){ toast("Face ID недоступен: нужен сайт по HTTPS и Safari"); return; }
+      try{ await faceIdRegister(); toast("Face ID подключён"); render_current(); }catch(e){ toast("Не удалось подключить Face ID"); }
+    };
+  } else {
+    lk.querySelector("#lockOn").onclick=()=>{ const c=prompt("Придумайте резервный код (цифры или буквы):"); if(!c)return; const c2=prompt("Повторите код:"); if(c!==c2){toast("Коды не совпали");return;} state.lock={enabled:true,codeHash:simpleHash(c)}; save(); toast("Защита входа включена"); render_current(); };
+  }
+  v.appendChild(lk);
+
   // reset
   const rc=h(`<div class="card"><h3>Сброс</h3><button class="btn danger block" id="reset">Очистить все данные и вернуть демо-структуру</button></div>`);
   rc.querySelector("#reset").onclick=()=>{ if(confirm("Удалить ВСЕ данные и вернуть стартовую структуру? Это необратимо (сделайте экспорт заранее).")){ localStorage.removeItem(LS_KEY); state=seedState(); save(false); toast("Сброшено"); render_current(); } };
@@ -1336,12 +1375,62 @@ document.getElementById("syncBtn").onclick=()=>{ if(DBX.linked)DBX.pull(true); e
 document.getElementById("meBtn").onclick=openMemberPicker;
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet(); });
 
+/* ---------- защита входа: заглушка + опциональная блокировка + Face ID ---------- */
+function bufToB64(buf){ return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
+function b64ToBuf(b){ b=b.replace(/-/g,"+").replace(/_/g,"/"); const s=atob(b); const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i); return a.buffer; }
+async function faceIdAvailable(){ try{ return !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }catch(e){ return false; } }
+async function faceIdRegister(){
+  const cred=await navigator.credentials.create({publicKey:{
+    challenge:crypto.getRandomValues(new Uint8Array(32)),
+    rp:{name:"Заметки",id:location.hostname},
+    user:{id:crypto.getRandomValues(new Uint8Array(16)),name:"u",displayName:"u"},
+    pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
+    authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required",residentKey:"preferred"},
+    timeout:60000,attestation:"none"}});
+  localStorage.setItem(LS_FACEID,bufToB64(cred.rawId)); return true;
+}
+async function faceIdUnlock(){
+  const id=localStorage.getItem(LS_FACEID); if(!id) throw new Error("no cred");
+  await navigator.credentials.get({publicKey:{
+    challenge:crypto.getRandomValues(new Uint8Array(32)),
+    allowCredentials:[{type:"public-key",id:b64ToBuf(id)}],
+    userVerification:"required",timeout:60000,rpId:location.hostname}});
+  return true;
+}
+let booted=false;
+function bootApp(){
+  if(booted)return; booted=true;
+  document.getElementById("gate").classList.remove("show");
+  document.getElementById("app").style.visibility="visible";
+  renderNav(); renderMe(); render_current();
+  if(DBX.linked){ setSync("ok"); setTimeout(()=>DBX.pull(false),400); }
+}
+function showGate(mode){
+  const g=document.getElementById("gate"), box=document.getElementById("gbox");
+  g.classList.add("show");
+  box.innerHTML='<input id="gpass" type="password" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><button class="gbtn" id="gok">→</button>'+
+    (mode==="lock"?'<button class="gface" id="gface" style="display:none">Face ID</button>':'');
+  const inp=box.querySelector("#gpass"), ok=box.querySelector("#gok");
+  function fail(){ g.classList.add("shake"); inp.value=""; setTimeout(()=>g.classList.remove("shake"),400); inp.focus(); }
+  function submit(){
+    const v=inp.value;
+    if(mode==="gate"){ if(simpleHash(v)===GATE_HASH){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
+    else { if(state.lock&&state.lock.codeHash&&simpleHash(v)===state.lock.codeHash) bootApp(); else fail(); }
+  }
+  ok.onclick=submit; inp.addEventListener("keydown",e=>{ if(e.key==="Enter")submit(); });
+  if(mode==="lock" && localStorage.getItem(LS_FACEID)){
+    faceIdAvailable().then(av=>{ if(!av)return; const fb=box.querySelector("#gface"); if(!fb)return; fb.style.display="";
+      fb.onclick=async()=>{ try{ await faceIdUnlock(); bootApp(); }catch(e){ fail(); } };
+      faceIdUnlock().then(()=>bootApp()).catch(()=>{}); });
+  }
+  setTimeout(()=>inp.focus(),120);
+}
+function afterGate(){ if(state.lock&&state.lock.enabled) showGate("lock"); else bootApp(); }
+function securityBoot(){ let g="1"; try{g=localStorage.getItem(LS_GATE);}catch(e){} if(g!=="1"){ showGate("gate"); } else afterGate(); }
+
 DBX.boot();
-renderNav();
-renderMe();
-render_current();
-if(DBX.linked){ setSync("ok"); setTimeout(()=>DBX.pull(false),400); }
-console.log("Семейная финансовая ERP готова.");
+securityBoot();
+console.log("Готово.");
 </script>
 </body>
 </html>
