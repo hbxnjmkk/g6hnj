@@ -278,7 +278,7 @@ const LS_ME  = "famfin.me";   // текущий участник — локал�
 const LS_GATE= "famfin.gate"; // заглушка пройдена на этом браузере
 const LS_FACEID="famfin.faceid"; // id ключа Face ID для этого браузера
 const LS_ENCFACE="famfin.encface"; // код шифрования, хранимый на устройстве для входа по Face ID
-const APP_VERSION="версия 8 · 02.07";
+const APP_VERSION="версия 9 · 02.07";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -368,7 +368,8 @@ function seedState(){
     lock:{enabled:false,codeHash:null},
     snapshots:{},
     incomePlans:{},
-    freq:{}
+    freq:{},
+    __meta:{}
   };
 }
 
@@ -380,16 +381,110 @@ function load(){
   const s=seedState(); try{localStorage.setItem(LS_KEY,JSON.stringify(s));}catch(e){} return s;
 }
 function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.incomePlans=s.incomePlans||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; sanitizeState(s); return s; }
-let saveTimer=null, dbxTimer=null;
+let saveTimer=null, dbxTimer=null, __lastSaved=null;
 async function persistLocal(){
   try{ const str = CRYPT.on ? await CRYPT.wrap(state) : JSON.stringify(state); localStorage.setItem(LS_KEY, str); }
   catch(e){ toast("Не удалось сохранить локально"); }
 }
 function save(pushCloud=true){
-  state.updatedAt=nowISO();
+  stampChanges();          // проставить метки времени на изменённые записи
+  recomputeUpdatedAt();    // общий updatedAt = самая свежая метка (для сравнения версий)
   if(CRYPT.on){ persistLocal(); }
   else { try{ localStorage.setItem(LS_KEY,JSON.stringify(state)); }catch(e){ toast("Не удалось сохранить локально"); } }
-  if(pushCloud && DBX.linked){ setSync("dirty"); clearTimeout(dbxTimer); dbxTimer=setTimeout(()=>DBX.push(),1500); }
+  if(pushCloud && DBX.linked){ setSync("dirty"); clearTimeout(dbxTimer); dbxTimer=setTimeout(()=>DBX.syncNow(false),1500); }
+}
+
+/* ============================================================
+   ДВИЖОК СЛИЯНИЯ (record-level merge с надгробиями)
+   Каждая запись/ключ помечается меткой изменения (u) и удаления (d).
+   При синхронизации состояния сливаются по записям, а не «весь файл».
+   Заложено расширяемо: позже можно нарастить до пофайлового журнала.
+   ============================================================ */
+const SYNC_COLLS = {
+  txns:{type:'array'}, assets:{type:'array'}, liabilities:{type:'array'},
+  incomeSources:{type:'array'}, categories:{type:'array'}, subcategories:{type:'array'},
+  groups:{type:'array'}, members:{type:'array'}, goals:{type:'array'}, recurring:{type:'array'},
+  plans:{type:'map'}, incomePlans:{type:'map'}, snapshots:{type:'map'}, freq:{type:'map'},
+  netWorthHistory:{type:'arraykey', key:'date'},
+  settings:{type:'scalar'}, lock:{type:'scalar'}
+};
+const _clone=x=>JSON.parse(JSON.stringify(x));
+const _deepEq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+const _maxs=(a,b)=>((a||"")>(b||"")?(a||""):(b||""));
+function _idx(arr,keyf){ const o={}; (arr||[]).forEach(r=>{ const k=keyf(r); if(k!=null) o[k]=r; }); return o; }
+function buildMetaBaseline(s){
+  const now=s.updatedAt||nowISO(); const M={};
+  for(const [coll,cfg] of Object.entries(SYNC_COLLS)){
+    const m=M[coll]={u:{},d:{}};
+    if(cfg.type==='array'||cfg.type==='arraykey'){ const kf=cfg.type==='array'?(r=>r.id):(r=>r[cfg.key]); (s[coll]||[]).forEach(r=>{ const k=kf(r); if(k!=null)m.u[k]=now; }); }
+    else if(cfg.type==='map'){ for(const k in (s[coll]||{})) m.u[k]=now; }
+    else { if(s[coll]!=null) m.u["_"]=now; }
+  }
+  s.__meta=M; return s;
+}
+function stampChanges(){
+  state.__meta=state.__meta||{};
+  if(!__lastSaved){ __lastSaved=_clone(state); return; }
+  const now=nowISO(), prev=__lastSaved, cur=state;
+  for(const [coll,cfg] of Object.entries(SYNC_COLLS)){
+    const m=cur.__meta[coll]=cur.__meta[coll]||{u:{},d:{}}; m.u=m.u||{}; m.d=m.d||{};
+    if(cfg.type==='array'||cfg.type==='arraykey'){
+      const kf=cfg.type==='array'?(r=>r.id):(r=>r[cfg.key]);
+      const pv=_idx(prev[coll],kf), cv=_idx(cur[coll],kf);
+      for(const k in cv){ if(!(k in pv)||!_deepEq(pv[k],cv[k])){ m.u[k]=now; if(m.d[k])delete m.d[k]; } }
+      for(const k in pv){ if(!(k in cv)) m.d[k]=now; }
+    } else if(cfg.type==='map'){
+      const pv=prev[coll]||{}, cv=cur[coll]||{};
+      for(const k in cv){ if(!(k in pv)||!_deepEq(pv[k],cv[k])){ m.u[k]=now; if(m.d[k])delete m.d[k]; } }
+      for(const k in pv){ if(!(k in cv)) m.d[k]=now; }
+    } else { if(!_deepEq(prev[coll],cur[coll])) m.u["_"]=now; }
+  }
+  __lastSaved=_clone(cur);
+}
+function recomputeUpdatedAt(){
+  let mx=""; const M=state.__meta||{};
+  for(const coll in M){ for(const t of ['u','d']){ const o=M[coll][t]||{}; for(const k in o){ if(o[k]>mx)mx=o[k]; } } }
+  state.updatedAt = mx || state.updatedAt || nowISO();
+}
+function mergeStates(A,B){
+  const R=_clone(A); R.__meta={};
+  const MA=A.__meta||{}, MB=B.__meta||{};
+  for(const [coll,cfg] of Object.entries(SYNC_COLLS)){
+    const ma=MA[coll]||{u:{},d:{}}, mb=MB[coll]||{u:{},d:{}};
+    const uA=ma.u||{},dA=ma.d||{},uB=mb.u||{},dB=mb.d||{};
+    const rm=R.__meta[coll]={u:{},d:{}};
+    const allKeys=new Set([...Object.keys(uA),...Object.keys(dA),...Object.keys(uB),...Object.keys(dB)]);
+    if(cfg.type==='array'||cfg.type==='arraykey'){
+      const kf=cfg.type==='array'?(r=>r.id):(r=>r[cfg.key]);
+      const ia=_idx(A[coll],kf), ib=_idx(B[coll],kf);
+      Object.keys(ia).forEach(k=>allKeys.add(k)); Object.keys(ib).forEach(k=>allKeys.add(k));
+      const out=[];
+      allKeys.forEach(k=>{
+        const alive=_maxs(uA[k],uB[k]), dead=_maxs(dA[k],dB[k]);
+        if(alive) rm.u[k]=alive; if(dead) rm.d[k]=dead;
+        if(dead && dead>=alive) return; // удалено
+        let rec = ((uA[k]||"")>=(uB[k]||"") && ia[k]!==undefined) ? ia[k] : (ib[k]!==undefined?ib[k]:ia[k]);
+        if(rec!=null) out.push(rec);
+      });
+      R[coll]=out;
+    } else if(cfg.type==='map'){
+      const oa=A[coll]||{}, ob=B[coll]||{};
+      Object.keys(oa).forEach(k=>allKeys.add(k)); Object.keys(ob).forEach(k=>allKeys.add(k));
+      const out={};
+      allKeys.forEach(k=>{
+        const alive=_maxs(uA[k],uB[k]), dead=_maxs(dA[k],dB[k]);
+        if(alive) rm.u[k]=alive; if(dead) rm.d[k]=dead;
+        if(dead && dead>=alive) return;
+        out[k] = ((uA[k]||"")>=(uB[k]||"") && (k in oa)) ? oa[k] : ((k in ob)?ob[k]:oa[k]);
+      });
+      R[coll]=out;
+    } else {
+      const a=uA["_"]||"", b=uB["_"]||""; if(_maxs(a,b)) rm.u["_"]=_maxs(a,b);
+      R[coll] = a>=b ? A[coll] : B[coll];
+    }
+  }
+  if(Array.isArray(R.netWorthHistory)) R.netWorthHistory.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+  return R;
 }
 
 /* ---------- lookups & derived ---------- */
@@ -431,6 +526,13 @@ function fixedSpend(k){ return groupSpend(k,"g1"); }
 
 const totalAssets=()=>state.assets.reduce((a,x)=>a+(+x.value||0),0);
 const liquidAssets=()=>state.assets.filter(a=>a.liquid).reduce((a,x)=>a+(+x.value||0),0);
+function setLiquidCash(v){
+  v=Math.max(0,Math.round(+v||0));
+  const liq=state.assets.filter(a=>a.liquid);
+  if(liq.length===1){ liq[0].value=v; }
+  else if(liq.length===0){ if(v>0) state.assets.push({id:uid(),name:"Счета и наличные",kind:"кэш",value:v,liquid:true}); }
+  else { const others=liq.slice(1).reduce((a,x)=>a+(+x.value||0),0); liq[0].value=Math.max(0,v-others); }
+}
 const totalLiab=()=>state.liabilities.reduce((a,x)=>a+(+x.balance||0),0);
 const netWorth=()=>totalAssets()-totalLiab();
 const totalMinPayment=()=>state.liabilities.reduce((a,x)=>a+(+x.minPayment||0),0);
@@ -627,7 +729,10 @@ function openMonthClose(k){
       <div id="clDebts">${liabs.map(x=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">было ${fmt(x.balance,{bare:true})}${x.minPayment?' · платёж '+fmt(x.minPayment,{bare:true}):''}</div></div>
         <input class="num" data-lb="${x.id}" inputmode="numeric" value="${suggestBalance(x)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join("")}</div>
       <small class="hint">Предложены расчётные остатки (проценты минус платёж). Поправьте, если платёж был другим или долг не уменьшился.</small></div>`:`<div class="infobox">Долгов нет — просто зафиксируем капитал за месяц.</div>`}
-    <div class="field"><button class="btn ghost block" id="clAssetsToggle" style="text-align:left">▸ Обновить стоимость активов (по желанию)</button>
+    <div class="field"><label>💵 Остаток на счетах на конец месяца</label>
+      <input class="num" id="clCash" inputmode="numeric" value="${Math.round(liquidAssets())}" style="width:100%;text-align:right;padding:12px;font-size:17px;font-weight:600">
+      <small class="hint">Сколько реально денег на счетах и наличными. Это стартовая точка «Прогноза денег» — важно держать актуальной.</small></div>
+    <div class="field"><button class="btn ghost block" id="clAssetsToggle" style="text-align:left">▸ Обновить стоимость других активов (по желанию)</button>
       <div id="clAssets" style="display:none;margin-top:10px">${assetRows.length?assetRows.map(a=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">сейчас ${fmt(a.value,{bare:true})}</div></div>
         <input class="num" data-av="${a.id}" inputmode="numeric" value="${Math.round(+a.value||0)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join(""):'<div class="empty">Активов нет</div>'}</div></div>
     <button class="btn primary block" id="clDo" style="padding:14px;font-size:16px;margin-top:6px">Закрыть месяц</button>`,
@@ -636,6 +741,7 @@ function openMonthClose(k){
     at.onclick=()=>{ const open=ab.style.display!=="none"; ab.style.display=open?"none":"block"; at.textContent=(open?"▸":"▾")+" Обновить стоимость активов (по желанию)"; };
     el.querySelector("#clDo").onclick=()=>{
       el.querySelectorAll("[data-lb]").forEach(inp=>{ const x=byId(state.liabilities,inp.dataset.lb); if(x){ const v=parseFloat(String(inp.value).replace(/\s/g,""))||0; x.balance=Math.max(0,v); } });
+      const cashV=parseFloat(String(el.querySelector("#clCash").value).replace(/\s/g,"")); if(!isNaN(cashV)) setLiquidCash(cashV);
       if(ab.style.display!=="none") el.querySelectorAll("[data-av]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.av); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
       performClose(k);
       closeSheet(); render_current(); toast("Месяц "+ymShort(k)+" закрыт");
@@ -1734,35 +1840,8 @@ const DBX = {
       if(!r.ok) throw new Error("upload "+r.status); setSync("ok"); if(manual)toast("Отправлено в Dropbox");
     }catch(e){ setSync("err"); if(manual)toast("Ошибка отправки в Dropbox"); console.warn(e); }
   },
-  async pull(manual){
-    if(!this.linked)return;
-    try{
-      const r=await this.api("https://content.dropboxapi.com/2/files/download",{method:"POST",headers:{"Dropbox-API-Arg":JSON.stringify({path:"/famfin.json"})}});
-      if(r.status===409){ setSync("ok"); if(manual)toast("В Dropbox ещё нет данных — отправляю текущие"); return this.push(); }
-      if(!r.ok) throw new Error("download "+r.status);
-      const remote=JSON.parse(await r.text());
-      if(remote&&remote.updatedAt){
-        if(!manual && remote.updatedAt<=state.updatedAt){ setSync("ok"); return; }
-        if(manual || remote.updatedAt>state.updatedAt){
-          if(!manual || confirm("Загрузить данные из Dropbox? Текущие локальные будут заменены (в Dropbox новее).")){
-            await applyRemote(remote, true); return;
-          }
-        }
-      }
-      setSync("ok");
-    }catch(e){ setSync("err"); if(manual)toast("Ошибка загрузки из Dropbox"); console.warn(e); }
-  },
-  async forcePull(){
-    if(!this.linked)return;
-    try{ setSync("dirty");
-      const r=await this.api("https://content.dropboxapi.com/2/files/download",{method:"POST",headers:{"Dropbox-API-Arg":JSON.stringify({path:"/famfin.json"})}});
-      if(r.status===409){ setSync("ok"); toast("В Dropbox ещё нет данных"); return; }
-      if(!r.ok) throw new Error("dl "+r.status);
-      const remote=JSON.parse(await r.text());
-      if(remote&&remote.updatedAt){ await applyRemote(remote, true); }
-      else { setSync("ok"); toast("В Dropbox пустая база"); }
-    }catch(e){ setSync("err"); toast("Ошибка загрузки"); console.warn(e); }
-  },
+  async pull(manual){ return this.syncNow(manual); },
+  async forcePull(){ return this.syncNow(true); },
   async syncNow(manual){
     if(!this.linked){ if(manual)go("settings"); return; }
     try{ setSync("dirty");
@@ -1770,11 +1849,8 @@ const DBX = {
       if(r.status===409){ await this.push(); setSync("ok"); if(manual)toast("Отправлено в Dropbox"); return; }
       if(!r.ok) throw new Error("download "+r.status);
       const remote=JSON.parse(await r.text());
-      if(remote&&remote.updatedAt){
-        if(remote.updatedAt>state.updatedAt){ await applyRemote(remote, manual); return; }
-        if(remote.updatedAt<state.updatedAt){ await this.push(); setSync("ok"); if(manual)toast("Отправлено в Dropbox"); return; }
-      }
-      setSync("ok"); if(manual)toast("Уже синхронно");
+      if(remote&&remote.updatedAt){ await applyRemote(remote, manual); }
+      else { await this.push(); setSync("ok"); if(manual)toast("Отправлено в Dropbox"); }
     }catch(e){ setSync("err"); if(manual)toast("Ошибка синхронизации"); console.warn(e); }
   },
   unlink(){ if(!confirm("Отключить Dropbox? Локальные данные останутся."))return; this.token=this.refresh=this.account=null; this.linked=false; localStorage.removeItem(LS_DBX); setSync(null); toast("Dropbox отключён"); render_current(); }
@@ -1821,9 +1897,18 @@ const CRYPT = {
 // расшифровать удалённые данные Dropbox (или вернуть как есть, если не зашифровано)
 async function decodeRemote(parsed){ return (parsed && parsed.__enc) ? await CRYPT.unwrap(parsed) : parsed; }
 // применить удалённое состояние с расшифровкой и обработкой ошибок
+function metaAhead(a,b){ a=a||{}; b=b||{}; for(const coll in a){ for(const t of ['u','d']){ const mo=a[coll][t]||{}, ro=(b[coll]||{})[t]||{}; for(const k in mo){ if(!(k in ro) || mo[k]>ro[k]) return true; } } } return false; }
 async function applyRemote(remote, manual){
-  try{ const obj=await decodeRemote(remote); state=migrate(obj); save(false); setSync("ok"); render_current(); if(manual)toast("Загружено из Dropbox"); return true; }
-  catch(err){
+  try{
+    const obj=await decodeRemote(remote);
+    const rem=migrate(obj); if(!rem.__meta) buildMetaBaseline(rem);
+    const merged=mergeStates(state, rem);
+    const ahead=metaAhead(merged.__meta, rem.__meta);   // есть ли у нас данные, которых нет в облаке
+    state=merged; __lastSaved=_clone(state);
+    save(false);
+    if(DBX.linked && ahead) DBX.push();
+    setSync("ok"); render_current(); if(manual)toast("Синхронизировано"); return true;
+  }catch(err){
     if(err && err.message==="no-pass"){ setSync("ok"); showEncGate(remote); return false; }
     setSync("err"); if(manual)toast("Не удалось расшифровать данные из Dropbox — код не совпадает"); console.warn(err); return false;
   }
@@ -1849,7 +1934,7 @@ function showEncGate(env){
     try{
       CRYPT.on=true; CRYPT.saltB64=env.salt; CRYPT.pass=v; CRYPT.keyCache={};
       const obj = await CRYPT.unwrap(env);
-      state = migrate(obj); save(false);
+      state = migrate(obj); if(!state.__meta||!Object.keys(state.__meta).length) buildMetaBaseline(state); __lastSaved=_clone(state); save(false);
       try{localStorage.setItem(LS_GATE,"1");}catch(e){}
       g.classList.remove("show"); bootApp();
     }catch(err){ CRYPT.pass=null; CRYPT.keyCache={}; ok.disabled=false; fail(); }
@@ -1973,6 +2058,8 @@ function securityBoot(){
   showGate("gate");
 }
 
+if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
+__lastSaved=_clone(state);
 DBX.boot();
 if(__encEnv){ showEncGate(__encEnv); }
 else { securityBoot(); }
