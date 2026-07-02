@@ -179,6 +179,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 #gate .gbtn{width:46px;height:46px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);display:grid;place-items:center;font-size:20px;color:var(--ink2)}
 #gate .gface{font-size:14px;color:var(--ink3);background:none;border:none;text-decoration:underline}
 #gate.shake .gbox{animation:shk .35s}
+#gate .gmsg{font-size:13px;color:var(--red);min-height:16px;text-align:center;margin-top:-6px}
 @keyframes shk{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}60%{transform:translateX(8px)}}
 .donut-wrap{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
 .legend{flex:1;min-width:160px;display:flex;flex-direction:column;gap:7px}
@@ -274,6 +275,7 @@ const LS_DBX = "famfin.dbx";
 const LS_ME  = "famfin.me";   // текущий участник — локально на устройстве, НЕ синхронизируется
 const LS_GATE= "famfin.gate"; // заглушка пройдена на этом браузере
 const LS_FACEID="famfin.faceid"; // id ключа Face ID для этого браузера
+const LS_ENCFACE="famfin.encface"; // код шифрования, хранимый на устройстве для входа по Face ID
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -368,16 +370,22 @@ function seedState(){
 }
 
 /* ---------- persistence ---------- */
+let __encEnv=null;
 let state = load();
 function load(){
-  try{ const raw=localStorage.getItem(LS_KEY); if(raw){ const s=JSON.parse(raw); return migrate(s);} }catch(e){}
+  try{ const raw=localStorage.getItem(LS_KEY); if(raw){ const s=JSON.parse(raw); if(s&&s.__enc){ __encEnv=s; return seedState(); } return migrate(s);} }catch(e){}
   const s=seedState(); try{localStorage.setItem(LS_KEY,JSON.stringify(s));}catch(e){} return s;
 }
-function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.incomePlans=s.incomePlans||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; return s; }
+function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.incomePlans=s.incomePlans||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[]; sanitizeState(s); return s; }
 let saveTimer=null, dbxTimer=null;
+async function persistLocal(){
+  try{ const str = CRYPT.on ? await CRYPT.wrap(state) : JSON.stringify(state); localStorage.setItem(LS_KEY, str); }
+  catch(e){ toast("Не удалось сохранить локально"); }
+}
 function save(pushCloud=true){
   state.updatedAt=nowISO();
-  try{ localStorage.setItem(LS_KEY,JSON.stringify(state)); }catch(e){ toast("Не удалось сохранить локально"); }
+  if(CRYPT.on){ persistLocal(); }
+  else { try{ localStorage.setItem(LS_KEY,JSON.stringify(state)); }catch(e){ toast("Не удалось сохранить локально"); } }
   if(pushCloud && DBX.linked){ setSync("dirty"); clearTimeout(dbxTimer); dbxTimer=setTimeout(()=>DBX.push(),1500); }
 }
 
@@ -402,7 +410,7 @@ const MEMBER_COLORS=["#3D7BE0","#2E9E6B","#C68A12","#9163C9","#2494B0","#D6743E"
 const memberById=id=>byId(state.members,id);
 function curMember(){ let id=null; try{id=localStorage.getItem(LS_ME);}catch(e){} if(id&&memberById(id))return id; return state.members[0]?state.members[0].id:null; }
 function setCurMember(id){ try{localStorage.setItem(LS_ME,id||"");}catch(e){} }
-function memberBadge(id,mini){ const m=memberById(id); if(!m)return ""; return '<span class="mbadge" style="background:'+tint(m.color,16)+';color:'+m.color+';border-color:'+tint(m.color,40)+'">'+(m.emoji||"👤")+(mini?"":" "+esc(m.name))+'</span>'; }
+function memberBadge(id,mini){ const m=memberById(id); if(!m)return ""; return '<span class="mbadge" style="background:'+tint(m.color,16)+';color:'+esc(m.color)+';border-color:'+tint(m.color,40)+'">'+esc(m.emoji||"👤")+(mini?"":" "+esc(m.name))+'</span>'; }
 function memberSpend(k,mid,type){ return txnsOfMonth(k).filter(t=>t.memberId===mid&&(type?t.type===type:true)).reduce((a,t)=>a+(+t.amount||0),0); }
 
 function txnsOfMonth(k){ return state.txns.filter(t=>ym(t.date)===k); }
@@ -478,6 +486,16 @@ let toastTimer=null;
 function toast(msg){ const t=document.getElementById("toast"); t.textContent=msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove("show"),2200); }
 function h(html){ const t=document.createElement("template"); t.innerHTML=html.trim(); return t.content.firstChild; }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function safeGlyph(x){ return String(x==null?"":x).replace(/[<>"'&]/g,"").slice(0,12); }
+function safeColor(x){ x=String(x==null?"":x).trim(); return (/^#[0-9a-fA-F]{3,8}$/.test(x)||/^var\(--[a-z0-9-]+\)$/.test(x))?x:""; }
+function sanitizeState(s){
+  try{
+    (s.members||[]).forEach(m=>{ m.emoji=safeGlyph(m.emoji)||"👤"; m.color=safeColor(m.color)||"#3D7BE0"; });
+    (s.categories||[]).forEach(c=>{ if(c.icon!=null) c.icon=safeGlyph(c.icon)||"•"; });
+    (s.groups||[]).forEach(g=>{ if(g.color!=null){ const c=safeColor(g.color); if(!c) g.color="var(--ink3)"; } });
+  }catch(e){}
+  return s;
+}
 
 /* ---------- sheet system ---------- */
 const scrim=document.getElementById("scrim"), sheetEl=document.getElementById("sheet");
@@ -629,7 +647,7 @@ function openMemberPicker(){
   }
   const cur=curMember();
   openSheet('<h3>Кто я на этом устройстве</h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Выбор запоминается только на этом устройстве и не меняет его у других.</p><div class="opts" style="flex-direction:column">'+
-    state.members.map(m=>'<button class="btn block '+(m.id===cur?'':'')+'" style="justify-content:flex-start;gap:10px;'+(m.id===cur?'border-color:'+m.color+';color:'+m.color:'')+'" data-m="'+m.id+'"><span style="font-size:18px">'+(m.emoji||"👤")+'</span>'+esc(m.name)+(m.id===cur?' ✓':'')+'</button>').join("")+
+    state.members.map(m=>'<button class="btn block '+(m.id===cur?'':'')+'" style="justify-content:flex-start;gap:10px;'+(m.id===cur?'border-color:'+esc(m.color)+';color:'+esc(m.color):'')+'" data-m="'+m.id+'"><span style="font-size:18px">'+esc(m.emoji||"👤")+'</span>'+esc(m.name)+(m.id===cur?' ✓':'')+'</button>').join("")+
     '</div>', el=>{ el.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{ setCurMember(b.dataset.m); closeSheet(); renderMe(); toast("Теперь вы: "+memberById(b.dataset.m).name); }); });
 }
 function editMember(id){
@@ -672,7 +690,7 @@ function openAddTxn(preset){
       <div class="field">
         <label>${draft.type==='income'?'Источник дохода':'Категория'}</label>
         <div class="opts" id="catOpts">
-          ${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${c.icon||'•'} ${esc(c.name)}</button>`).join("")}
+          ${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}
           ${draft.type==='income'?`<button class="opt" data-cat="__addsrc">＋ источник</button>`:''}
         </div>
       </div>
@@ -682,7 +700,7 @@ function openAddTxn(preset){
         </div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
       ${state.members.length?`<div class="field"><label>Кто</label><div class="opts" id="whoOpts">
-          ${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${m.emoji||'👤'} ${esc(m.name)}</button>`).join("")}
+          ${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${esc(m.emoji||'👤')} ${esc(m.name)}</button>`).join("")}
         </div></div>`:''}
       <div class="field"><label>Комментарий</label><input id="cm" placeholder="необязательно" value="${esc(draft.comment)}"></div>
       <button class="btn primary block" id="saveTxn" style="padding:14px;font-size:16px;margin-top:4px">Сохранить</button>
@@ -717,10 +735,10 @@ function editTxn(id){
       <div class="seg" style="margin-bottom:12px"><button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button><button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button></div>
       <input class="amount-big num" id="amt" inputmode="decimal" value="${esc(String(draft.amount))}">
       </div>
-      <div class="field"><label>${draft.type==='income'?'Источник дохода':'Категория'}</label><div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${c.icon||'•'} ${esc(c.name)}</button>`).join("")}</div></div>
+      <div class="field"><label>${draft.type==='income'?'Источник дохода':'Категория'}</label><div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}</div></div>
       ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts">${subs.map(s=>`<button class="opt ${draft.subId===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
-      ${state.members.length?`<div class="field"><label>Кто</label><div class="opts">${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${m.emoji||'👤'} ${esc(m.name)}</button>`).join("")}</div></div>`:''}
+      ${state.members.length?`<div class="field"><label>Кто</label><div class="opts">${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${esc(m.emoji||'👤')} ${esc(m.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Комментарий</label><input id="cm" value="${esc(draft.comment||'')}"></div>
       <button class="btn primary block" id="upd" style="padding:13px;margin-top:4px">Сохранить</button>
       <button class="btn danger block" id="del" style="margin-top:8px">Удалить операцию</button>
@@ -832,34 +850,61 @@ function dueRecurring(k){ return (state.recurring||[]).filter(r=>r.active!==fals
 /* ============================================================
    PAGE: ОПЕРАЦИИ
    ============================================================ */
-let opsFilter={cat:null,q:""};
+let opsFilter={type:null,cat:null,sub:null,member:null,q:""};
 function pgOps(v){
   const k=curMonth;
   v.appendChild(h(`<div class="page-title">Операции</div><div class="page-sub">${ymLabel(k)} · вся лента доходов и расходов</div>`));
-  let list=txnsOfMonth(k).slice().sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
-  const inc=sumTxns(list,"income"),exp=list.filter(t=>t.type==="expense").reduce((a,t)=>a+ +t.amount,0);
-  v.appendChild(h(`<div class="grid g3" style="margin-bottom:14px">
-    ${kpiCard("Доходы",fmt(inc),list.filter(t=>t.type==='income').length+" оп.","pos")}
-    ${kpiCard("Расходы",fmt(exp),list.filter(t=>t.type==='expense').length+" оп.","")}
+  const all=txnsOfMonth(k);
+  const inc=sumTxns(all,"income"),exp=all.filter(t=>t.type==="expense").reduce((a,t)=>a+ +t.amount,0);
+  v.appendChild(h(`<div class="grid g3" style="margin-bottom:12px">
+    ${kpiCard("Доходы",fmt(inc),all.filter(t=>t.type==='income').length+" оп.","pos")}
+    ${kpiCard("Расходы",fmt(exp),all.filter(t=>t.type==='expense').length+" оп.","")}
     ${kpiCard("Итог",fmt(inc-exp,{plus:true}),"приход − расход",inc-exp>=0?"pos":"neg")}
   </div>`));
-  // filter chips
-  const usedCats=[...new Set(list.map(t=>t.categoryId))];
-  const chips=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${!opsFilter.cat?'active':''}" data-c="">Все</button>${usedCats.map(c=>`<button class="chip ${opsFilter.cat===c?'active':''}" data-c="${c}">${catIcon(c)} ${esc(catName(c))}</button>`).join("")}</div>`);
-  chips.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{opsFilter.cat=b.dataset.c||null;render_current();});
-  v.appendChild(chips);
-  const search=h(`<div class="field" style="margin:8px 0 4px"><input id="opsQ" placeholder="🔎 Поиск по комментарию…" value="${esc(opsFilter.q)}"></div>`);
+
+  const fbox=h(`<div></div>`);
+  // тип
+  const typeRow=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${!opsFilter.type?'active':''}" data-t="">Все</button><button class="chip ${opsFilter.type==='income'?'active':''}" data-t="income">↑ Доходы</button><button class="chip ${opsFilter.type==='expense'?'active':''}" data-t="expense">↓ Расходы</button></div>`);
+  typeRow.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>{ opsFilter.type=b.dataset.t||null; opsFilter.cat=null; opsFilter.sub=null; render_current(); });
+  fbox.appendChild(typeRow);
+  // участники
+  if(state.members.length){
+    const memRow=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${!opsFilter.member?'active':''}" data-m="">Все участники</button>${state.members.map(m=>`<button class="chip ${opsFilter.member===m.id?'active':''}" data-m="${m.id}">${esc(m.emoji||'👤')} ${esc(m.name)}</button>`).join("")}</div>`);
+    memRow.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{ opsFilter.member=b.dataset.m||null; render_current(); });
+    fbox.appendChild(memRow);
+  }
+  // категории (с учётом типа)
+  const baseForCats=all.filter(t=>!opsFilter.type||t.type===opsFilter.type);
+  const usedCats=[...new Set(baseForCats.map(t=>t.categoryId))];
+  const catRow=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${!opsFilter.cat?'active':''}" data-c="">Все статьи</button>${usedCats.map(c=>`<button class="chip ${opsFilter.cat===c?'active':''}" data-c="${c}">${esc(catIcon(c))} ${esc(catName(c))}</button>`).join("")}</div>`);
+  catRow.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{ opsFilter.cat=b.dataset.c||null; opsFilter.sub=null; render_current(); });
+  fbox.appendChild(catRow);
+  // подкатегории выбранной категории
+  if(opsFilter.cat){
+    const usedSubs=[...new Set(baseForCats.filter(t=>t.categoryId===opsFilter.cat&&t.subId).map(t=>t.subId))];
+    if(usedSubs.length){
+      const subRow=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${!opsFilter.sub?'active':''}" data-s="">Все подкатегории</button>${usedSubs.map(sd=>`<button class="chip ${opsFilter.sub===sd?'active':''}" data-s="${sd}">${esc(subName(sd))}</button>`).join("")}</div>`);
+      subRow.querySelectorAll("[data-s]").forEach(b=>b.onclick=()=>{ opsFilter.sub=b.dataset.s||null; render_current(); });
+      fbox.appendChild(subRow);
+    }
+  }
+  v.appendChild(fbox);
+  const search=h(`<div class="field" style="margin:4px 0"><input id="opsQ" placeholder="🔎 Поиск по комментарию…" value="${esc(opsFilter.q)}"></div>`);
   v.appendChild(search);
   search.querySelector("#opsQ").oninput=e=>{opsFilter.q=e.target.value; renderOpsList();};
   const cont=h(`<div class="card" id="opsList"></div>`); v.appendChild(cont);
   function renderOpsList(){
     let l=txnsOfMonth(k).slice().sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
+    if(opsFilter.type) l=l.filter(t=>t.type===opsFilter.type);
+    if(opsFilter.member) l=l.filter(t=>t.memberId===opsFilter.member);
     if(opsFilter.cat) l=l.filter(t=>t.categoryId===opsFilter.cat);
+    if(opsFilter.sub) l=l.filter(t=>t.subId===opsFilter.sub);
     if(opsFilter.q) l=l.filter(t=>((t.comment||"")+catName(t.categoryId)+subName(t.subId)).toLowerCase().includes(opsFilter.q.toLowerCase()));
     const box=document.getElementById("opsList"); box.innerHTML="";
     if(!l.length){ box.appendChild(h(`<div class="empty"><div class="big">🗂️</div>Нет операций по фильтру за этот месяц.</div>`)); return; }
-    let lastDate="";
-    l.forEach(t=>{ if(t.date!==lastDate){ box.appendChild(h(`<div class="eyebrow" style="margin:14px 0 4px">${esc(fullDate(t.date))}</div>`)); lastDate=t.date; } box.appendChild(txnRow(t)); });
+    const fi=l.filter(t=>t.type==='income').reduce((a,t)=>a+ +t.amount,0), fe=l.filter(t=>t.type==='expense').reduce((a,t)=>a+ +t.amount,0);
+    box.appendChild(h(`<div class="linrow" style="padding:2px 2px 10px;border-bottom:1px solid var(--line);font-size:12px"><span class="dim">Найдено: ${l.length}</span><span class="num dim">${fi?'+'+fmt(fi,{bare:true}):''}${fi&&fe?' · ':''}${fe?'−'+fmt(fe,{bare:true}):''}</span></div>`));
+    let lastDate=""; l.forEach(t=>{ if(t.date!==lastDate){ box.appendChild(h(`<div class="eyebrow" style="margin:14px 0 4px">${esc(fullDate(t.date))}</div>`)); lastDate=t.date; } box.appendChild(txnRow(t)); });
   }
   renderOpsList();
 }
@@ -907,7 +952,7 @@ function pgPlan(v){
       const subs=subsOf(c.id);
       if(subs.length){
         const cTot=subs.reduce((a,su)=>a+(+plan[su.id]||0),0);
-        card.appendChild(h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600"><span>${c.icon||'•'} ${esc(c.name)}</span><span class="num dim" style="font-size:12px">${fmt(cTot)}</span></div>`));
+        card.appendChild(h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600"><span>${esc(c.icon||'•')} ${esc(c.name)}</span><span class="num dim" style="font-size:12px">${fmt(cTot)}</span></div>`));
         subs.forEach(su=>{
           const row=h(`<div class="lrow" style="padding-left:8px"><div class="ic" style="width:24px;height:24px;font-size:11px;background:${tint(g.color,10)};color:${g.color}">•</div>
             <div class="t1" style="flex:1">${esc(su.name)}</div>
@@ -915,7 +960,7 @@ function pgPlan(v){
           wirePlan(row); card.appendChild(row);
         });
       } else {
-        const row=h(`<div class="lrow"><div class="ic" style="background:${tint(g.color,13)};color:${g.color}">${c.icon||'•'}</div>
+        const row=h(`<div class="lrow"><div class="ic" style="background:${tint(g.color,13)};color:${g.color}">${esc(c.icon||'•')}</div>
           <div class="t1" style="flex:1">${esc(c.name)}</div>
           <input class="num right" style="width:130px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[c.id]?plan[c.id]:''}" data-plan="${c.id}"></div>`);
         wirePlan(row); card.appendChild(row);
@@ -953,6 +998,21 @@ function pgFact(v){
   </div>`));
   if(planT===0 && factT===0){ v.appendChild(h(`<div class="card"><div class="empty"><div class="big">🎚️</div>Плановый бюджет не задан и расходов пока нет.<br>Откройте «План», чтобы поставить лимиты, — здесь появится план/факт со светофором.<br><button class="btn primary sm" style="margin-top:12px" data-nav="plan">К плану →</button></div></div>`)); return; }
   if(planT===0){ v.appendChild(h(`<div class="infobox">Плановый бюджет на месяц не задан — ниже показан только факт по категориям. Лимиты можно поставить во вкладке «План».</div>`)); }
+  // расходы: сводка план/факт по группам
+  const egCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grp1);display:inline-block"></span>Расходы · план/факт</h3></div>`);
+  let anyEG=false;
+  expenseGroups().forEach(g=>{
+    let pl=0; catsOf(g.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>pl+=(+plan[su.id]||0)); else pl+=(+plan[c.id]||0); });
+    const fc=groupSpend(k,g.id); if(pl===0&&fc===0) return; anyEG=true;
+    const ratio=pl?fc/pl:(fc>0?1.5:0), cls=ratio>1?"bad":(ratio>0.9?"warn":""), rest=pl-fc;
+    egCard.appendChild(h(`<div style="padding:9px 2px;border-bottom:1px solid var(--line)">
+      <div class="linrow"><span>${esc(g.name)}</span><span class="num" style="color:${rest<0?'var(--red)':'var(--ink2)'};font-weight:600">${rest<0?'−'+fmt(-rest,{bare:true})+' сверх':'осталось '+fmt(rest,{bare:true})}</span></div>
+      <div class="meter ${cls}"><span style="width:${clamp(ratio*100,0,100)}%;background:${g.color}"></span></div>
+      <div class="linrow" style="margin-top:5px;font-size:11.5px"><span class="dim num">Факт ${fmt(fc)}</span><span class="dim num">План ${fmt(pl)} · ${pct(ratio)}</span></div>
+    </div>`));
+  });
+  if(anyEG) v.appendChild(egCard);
+
   expenseGroups().forEach(g=>{
     const cats=catsOfAll(g.id);
     const lines=[];
@@ -1066,7 +1126,7 @@ function pgDash(v){
     if(any){
       const tbl=h(`<table class="tbl"><thead><tr><th>Кто</th><th class="right">Расход</th><th class="right">Доход</th></tr></thead><tbody></tbody></table>`);
       const tb=tbl.querySelector("tbody");
-      rows.filter(r=>r.exp||r.inc).forEach(r=>tb.appendChild(h(`<tr><td><span style="color:${r.m.color}">${r.m.emoji||'👤'}</span> ${esc(r.m.name)}</td><td class="right num">${r.exp?fmt(r.exp,{bare:true}):'—'}</td><td class="right num" style="color:var(--green)">${r.inc?fmt(r.inc,{bare:true}):'—'}</td></tr>`)));
+      rows.filter(r=>r.exp||r.inc).forEach(r=>tb.appendChild(h(`<tr><td><span style="color:${esc(r.m.color)}">${esc(r.m.emoji||'👤')}</span> ${esc(r.m.name)}</td><td class="right num">${r.exp?fmt(r.exp,{bare:true}):'—'}</td><td class="right num" style="color:var(--green)">${r.inc?fmt(r.inc,{bare:true}):'—'}</td></tr>`)));
       if(un.exp||un.inc)tb.appendChild(h(`<tr><td class="dim">автор не указан</td><td class="right num dim">${un.exp?fmt(un.exp,{bare:true}):'—'}</td><td class="right num dim">${un.inc?fmt(un.inc,{bare:true}):'—'}</td></tr>`));
       mc.appendChild(tbl);
     } else mc.appendChild(h(`<div class="empty" style="padding:16px">Пока нет операций с автором за ${ymShort(k)}. Отмечайте «Кто» при вводе — здесь появится разбивка.</div>`));
@@ -1375,7 +1435,7 @@ function pgSettings(v){
   // participants
   const pc=h(`<div class="card"><h3>Участники <span class="tag">кто ведёт учёт</span></h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Добавьте членов семьи — в операциях можно отмечать автора, а в дашборде видеть, кто сколько тратит и зарабатывает.</p></div>`);
   state.members.forEach(m=>{
-    const row=h(`<div class="lrow"><div class="ic" style="background:${tint(m.color,16)};color:${m.color}">${m.emoji||'👤'}</div>
+    const row=h(`<div class="lrow"><div class="ic" style="background:${tint(m.color,16)};color:${esc(m.color)}">${esc(m.emoji||'👤')}</div>
       <div class="t1" style="flex:1">${esc(m.name)}${curMember()===m.id?' <span class="pill g" style="padding:1px 7px;font-size:10px">это я на этом устройстве</span>':''}</div>
       <button class="iconbtn" data-edit>✎</button></div>`);
     row.querySelector("[data-edit]").onclick=()=>editMember(m.id);
@@ -1407,7 +1467,7 @@ function pgSettings(v){
     const gEl=h(`<div style="margin-bottom:10px"><div class="linrow" style="padding:8px 2px"><span style="font-weight:700;color:${g.color}">● ${esc(g.name)}</span><button class="btn sm ghost" data-addcat>＋ категория</button></div></div>`);
     catsOf(g.id).forEach(c=>{
       const row=h(`<div style="padding:8px 2px 8px 12px;border-left:2px solid var(--line2);margin-left:4px">
-        <div class="row"><span style="font-size:15px">${c.icon||'•'}</span><span style="font-weight:600;flex:1">${esc(c.name)}</span>
+        <div class="row"><span style="font-size:15px">${esc(c.icon||'•')}</span><span style="font-weight:600;flex:1">${esc(c.name)}</span>
           <button class="iconbtn" data-editcat title="переименовать">✎</button><button class="iconbtn" data-delcat title="удалить">🗑</button></div>
         <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px;padding-left:26px">
           ${subsOf(c.id).map(s=>`<span class="pill" data-sub="${s.id}" style="cursor:pointer">${esc(s.name)} <span style="opacity:.5">✕</span></span>`).join("")}
@@ -1426,9 +1486,12 @@ function pgSettings(v){
 
   // data + sync
   const dc=h(`<div class="card"><h3>Данные и резервные копии</h3>
+    <button class="btn primary block" id="expXlsx" style="padding:12px">📊 Выгрузить в Excel (.xlsx)</button>
+    <p class="muted" style="font-size:12.5px;margin:8px 0 12px">Таблицы для просмотра и анализа в Excel или Numbers: операции, помесячная сводка, активы, пассивы, цели. Открывается прямо на телефоне.</p>
     <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="exp">⬇ Экспорт JSON</button><button class="btn" id="imp">⬆ Импорт JSON</button></div>
-    <p class="muted" style="font-size:12.5px;margin-top:10px">Данные хранятся в этом браузере и сохраняются автоматически после каждого изменения. Экспорт — резервная копия и перенос между устройствами вручную.</p>
+    <p class="muted" style="font-size:12.5px;margin-top:10px">JSON — полная резервная копия для восстановления и переноса между устройствами. Выгрузки сохраняются в <b>открытом виде</b> (без шифрования) — храните их в надёжном месте.</p>
     <input type="file" id="impFile" accept="application/json,.json" class="hidden"></div>`);
+  dc.querySelector("#expXlsx").onclick=exportXLSX;
   dc.querySelector("#exp").onclick=exportJSON;
   dc.querySelector("#imp").onclick=()=>dc.querySelector("#impFile").click();
   dc.querySelector("#impFile").onchange=importJSON;
@@ -1467,6 +1530,29 @@ function pgSettings(v){
   }
   v.appendChild(lk);
 
+  // encryption
+  const encOn=CRYPT.on; const faceEncOn=!!localStorage.getItem(LS_ENCFACE);
+  const ec=h(`<div class="card"><h3>Шифрование данных ${encOn?'<span class="pill g" style="margin-left:auto">включено</span>':'<span class="pill" style="margin-left:auto">выключено</span>'}</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Настоящая защита: данные шифруются кодом и становятся нечитаемы без него — и на устройстве, и в Dropbox. Код нигде не хранится; забудете — данные восстановить нельзя. На всех устройствах используйте один и тот же код.</p>
+    ${encOn?`<button class="btn block" id="encFace" style="margin-bottom:8px">${faceEncOn?'Face ID для входа: включён ✓ — отключить':'🙂 Разблокировать по Face ID на этом устройстве'}</button>
+      <p class="muted" style="font-size:11.5px;margin:-2px 0 10px">При входе по Face ID код хранится на этом устройстве, поэтому локальная защита опирается на замок телефона и Face ID. Копия в Dropbox остаётся полностью зашифрованной.</p>
+      <div class="row" style="gap:8px;flex-wrap:wrap"><button class="btn" id="encChg">Сменить код</button><button class="btn danger" id="encOff">Отключить</button></div>`
+      :`<button class="btn primary block" id="encEnable">Включить шифрование</button>`}
+  </div>`);
+  if(encOn){
+    ec.querySelector("#encFace").onclick=async()=>{
+      if(faceEncOn){ localStorage.removeItem(LS_ENCFACE); toast("Вход по Face ID отключён"); render_current(); return; }
+      if(!(await faceIdAvailable())){ toast("Face ID недоступен: нужен HTTPS и Safari"); return; }
+      try{ await faceIdRegister(); localStorage.setItem(LS_ENCFACE,_obf(CRYPT.pass)); toast("Face ID подключён — код сохранён на устройстве"); render_current(); }
+      catch(e){ toast("Не удалось подключить Face ID"); }
+    };
+    ec.querySelector("#encChg").onclick=()=>askEncPass("Новый код шифрования","После смены введите новый код и на других устройствах.",async(code)=>{ CRYPT.pass=code; CRYPT.saltB64=CRYPT._b64(crypto.getRandomValues(new Uint8Array(16))); CRYPT.keyCache={}; await persistLocal(); if(DBX.linked) await DBX.push(true); if(localStorage.getItem(LS_ENCFACE)) localStorage.setItem(LS_ENCFACE,_obf(code)); toast("Код шифрования изменён"); render_current(); });
+    ec.querySelector("#encOff").onclick=()=>{ if(confirm("Отключить шифрование? Данные снова будут храниться в открытом виде.")){ localStorage.removeItem(LS_ENCFACE); CRYPT.disable().then(()=>{ toast("Шифрование отключено"); render_current(); }); } };
+  } else {
+    ec.querySelector("#encEnable").onclick=()=>askEncPass("Код шифрования","Придумайте код — им будут зашифрованы все данные. Запомните его: без кода данные не открыть. Совет: используйте тот же код, что на входе.",async(code)=>{ await CRYPT.enable(code); toast("Шифрование включено"); render_current(); });
+  }
+  v.appendChild(ec);
+
   // reset
   const rc=h(`<div class="card"><h3>Сброс</h3><button class="btn danger block" id="reset">Очистить все данные и вернуть демо-структуру</button></div>`);
   rc.querySelector("#reset").onclick=()=>{ if(confirm("Удалить ВСЕ данные и вернуть стартовую структуру? Это необратимо (сделайте экспорт заранее).")){ localStorage.removeItem(LS_KEY); state=seedState(); save(false); toast("Сброшено"); render_current(); } };
@@ -1475,6 +1561,91 @@ function pgSettings(v){
   v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">Семейная финансовая ERP · данные остаются у вас</p>`));
 }
 function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="famfin-"+todayISOdate()+".json"; a.click(); toast("Экспортировано"); }
+
+/* ---------- Экспорт в Excel (.xlsx) без внешних библиотек ---------- */
+function xmlEsc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c])); }
+function colRef(n){ let s=""; n++; while(n>0){ const m=(n-1)%26; s=String.fromCharCode(65+m)+s; n=Math.floor((n-1)/26); } return s; }
+function wsXML(rows){
+  let x='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>';
+  rows.forEach((row,ri)=>{ x+='<row r="'+(ri+1)+'">';
+    row.forEach((val,ci)=>{ const ref=colRef(ci)+(ri+1);
+      if(typeof val==="number" && isFinite(val)) x+='<c r="'+ref+'"><v>'+val+'</v></c>';
+      else x+='<c r="'+ref+'" t="inlineStr"><is><t xml:space="preserve">'+xmlEsc(val)+'</t></is></c>';
+    });
+    x+='</row>';
+  });
+  return x+'</sheetData></worksheet>';
+}
+const _CRCT=(()=>{ const t=[]; for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++)c=c&1?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } return t; })();
+function crc32(b){ let c=0xFFFFFFFF; for(let i=0;i<b.length;i++)c=_CRCT[(c^b[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+function zipStore(files){
+  const enc=new TextEncoder(); const u16=n=>[n&255,(n>>8)&255], u32=n=>[n&255,(n>>8)&255,(n>>16)&255,(n>>24)&255];
+  const parts=[], central=[]; let offset=0;
+  files.forEach(f=>{ const nb=enc.encode(f.name), data=f.data, crc=crc32(data);
+    const local=[0x50,0x4b,0x03,0x04,...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(data.length),...u32(data.length),...u16(nb.length),...u16(0)];
+    parts.push(new Uint8Array(local),nb,data);
+    central.push(new Uint8Array([0x50,0x4b,0x01,0x02,...u16(20),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(data.length),...u32(data.length),...u16(nb.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(offset)]), nb);
+    offset += local.length+nb.length+data.length;
+  });
+  let cs=0; central.forEach(c=>cs+=c.length); const co=offset;
+  const end=new Uint8Array([0x50,0x4b,0x05,0x06,...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(cs),...u32(co),...u16(0)]);
+  const all=[...parts,...central,end]; let total=0; all.forEach(c=>total+=c.length);
+  const out=new Uint8Array(total); let p=0; all.forEach(c=>{out.set(c,p);p+=c.length;}); return out;
+}
+function buildXLSX(sheets){
+  const enc=new TextEncoder(); const files=[];
+  const ct='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'+sheets.map((s,i)=>'<Override PartName="/xl/worksheets/sheet'+(i+1)+'.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>').join("")+'</Types>';
+  files.push({name:"[Content_Types].xml",data:enc.encode(ct)});
+  files.push({name:"_rels/.rels",data:enc.encode('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')});
+  const wb='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'+sheets.map((s,i)=>'<sheet name="'+xmlEsc(s.name)+'" sheetId="'+(i+1)+'" r:id="rId'+(i+1)+'"/>').join("")+'</sheets></workbook>';
+  files.push({name:"xl/workbook.xml",data:enc.encode(wb)});
+  const wbr='<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'+sheets.map((s,i)=>'<Relationship Id="rId'+(i+1)+'" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet'+(i+1)+'.xml"/>').join("")+'</Relationships>';
+  files.push({name:"xl/_rels/workbook.xml.rels",data:enc.encode(wbr)});
+  sheets.forEach((s,i)=>files.push({name:"xl/worksheets/sheet"+(i+1)+".xml",data:enc.encode(wsXML(s.rows))}));
+  return zipStore(files);
+}
+function buildWorkbookSheets(){
+  const sheets=[];
+  // Операции
+  const opRows=[["Дата","Тип","Группа","Категория","Подкатегория","Сумма","Участник","Комментарий"]];
+  state.txns.slice().sort((a,b)=>(a.date<b.date?-1:a.date>b.date?1:0)).forEach(t=>{
+    const inc=t.type==="income"; const g=groupOf(t.categoryId);
+    const grp=inc?"Доход":(g?g.name:""); const cat=catName(t.categoryId); const sub=(!inc&&t.subId)?subName(t.subId):"";
+    const mem=t.memberId&&memberById(t.memberId)?memberById(t.memberId).name:"";
+    opRows.push([t.date, inc?"Доход":"Расход", grp, cat, sub, inc?Math.round(+t.amount||0):-Math.round(+t.amount||0), mem, t.comment||""]);
+  });
+  sheets.push({name:"Операции",rows:opRows});
+  // Помесячно
+  const mset={}; state.txns.forEach(t=>mset[t.date.slice(0,7)]=1); Object.keys(state.snapshots||{}).forEach(m=>mset[m]=1); Object.keys(state.plans||{}).forEach(m=>mset[m]=1); Object.keys(state.incomePlans||{}).forEach(m=>mset[m]=1);
+  const months=Object.keys(mset).sort();
+  const mRows=[["Месяц","Доход","Расход","В капитал","Сальдо (доход−расход)","Чистый капитал (на конец)","Месяц закрыт"]];
+  months.forEach(k=>{ const sn=(state.snapshots||{})[k];
+    const inc=sn?sn.income:monthIncome(k), exp=sn?sn.expense:monthExpense(k), cap=sn?sn.capital:monthCapital(k);
+    mRows.push([k, Math.round(inc||0), Math.round(exp||0), Math.round(cap||0), Math.round((inc||0)-(exp||0)), sn?Math.round(sn.net||0):"", sn?"да":"нет"]);
+  });
+  sheets.push({name:"Помесячно",rows:mRows});
+  // Активы
+  if(state.assets.length){ const aRows=[["Название","Тип","Стоимость","Ликвидный"]];
+    state.assets.forEach(a=>aRows.push([a.name,a.kind||"",Math.round(+a.value||0),a.liquid?"да":"нет"]));
+    aRows.push(["ИТОГО","",Math.round(totalAssets()),""]); sheets.push({name:"Активы",rows:aRows}); }
+  // Пассивы
+  if(state.liabilities.length){ const lRows=[["Название","Тип","Остаток","Ставка, % годовых","Платёж/мес"]];
+    state.liabilities.slice().sort((a,b)=>b.balance-a.balance).forEach(x=>lRows.push([x.name,x.kind||"",Math.round(+x.balance||0),Math.round((+x.rate||0)*1000)/10,Math.round(+x.minPayment||0)]));
+    lRows.push(["ИТОГО","",Math.round(totalLiab()),"",Math.round(totalMinPayment())]); sheets.push({name:"Пассивы",rows:lRows}); }
+  // Цели
+  if((state.goals||[]).length){ const gRows=[["Цель","Целевая сумма","Накоплено","Срок","Прогресс, %"]];
+    state.goals.forEach(g=>gRows.push([g.name,Math.round(+g.target||0),Math.round(+g.current||0),g.targetDate||"",g.target?Math.round((g.current||0)/g.target*100):0]));
+    sheets.push({name:"Цели",rows:gRows}); }
+  return sheets;
+}
+function exportXLSX(){
+  try{
+    const bytes=buildXLSX(buildWorkbookSheets());
+    const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="Финансы_"+ym(new Date())+".xlsx"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000); toast("Excel-файл создан");
+  }catch(e){ toast("Не удалось создать файл"); console.warn(e); }
+}
 function importJSON(e){ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=()=>{ try{ const s=JSON.parse(r.result); if(!s.groups||!s.categories) throw 0; state=migrate(s); save(); toast("Импортировано"); render_current(); }catch(err){ toast("Файл не распознан"); } }; r.readAsText(f); }
 
 /* ============================================================
@@ -1535,7 +1706,7 @@ const DBX = {
         <button class="btn block" id="usePhone" style="padding:13px">Заменить данными этого устройства</button>
         <p class="muted" style="font-size:12px;margin-top:6px">Перезапишет базу в Dropbox тем, что сейчас на этом устройстве.</p>`,
       el=>{
-        el.querySelector("#useCloud").onclick=()=>{ state=migrate(remote); save(false); closeSheet(); render_current(); toast("Загружено из Dropbox"); };
+        el.querySelector("#useCloud").onclick=async()=>{ closeSheet(); await applyRemote(remote, true); };
         el.querySelector("#usePhone").onclick=async()=>{ closeSheet(); await DBX.push(); render_current(); toast("Отправлено в Dropbox"); };
       });
     }catch(e){ toast("Не удалось подключить Dropbox"); console.warn(e); }
@@ -1555,7 +1726,8 @@ const DBX = {
   async push(manual){
     if(!this.linked)return;
     try{ setSync("dirty");
-      const r=await this.api("https://content.dropboxapi.com/2/files/upload",{method:"POST",headers:{"Content-Type":"application/octet-stream","Dropbox-API-Arg":JSON.stringify({path:"/famfin.json",mode:"overwrite",mute:true})},body:JSON.stringify(state)});
+      const body = CRYPT.on ? await CRYPT.wrap(state) : JSON.stringify(state);
+      const r=await this.api("https://content.dropboxapi.com/2/files/upload",{method:"POST",headers:{"Content-Type":"application/octet-stream","Dropbox-API-Arg":JSON.stringify({path:"/famfin.json",mode:"overwrite",mute:true})},body});
       if(!r.ok) throw new Error("upload "+r.status); setSync("ok"); if(manual)toast("Отправлено в Dropbox");
     }catch(e){ setSync("err"); if(manual)toast("Ошибка отправки в Dropbox"); console.warn(e); }
   },
@@ -1570,7 +1742,7 @@ const DBX = {
         if(!manual && remote.updatedAt<=state.updatedAt){ setSync("ok"); return; }
         if(manual || remote.updatedAt>state.updatedAt){
           if(!manual || confirm("Загрузить данные из Dropbox? Текущие локальные будут заменены (в Dropbox новее).")){
-            state=migrate(remote); save(false); setSync("ok"); toast("Загружено из Dropbox"); render_current(); return;
+            await applyRemote(remote, true); return;
           }
         }
       }
@@ -1584,7 +1756,7 @@ const DBX = {
       if(r.status===409){ setSync("ok"); toast("В Dropbox ещё нет данных"); return; }
       if(!r.ok) throw new Error("dl "+r.status);
       const remote=JSON.parse(await r.text());
-      if(remote&&remote.updatedAt){ state=migrate(remote); save(false); setSync("ok"); render_current(); toast("Загружено из Dropbox"); }
+      if(remote&&remote.updatedAt){ await applyRemote(remote, true); }
       else { setSync("ok"); toast("В Dropbox пустая база"); }
     }catch(e){ setSync("err"); toast("Ошибка загрузки"); console.warn(e); }
   },
@@ -1596,7 +1768,7 @@ const DBX = {
       if(!r.ok) throw new Error("download "+r.status);
       const remote=JSON.parse(await r.text());
       if(remote&&remote.updatedAt){
-        if(remote.updatedAt>state.updatedAt){ state=migrate(remote); save(false); setSync("ok"); render_current(); if(manual)toast("Обновлено из Dropbox"); return; }
+        if(remote.updatedAt>state.updatedAt){ await applyRemote(remote, manual); return; }
         if(remote.updatedAt<state.updatedAt){ await this.push(); setSync("ok"); if(manual)toast("Отправлено в Dropbox"); return; }
       }
       setSync("ok"); if(manual)toast("Уже синхронно");
@@ -1605,6 +1777,109 @@ const DBX = {
   unlink(){ if(!confirm("Отключить Dropbox? Локальные данные останутся."))return; this.token=this.refresh=this.account=null; this.linked=false; localStorage.removeItem(LS_DBX); setSync(null); toast("Dropbox отключён"); render_current(); }
 };
 function setSync(st){ const b=document.getElementById("syncBtn"),i=document.getElementById("syncIco"); b.classList.remove("ok","dirty","err"); if(st)b.classList.add(st); i.textContent = st==="dirty"?"⟳":(st==="err"?"⚠":"☁"); }
+
+/* ============================================================
+   ШИФРОВАНИЕ (PBKDF2 + AES-GCM, WebCrypto). Данные нечитаемы без кода.
+   updatedAt хранится открыто (нужен для сравнения версий синхронизации).
+   ============================================================ */
+function normCode(s){ let v=String(s||""); try{v=v.normalize("NFKC");}catch(e){} return v.replace(/[\s\u200B\u200C\u200D\uFEFF\u00A0]+/g,""); }
+const CRYPT = {
+  on:false, pass:null, saltB64:null, keyCache:{},
+  _b64(buf){ let s="",a=new Uint8Array(buf); for(let i=0;i<a.length;i++)s+=String.fromCharCode(a[i]); return btoa(s); },
+  _ub64(s){ return Uint8Array.from(atob(s),c=>c.charCodeAt(0)); },
+  async _keyFor(saltB64){
+    if(this.keyCache[saltB64]) return this.keyCache[saltB64];
+    const km = await crypto.subtle.importKey("raw", new TextEncoder().encode(this.pass), "PBKDF2", false, ["deriveKey"]);
+    const k = await crypto.subtle.deriveKey({name:"PBKDF2", salt:this._ub64(saltB64), iterations:200000, hash:"SHA-256"}, km, {name:"AES-GCM",length:256}, false, ["encrypt","decrypt"]);
+    this.keyCache[saltB64]=k; return k;
+  },
+  async wrap(obj){
+    const key = await this._keyFor(this.saltB64);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({name:"AES-GCM",iv}, key, new TextEncoder().encode(JSON.stringify(obj)));
+    return JSON.stringify({__enc:1, v:1, updatedAt:obj.updatedAt||nowISO(), salt:this.saltB64, iv:this._b64(iv), ct:this._b64(ct)});
+  },
+  async unwrap(env){
+    if(!this.pass) throw new Error("no-pass");
+    const key = await this._keyFor(env.salt);
+    const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv:this._ub64(env.iv)}, key, this._ub64(env.ct));
+    return JSON.parse(new TextDecoder().decode(pt));
+  },
+  async enable(pass){
+    this.pass=normCode(pass); this.saltB64=this._b64(crypto.getRandomValues(new Uint8Array(16))); this.keyCache={}; this.on=true;
+    await persistLocal(); if(DBX.linked) await DBX.push(true);
+  },
+  async disable(){
+    this.on=false; this.pass=null; this.keyCache={};
+    try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){}
+    if(DBX.linked) await DBX.push(true);
+  }
+};
+// расшифровать удалённые данные Dropbox (или вернуть как есть, если не зашифровано)
+async function decodeRemote(parsed){ return (parsed && parsed.__enc) ? await CRYPT.unwrap(parsed) : parsed; }
+// применить удалённое состояние с расшифровкой и обработкой ошибок
+async function applyRemote(remote, manual){
+  try{ const obj=await decodeRemote(remote); state=migrate(obj); save(false); setSync("ok"); render_current(); if(manual)toast("Загружено из Dropbox"); return true; }
+  catch(err){
+    if(err && err.message==="no-pass"){ setSync("ok"); showEncGate(remote); return false; }
+    setSync("err"); if(manual)toast("Не удалось расшифровать данные из Dropbox — код не совпадает"); console.warn(err); return false;
+  }
+}
+// экран ввода кода при запуске, если локальные данные зашифрованы
+function showEncGate(env){
+  const g=document.getElementById("gate"), box=document.getElementById("gbox");
+  g.classList.add("show");
+  const faceEnc=!!localStorage.getItem(LS_ENCFACE);
+  box.innerHTML='<div style="font-size:13px;color:var(--ink3);text-align:center">🔒 Данные защищены. Введите код.</div>'+
+    '<input id="gcode" name="famfin_code" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" data-1p-ignore="true" data-lpignore="true" data-form-type="other" placeholder="код" readonly>'+
+    '<div id="gmsg" class="gmsg"></div>'+
+    '<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:2px"><button class="gface" id="gshow" type="button">показать</button><button class="gbtn" id="gok" type="button">→</button></div>'+
+    (faceEnc?'<button class="gface" id="gfaceEnc" type="button" style="margin-top:4px">🙂 Войти по Face ID</button>':'');
+  const inp=box.querySelector("#gcode"), ok=box.querySelector("#gok"), shw=box.querySelector("#gshow"), msg=box.querySelector("#gmsg");
+  const unlockRO=()=>inp.removeAttribute("readonly");
+  inp.addEventListener("touchstart",unlockRO,{passive:true}); inp.addEventListener("pointerdown",unlockRO); inp.addEventListener("keydown",unlockRO);
+  inp.addEventListener("input",()=>{ msg.textContent=""; });
+  let shown=false; shw.onclick=()=>{ shown=!shown; inp.style.webkitTextSecurity=shown?"none":"disc"; inp.style.textSecurity=shown?"none":"disc"; shw.textContent=shown?"скрыть":"показать"; unlockRO(); inp.focus(); };
+  function fail(){ msg.textContent="Неверный код"; g.classList.add("shake"); setTimeout(()=>g.classList.remove("shake"),400); inp.value=""; unlockRO(); inp.focus(); }
+  async function trySubmit(codeStr){
+    const v=normCode(codeStr); if(!v){ fail(); return; }
+    ok.disabled=true;
+    try{
+      CRYPT.on=true; CRYPT.saltB64=env.salt; CRYPT.pass=v; CRYPT.keyCache={};
+      const obj = await CRYPT.unwrap(env);
+      state = migrate(obj); save(false);
+      try{localStorage.setItem(LS_GATE,"1");}catch(e){}
+      g.classList.remove("show"); bootApp();
+    }catch(err){ CRYPT.pass=null; CRYPT.keyCache={}; ok.disabled=false; fail(); }
+  }
+  ok.onclick=()=>trySubmit(inp.value); inp.addEventListener("keydown",e=>{ if(e.key==="Enter")trySubmit(inp.value); });
+  if(faceEnc){
+    const fb=box.querySelector("#gfaceEnc");
+    const runFace=async()=>{ try{ await faceIdUnlock(); const code=_deobf(localStorage.getItem(LS_ENCFACE)); if(!code) throw 0; await trySubmit(code); }catch(e){ /* остаётся ручной ввод */ } };
+    if(fb) fb.onclick=runFace;
+    faceIdAvailable().then(av=>{ if(av) runFace(); });
+  }
+  setTimeout(()=>inp.focus(),120);
+}
+function _obf(s){ try{ return btoa(unescape(encodeURIComponent(String(s)))); }catch(e){ return ""; } }
+function _deobf(s){ try{ return decodeURIComponent(escape(atob(String(s)))); }catch(e){ return ""; } }
+function askEncPass(title, hint, onOk){
+  openSheet(`<h3>${esc(title)}</h3>${hint?`<p class="muted" style="font-size:12.5px">${esc(hint)}</p>`:''}
+    <div class="field"><label>Код</label><input id="ep1" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="-webkit-text-security:disc"></div>
+    <div class="field"><label>Повторите код</label><input id="ep2" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="-webkit-text-security:disc"></div>
+    <button class="btn primary block" id="epOk" style="padding:13px">Сохранить</button>
+    <button class="btn ghost block" id="epCancel" style="margin-top:8px">Отмена</button>`, el=>{
+    el.querySelector("#epCancel").onclick=closeSheet;
+    el.querySelector("#epOk").onclick=async()=>{
+      const a=normCode(el.querySelector("#ep1").value), b=normCode(el.querySelector("#ep2").value);
+      if(!a){ toast("Введите код"); return; }
+      if(a!==b){ toast("Коды не совпали"); return; }
+      el.querySelector("#epOk").disabled=true;
+      try{ await onOk(a); }catch(e){ toast("Ошибка"); console.warn(e); el.querySelector("#epOk").disabled=false; return; }
+      closeSheet();
+    };
+  });
+}
 
 /* ============================================================
    INIT
@@ -1663,16 +1938,18 @@ function setupAutoSync(){
 function showGate(mode){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show");
-  box.innerHTML='<input id="gpass" type="text" inputmode="'+(mode==="gate"?"numeric":"text")+'" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" enterkeyhint="go" placeholder="код">'+
-    '<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:2px"><button class="gface" id="gshow" type="button">показать</button><button class="gbtn" id="gok">→</button></div>'+
+  box.innerHTML='<input id="gcode" name="famfin_code" type="text" inputmode="'+(mode==="gate"?"numeric":"text")+'" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" data-1p-ignore="true" data-lpignore="true" data-form-type="other" placeholder="код" readonly>'+
+    '<div id="gmsg" class="gmsg"></div>'+
+    '<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:2px"><button class="gface" id="gshow" type="button">показать</button><button class="gbtn" id="gok" type="button">→</button></div>'+
     (mode==="lock"?'<button class="gface" id="gface" style="display:none">Face ID</button>':'');
-  const inp=box.querySelector("#gpass"), ok=box.querySelector("#gok"), shw=box.querySelector("#gshow");
-  let shown=false; shw.onclick=()=>{ shown=!shown; inp.style.webkitTextSecurity=shown?"none":"disc"; inp.style.textSecurity=shown?"none":"disc"; shw.textContent=shown?"скрыть":"показать"; inp.focus(); };
-  function fail(){ g.classList.add("shake"); inp.value=""; setTimeout(()=>g.classList.remove("shake"),400); inp.focus(); }
+  const inp=box.querySelector("#gcode"), ok=box.querySelector("#gok"), shw=box.querySelector("#gshow"), msg=box.querySelector("#gmsg");
+  const unlockRO=()=>inp.removeAttribute("readonly");
+  inp.addEventListener("touchstart",unlockRO,{passive:true}); inp.addEventListener("pointerdown",unlockRO); inp.addEventListener("keydown",unlockRO);
+  inp.addEventListener("input",()=>{ msg.textContent=""; });
+  let shown=false; shw.onclick=()=>{ shown=!shown; inp.style.webkitTextSecurity=shown?"none":"disc"; inp.style.textSecurity=shown?"none":"disc"; shw.textContent=shown?"скрыть":"показать"; unlockRO(); inp.focus(); };
+  function fail(){ msg.textContent="Неверный код"; g.classList.add("shake"); setTimeout(()=>g.classList.remove("shake"),400); inp.value=""; unlockRO(); inp.focus(); }
   function submit(){
-    let v=(inp.value||"");
-    try{ v=v.normalize("NFKC"); }catch(e){}
-    v=v.replace(/[\s\u200B\u200C\u200D\uFEFF\u00A0]+/g,"");
+    const v=normCode(inp.value); if(!v){ fail(); return; }
     if(mode==="gate"){ if(simpleHash(v)===GATE_HASH || simpleHash(v.toLowerCase())===GATE_HASH){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
     else { if(state.lock&&state.lock.codeHash&&(simpleHash(v)===state.lock.codeHash||simpleHash(v.toLowerCase())===state.lock.codeHash)) bootApp(); else fail(); }
   }
@@ -1694,7 +1971,8 @@ function securityBoot(){
 }
 
 DBX.boot();
-securityBoot();
+if(__encEnv){ showEncGate(__encEnv); }
+else { securityBoot(); }
 console.log("Готово.");
 </script>
 </body>
