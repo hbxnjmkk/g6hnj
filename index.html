@@ -269,6 +269,10 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 .quoteArrow:active{transform:scale(.94)}
 .quoteArrow:disabled{opacity:.35;cursor:default}
 .quoteDots{font-size:11px;opacity:.7;text-align:center;flex:1}
+.helpBody{font-size:14px;line-height:1.55;color:var(--ink2)}
+.helpBody b{color:var(--ink)}
+.helpBody p{margin:0 0 10px}
+.helpBody p:last-child{margin-bottom:0}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -323,7 +327,7 @@ const LS_GATE= "famfin.gate"; // заглушка пройдена на этом
 const LS_FACEID="famfin.faceid"; // id ключа Face ID для этого браузера
 const LS_ENCFACE="famfin.encface"; // код шифрования, хранимый на устройстве для входа по Face ID
 const LS_QUOTE="famfin.quoteStart"; // дата первого «совета дня» (локально, свой счёт на устройстве)
-const APP_VERSION="версия 14 · 02.07";
+const APP_VERSION="v2.3 · помощь+ставка · 02.07";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -399,7 +403,7 @@ function seedState(){
   const income=[];
   return {
     version:1, updatedAt:nowISO(),
-    settings:{currency:CUR,startMonth:"2026-06",horizon:12},
+    settings:{currency:CUR,startMonth:"2026-06",horizon:12,withdrawRatePct:4},
     groups, categories:C, subcategories:S,
     txns:[], plans:{}, recurring:[],
     assets, liabilities:liab, incomeSources:income,
@@ -424,6 +428,9 @@ function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||
   if(Array.isArray(s.groups) && !s.groups.some(g=>g.id==="g6")){ const idx=s.groups.findIndex(g=>g.id==="gi"); const g6={id:"g6",name:"Пожертвования",kind:"expense",color:"#C77DA6",note:"Giving — отдаём, не копим (это расход)"}; if(idx>=0)s.groups.splice(idx,0,g6); else s.groups.push(g6); }
   if(Array.isArray(s.categories)){ const cc=s.categories.find(c=>c.id==="c_char"); if(cc && cc.groupId==="g5") cc.groupId="g6"; }
   if(Array.isArray(s.categories)){ const cf=s.categories.find(c=>c.id==="c_cafe"); if(cf && cf.groupId==="g2") cf.groupId="g4"; }
+  if(Array.isArray(s.assets)) s.assets.forEach(a=>{ if(!a.class) a.class=a.liquid?'reserve':'personal'; });
+  if(Array.isArray(s.incomeSources)) s.incomeSources.forEach(x=>{ if(!x.kind) x.kind='labor'; });
+  if(s.settings && s.settings.withdrawRatePct==null) s.settings.withdrawRatePct=4;
   sanitizeState(s); return s; }
 let dbxTimer=null, __lastSaved=null;
 async function persistLocal(){
@@ -780,6 +787,8 @@ const NAV=[
   {id:"balance",name:"Баланс / Капитал",icon:"⚖️",grp:"Капитал"},
   {id:"debts",name:"Долги",icon:"🔻",grp:"Капитал"},
   {id:"goals",name:"Цели 5 лет",icon:"🧭",grp:"Капитал"},
+  {id:"capital",name:"Путь к капиталу",icon:"🌟",grp:"Капитал"},
+  {id:"help",name:"Помощь",icon:"❓",grp:"Система"},
   {id:"settings",name:"Настройка",icon:"⚙️",grp:"Система"},
 ];
 const BOTTOM=["today","ops","dash","goals"]; // + more
@@ -867,6 +876,10 @@ function openMonthClose(k){
     <div class="field"><label>💵 Остаток на счетах на конец месяца</label>
       <input class="num" id="clCash" inputmode="numeric" value="${Math.round(liquidAssets())}" style="width:100%;text-align:right;padding:12px;font-size:17px;font-weight:600">
       <small class="hint">Сколько реально денег на счетах и наличными. Это стартовая точка «Прогноза денег» — важно держать актуальной.</small></div>
+    ${(()=>{ const caps=assetRows.filter(a=>(a.class||'')==='working'&&a.yieldType==='capitalize'&&(+a.yield||0)>0); if(!caps.length)return ''; return `<div class="field"><label>📈 Переоценка работающих активов (капитализация)</label>
+      <div id="clReval">${caps.map(a=>{const g=assetCapitalizeForMonth(a); const nv=Math.round((+a.value||0)+g); return `<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">было ${fmt(a.value,{bare:true})} · +${fmt(g,{bare:true})} за месяц (${a.yield}%)</div></div>
+        <input class="num" data-rv="${a.id}" inputmode="numeric" value="${nv}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`;}).join("")}</div>
+      <small class="hint">За месяц капитал предположительно вырос по вашей ставке. Подтвердите или впишите фактическую стоимость по выписке — это не кэш на счёте, а рост стоимости актива.</small></div>`; })()}
     <div class="field"><button class="btn ghost block" id="clAssetsToggle" style="text-align:left">▸ Обновить стоимость других активов (по желанию)</button>
       <div id="clAssets" style="display:none;margin-top:10px">${assetRows.length?assetRows.map(a=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">сейчас ${fmt(a.value,{bare:true})}</div></div>
         <input class="num" data-av="${a.id}" inputmode="numeric" value="${Math.round(+a.value||0)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join(""):'<div class="empty">Активов нет</div>'}</div></div>
@@ -877,6 +890,7 @@ function openMonthClose(k){
     el.querySelector("#clDo").onclick=()=>{
       el.querySelectorAll("[data-lb]").forEach(inp=>{ const x=byId(state.liabilities,inp.dataset.lb); if(x){ const v=parseFloat(String(inp.value).replace(/\s/g,""))||0; x.balance=Math.max(0,v); } });
       const cashV=parseFloat(String(el.querySelector("#clCash").value).replace(/\s/g,"")); if(!isNaN(cashV)) setLiquidCash(cashV);
+      el.querySelectorAll("[data-rv]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.rv); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
       if(ab.style.display!=="none") el.querySelectorAll("[data-av]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.av); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
       performClose(k);
       closeSheet(); render_current(); toast("Месяц "+ymShort(k)+" закрыт");
@@ -1011,7 +1025,7 @@ function render_current(){
   const mn=document.getElementById("monthNav"); if(mn) mn.style.visibility=(route==="cashflow"||route==="forecast")?"hidden":"visible";
   if(typeof renderMe==="function") renderMe();
   const v=document.getElementById("view"); v.innerHTML="";
-  ({today:pgToday,ops:pgOps,plan:pgPlan,fact:pgFact,dash:pgDash,cashflow:pgCashflow,forecast:pgForecast,balance:pgBalance,debts:pgDebts,goals:pgGoals,settings:pgSettings}[route]||pgToday)(v);
+  ({today:pgToday,ops:pgOps,plan:pgPlan,fact:pgFact,dash:pgDash,cashflow:pgCashflow,forecast:pgForecast,balance:pgBalance,debts:pgDebts,goals:pgGoals,capital:pgCapital,help:pgHelp,settings:pgSettings}[route]||pgToday)(v);
 }
 
 /* ============================================================
@@ -1419,6 +1433,22 @@ function pgDash(v){
     }
   })();
 
+  // Путь к капиталу — краткая строка
+  v.appendChild(h(`<div class="card" style="cursor:pointer;border-color:color-mix(in srgb,var(--gold) 35%,transparent)" data-nav="capital">
+    <div class="row"><div style="min-width:0"><div class="eyebrow" style="margin:0">🌟 Путь к капиталу</div>
+      <div style="font-size:14px;margin-top:4px">Капитал работает на <b style="color:var(--gold)">${pct(capitalRatio(k))}</b> · до независимости <b>${pct(fiProgress())}</b></div></div>
+      <span style="margin-left:auto;align-self:center;color:var(--gold);font-weight:800;font-size:18px">→</span></div></div>`));
+
+  // Рост дохода vs рост трат (антираздувание образа жизни)
+  const li=lifestyleInsight();
+  if(li){
+    v.appendChild(h(`<div class="card"><h3>Рост дохода vs рост трат</h3>
+      <div class="linrow"><span class="dim">Доход вырос</span><span class="num" style="color:var(--green);font-weight:700">+${fmt(li.incG,{bare:true})}</span></div>
+      <div class="linrow"><span class="dim">Расходы выросли</span><span class="num" style="color:${li.expG>0?'var(--red)':'var(--green)'};font-weight:700">${li.expG>=0?'+':''}${fmt(li.expG,{bare:true})}</span></div>
+      <div class="${li.warn?'warnbox':'okbox'}" style="margin-top:10px;margin-bottom:0">${li.warn?'Образ жизни раздувается: почти весь прирост дохода ушёл в траты. Направьте прирост в капитал, а не в новый уровень расходов.':'Хорошо — бо́льшая часть прироста дохода ('+fmt(Math.max(0,li.savedG),{bare:true})+') осталась у вас и может идти в капитал.'}</div>
+    </div>`));
+  }
+
   // debt-load warning
   if(m.debtLoad>0.35){
     v.appendChild(h(`<div class="warnbox"><b>Долговая нагрузка в красной зоне (${pct(m.debtLoad)}).</b> Платежи по долгам съедают критичную долю дохода. Приоритет №1 — гасить дорогой долг лавиной: это освободит ${fmt(totalMinPayment())}/мес и ускорит любую цель. <button class="btn sm" style="margin-top:8px" data-nav="debts">Открыть «Долги» →</button></div>`));
@@ -1491,7 +1521,8 @@ function pgForecast(v){
   let cum=startCash; const proj=[]; let firstGap=null;
   const goalsMonthly=(state.goals||[]).reduce((a,g)=>a+(+g.monthlyNeeded||0),0);
   months.forEach(mm=>{ 
-    const inc = monthIncome(mm)>0?monthIncome(mm):plannedIncome(mm);
+    const actualInc=monthIncome(mm);
+    const inc = (actualInc>0?actualInc:plannedIncome(mm)) + (actualInc>0?0:assetCashYieldForMonth(mm));
     const planExp = planMonthTotal(mm);
     const realExp = monthExpense(mm)+monthCapital(mm);
     const exp = Math.max(planExp, realExp>0?realExp:0) || estimatedMonthlyExpense();
@@ -1507,7 +1538,7 @@ function pgForecast(v){
   const tb=card.querySelector("tbody");
   proj.forEach(p=>tb.appendChild(h(`<tr><td>${ymShort(p.mm)}</td><td class="right num">${fmt(p.inc,{bare:true})}</td><td class="right num">${fmt(p.exp,{bare:true})}</td><td class="right num" style="color:${p.delta<0?'var(--red)':'var(--green)'}">${fmt(p.delta,{bare:true,plus:true})}</td><td class="right num" style="color:${p.cum<0?'var(--red)':'var(--ink)'};font-weight:600">${fmt(p.cum,{bare:true})}</td></tr>`)));
   v.appendChild(card);
-  v.appendChild(h(`<div class="infobox">Допущения: приход = факт месяца или ожидаемый доход ${fmt(expectedIncome())}; отток = план месяца, а если плана нет — средняя оценка расходов${goalsMonthly?` плюс взносы по целям ${fmt(goalsMonthly)}/мес`:''}. Стартовый остаток = кэш на счетах ${fmt(startCash)} (задаётся в «Баланс»). Чем точнее план и кэш, тем точнее прогноз.</div>`));
+  v.appendChild(h(`<div class="infobox">Допущения: приход = факт месяца или ожидаемый доход ${fmt(expectedIncome())}; отток = план месяца, а если плана нет — средняя оценка расходов${goalsMonthly?` плюс взносы по целям ${fmt(goalsMonthly)}/мес`:''}. Стартовый остаток = кэш на счетах ${fmt(startCash)} (задаётся в «Баланс»). Ожидаемые выплаты от работающих активов «в кэш» уже учтены в приходе будущих месяцев. Чем точнее план и кэш, тем точнее прогноз.</div>`));
 }
 function estimatedMonthlyExpense(){
   const months=[...new Set(state.txns.map(t=>ym(t.date)))];
@@ -1563,14 +1594,44 @@ function pgBalance(v){
 }
 function editAsset(id){
   const a=id?byId(state.assets,id):{id:null,name:"",kind:"",value:"",liquid:false};
+  const cls=a.class||(a.liquid?'reserve':'personal');
+  const yt=a.yieldType||'none', pf=a.payFreq||'monthly';
   openSheet(`<h3>${id?'Актив':'Новый актив'}</h3>
     <div class="field"><label>Название</label><input id="an" value="${esc(a.name)}" placeholder="Напр. Квартира"></div>
     <div class="field"><label>Тип</label><input id="ak" value="${esc(a.kind||'')}" placeholder="Недвижимость / Бизнес / Кэш…"></div>
     <div class="field"><label>Стоимость, ${CUR}</label><input id="av" class="num" inputmode="numeric" value="${a.value||''}"></div>
+    <div class="field"><label>Роль в капитале</label>
+      <div class="chiprow" id="aclass">
+        <button class="chip ${cls==='reserve'?'active':''}" data-cl="reserve">🛟 Резерв</button>
+        <button class="chip ${cls==='working'?'active':''}" data-cl="working">⚙️ Работающий</button>
+        <button class="chip ${cls==='personal'?'active':''}" data-cl="personal">🏠 Личное</button>
+      </div>
+      <small class="hint">Резерв — кэш и вклады (подушка). Работающий — приносит доход: акции, фонды, доля в бизнесе, доходная недвижимость. Личное — дом, авто (не приносит доход).</small></div>
+    <div id="yieldBlock" style="display:${cls==='working'?'block':'none'};background:color-mix(in srgb,var(--gold) 7%,transparent);border-radius:12px;padding:12px;margin-bottom:12px">
+      <div class="eyebrow" style="margin-top:0">Доходность работающего актива</div>
+      <div class="field" style="margin-bottom:8px"><label>Ожидаемая доходность, % годовых</label><input id="ay" class="num" inputmode="decimal" value="${a.yield||''}" placeholder="напр. 8"></div>
+      <div class="field" style="margin-bottom:8px"><label>Как приходит доход</label>
+        <div class="chiprow" id="aytype">
+          <button class="chip ${yt==='cash'?'active':''}" data-yt="cash">💵 В кэш</button>
+          <button class="chip ${yt==='capitalize'?'active':''}" data-yt="capitalize">📈 Капитализируется</button>
+          <button class="chip ${yt==='none'?'active':''}" data-yt="none">— нет</button>
+        </div></div>
+      <div class="field" id="freqField" style="margin-bottom:0;display:${yt==='cash'?'block':'none'}"><label>Периодичность выплат</label>
+        <div class="chiprow" id="ayfreq">
+          <button class="chip ${pf==='monthly'?'active':''}" data-pf="monthly">Ежемесячно</button>
+          <button class="chip ${pf==='quarterly'?'active':''}" data-pf="quarterly">Раз в квартал</button>
+          <button class="chip ${pf==='yearly'?'active':''}" data-pf="yearly">Раз в год</button>
+        </div></div>
+      <small class="hint">«В кэш» — выплаты падают в «Прогноз денег» как приток; факт заводите операцией-доходом от источника «Капитал». «Капитализируется» — доход не приходит на счёт, а растит стоимость актива; фиксируется переоценкой при закрытии месяца. <b>Важно:</b> если этот же доход вы уже задали как источник дохода с месячной суммой — не задавайте доходность здесь ещё раз, иначе прогноз посчитает дважды.</small>
+    </div>
     <div class="field"><label class="row" style="gap:8px"><input type="checkbox" id="al" style="width:auto" ${a.liquid?'checked':''}> Ликвидный (кэш/вклад — идёт в подушку)</label></div>
     <button class="btn primary block" id="save" style="padding:13px">Сохранить</button>
     ${id?'<button class="btn danger block" id="del" style="margin-top:8px">Удалить</button>':''}`,el=>{
-    el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#an").value.trim(),kind:el.querySelector("#ak").value.trim(),value:parseFloat(String(el.querySelector("#av").value).replace(/\s/g,""))||0,liquid:el.querySelector("#al").checked}; if(!o.name){toast("Введите название");return;} if(id)Object.assign(a,o); else state.assets.push({id:uid(),...o}); save(); closeSheet(); render_current(); };
+    let curCls=cls, curYt=yt, curPf=pf;
+    el.querySelectorAll("#aclass [data-cl]").forEach(b=>b.onclick=()=>{ curCls=b.dataset.cl; el.querySelectorAll("#aclass .chip").forEach(x=>x.classList.toggle("active",x===b)); if(curCls==='reserve')el.querySelector("#al").checked=true; el.querySelector("#yieldBlock").style.display=curCls==='working'?'block':'none'; });
+    el.querySelectorAll("#aytype [data-yt]").forEach(b=>b.onclick=()=>{ curYt=b.dataset.yt; el.querySelectorAll("#aytype .chip").forEach(x=>x.classList.toggle("active",x===b)); el.querySelector("#freqField").style.display=curYt==='cash'?'block':'none'; });
+    el.querySelectorAll("#ayfreq [data-pf]").forEach(b=>b.onclick=()=>{ curPf=b.dataset.pf; el.querySelectorAll("#ayfreq .chip").forEach(x=>x.classList.toggle("active",x===b)); });
+    el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#an").value.trim(),kind:el.querySelector("#ak").value.trim(),value:parseFloat(String(el.querySelector("#av").value).replace(/\s/g,""))||0,liquid:el.querySelector("#al").checked,class:curCls,yield:parseFloat(String(el.querySelector("#ay").value).replace(/\s/g,"").replace(",","."))||0,yieldType:curCls==='working'?curYt:'none',payFreq:curPf}; if(!o.name){toast("Введите название");return;} if(id)Object.assign(a,o); else state.assets.push({id:uid(),...o}); save(); closeSheet(); render_current(); };
     if(id)el.querySelector("#del").onclick=()=>{ if(confirm("Удалить актив?")){state.assets=state.assets.filter(x=>x.id!==id);save();closeSheet();render_current();} };
   });
 }
@@ -1793,6 +1854,198 @@ function suggestPlanFromGoals(){
 /* ============================================================
    PAGE: НАСТРОЙКА (статьи, доходы, данные, синхронизация)
    ============================================================ */
+/* ============================================================
+   ПУТЬ К КАПИТАЛУ — «капитал, который работает» (только чтение)
+   ============================================================ */
+function workingCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='working').reduce((s,x)=>s+(+x.value||0),0); }
+function reserveCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='reserve').reduce((s,x)=>s+(+x.value||0),0); }
+function personalCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='personal').reduce((s,x)=>s+(+x.value||0),0); }
+function capitalSourceIds(){ return state.incomeSources.filter(s=>s.kind==='capital').map(s=>s.id); }
+function passiveIncomeMonth(k){ const ids=capitalSourceIds(); if(!ids.length)return 0;
+  const actual=txnsOfMonth(k).filter(t=>t.type==='income'&&ids.includes(t.categoryId)).reduce((a,t)=>a+ +t.amount,0);
+  if(actual>0)return actual;
+  return state.incomeSources.filter(s=>s.kind==='capital').reduce((a,s)=>a+incomeSrcPlanned(k,s.id),0);
+}
+function capitalRatio(k){ const inc=incomeForMonth(k); return inc>0? passiveIncomeMonth(k)/inc : 0; }
+function plannedEssentialMonthly(){
+  let best=0;
+  Object.keys(state.plans||{}).forEach(k=>{ const plan=state.plans[k]||{}; let sum=0;
+    ["g1","g2","g3"].forEach(gid=>{ catsOf(gid).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>sum+=(+plan[su.id]||0)); else sum+=(+plan[c.id]||0); }); });
+    if(sum>best)best=sum;
+  });
+  return best;
+}
+function avgEssentialMonthly(){ const mo={}; state.txns.forEach(t=>{ if(t.type==='expense')mo[t.date.slice(0,7)]=1; }); const keys=Object.keys(mo);
+  let actual=0;
+  if(keys.length){ let sum=0,n=0; keys.forEach(m=>{ const e=essentialSpend(m); if(e>0){sum+=e;n++;} }); if(n)actual=sum/n; }
+  const best=Math.max(actual, plannedEssentialMonthly());
+  if(best>0)return best;
+  const cur=essentialSpend(curMonth); return cur>0?cur:(fixedSpend(curMonth)||0);
+}
+function annualEssential(){ return avgEssentialMonthly()*12; }
+function withdrawRate(){ const p=(state.settings&&+state.settings.withdrawRatePct)||4; return p/100; }
+function fiMultiplier(){ const r=withdrawRate(); return r>0? Math.round(1/r) : 25; }
+function fiTarget(){ const r=withdrawRate(); return r>0? annualEssential()/r : annualEssential()*25; }
+function fiProgress(){ const t=fiTarget(); return t>0? clamp(workingCapital()/t,0,1):0; }
+function coverageByCapital(){ const ess=avgEssentialMonthly(); if(ess<=0)return 0; return (workingCapital()*withdrawRate()/12)/ess; }
+function assetCashYieldForMonth(k){
+  let sum=0; const mo=+k.slice(5,7);
+  state.assets.forEach(a=>{ if((a.class||'')!=='working' || a.yieldType!=='cash') return;
+    const annual=(+a.value||0)*(+a.yield||0)/100; const freq=a.payFreq||'monthly';
+    if(freq==='monthly') sum+=annual/12;
+    else if(freq==='quarterly'){ if(mo%3===0) sum+=annual/4; }
+    else if(freq==='yearly'){ if(mo===12) sum+=annual; }
+  });
+  return Math.round(sum);
+}
+function assetCapitalizeForMonth(a){ if((a.class||'')!=='working'||a.yieldType!=='capitalize')return 0; return Math.round((+a.value||0)*(+a.yield||0)/100/12); }
+function lifestyleInsight(){
+  const mo={}; state.txns.forEach(t=>mo[t.date.slice(0,7)]=1);
+  const keys=Object.keys(mo).sort(); if(keys.length<2)return null;
+  const L=keys[keys.length-1], E=keys[Math.max(0,keys.length-4)]; if(E===L)return null;
+  const incL=monthIncome(L), incE=monthIncome(E); if(incL<=0||incE<=0)return null;
+  const expL=monthExpense(L), expE=monthExpense(E);
+  const incG=incL-incE, expG=expL-expE; if(incG<=0)return null;
+  return {incG,expG,savedG:incG-expG,warn:expG>=incG*0.7};
+}
+const CAPITAL_STAGES=[
+  {t:"Мини-резерв",d:"Соберите небольшой резерв — около месяца существенных трат — на кэше или вкладе. Это первая опора спокойствия."},
+  {t:"Закрыть дорогие долги",d:"Гасите кредиты и карты с высокой ставкой в приоритете: это гарантированная доходность без риска."},
+  {t:"Полная подушка",d:"Доведите резерв до 3–6 месяцев существенных расходов — защита от любых потрясений."},
+  {t:"Откладывать 15–20%",d:"Выведите норму сбережений на 15–20% дохода и держите её стабильно, лучше автоматически."},
+  {t:"Наращивать работающий капитал",d:"Направляйте сбережения в активы, приносящие доход: фонды, доля в бизнесе, доходная недвижимость. Реинвестируйте отдачу."},
+  {t:"Финансовая независимость",d:"Работающий капитал покрывает ваши расходы — деньги работают за вас. Цель достигнута."}
+];
+function capitalStage(){
+  const ess=avgEssentialMonthly(), reserve=reserveCapital();
+  const highRateDebt=state.liabilities.some(l=>(+l.rate||0)>=0.15 && (+l.balance||0)>0);
+  const cushion= ess>0? liquidAssets()/ess : (liquidAssets()>0?99:0);
+  const sr=metrics(curMonth).savingsRate, fi=fiProgress();
+  if(fi>=1)return 6;
+  if(reserve < ess*0.9)return 1;
+  if(highRateDebt)return 2;
+  if(cushion<3)return 3;
+  if(sr<0.15)return 4;
+  return 5;
+}
+function compoundCard(start, monthlyAdd){
+  const r=0.07, years=20, pts=[]; let cap=start;
+  for(let y=0;y<=years;y++){ pts.push(cap); cap=cap*(1+r)+monthlyAdd*12; }
+  const max=Math.max(1,...pts), w=300, ht=90;
+  const coords=pts.map((p,i)=>`${(i/years*w).toFixed(1)},${(ht-p/max*ht).toFixed(1)}`).join(" ");
+  return h(`<div class="card"><h3>Сила сложного процента</h3>
+    <p class="muted" style="font-size:12px;margin:-2px 0 8px">Если работающий капитал ${fmtK(start)} и вы вкладываете ${fmt(monthlyAdd)}/мес под ~7% годовых с реинвестированием:</p>
+    <svg viewBox="0 0 ${w} ${ht}" style="width:100%;height:90px"><polygon points="0,${ht} ${coords} ${w},${ht}" fill="color-mix(in srgb,var(--gold) 12%,transparent)"/><polyline points="${coords}" fill="none" stroke="var(--gold)" stroke-width="2.5"/></svg>
+    <div class="grid g2" style="margin-top:10px">${kpiCard("Через 10 лет",fmtK(pts[10]),"","gold")}${kpiCard("Через 20 лет",fmtK(pts[20]),"","gold")}</div>
+    <p class="muted" style="font-size:11px;margin-top:8px">Это ориентир, а не обещание: реальная доходность колеблется. Главное — регулярность и время.</p></div>`);
+}
+function pgCapital(v){
+  const k=curMonth;
+  v.appendChild(h(`<div><div class="page-title">🌟 Путь к капиталу</div><div class="page-sub">Где вы на пути к тому, чтобы капитал работал за вас</div></div>`));
+  const wc=workingCapital(), pass=passiveIncomeMonth(k), ratio=capitalRatio(k), fi=fiProgress(), cov=coverageByCapital();
+  const stage=capitalStage(), st=CAPITAL_STAGES[stage-1];
+  v.appendChild(h(`<div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--gold) 12%,var(--panel)),var(--panel));border-color:color-mix(in srgb,var(--gold) 40%,transparent)">
+    <div class="eyebrow" style="margin-top:0">Ваш этап ${stage} из 6 · следующий шаг</div>
+    <h3 style="margin:2px 0 2px">${esc(st.t)}</h3>
+    <p class="muted" style="font-size:13px;margin:0 0 10px">${esc(st.d)}</p>
+    <div style="display:flex;gap:4px">${CAPITAL_STAGES.map((s,i)=>`<div style="flex:1;height:7px;border-radius:4px;background:${i<stage?'var(--gold)':'var(--line)'}"></div>`).join("")}</div></div>`));
+  v.appendChild(h(`<div class="grid g2">
+    ${kpiCard("Работающий капитал",fmtK(wc),"приносит доход","gold")}
+    ${kpiCard("Капитал работает на",pct(ratio),"доля пассивного дохода",ratio>0?"pos":"neg")}
+    ${kpiCard("Пассивный доход",fmt(pass),"в месяц, от капитала",pass>0?"pos":"")}
+    ${kpiCard("Покрытие расходов",pct(cov),"по правилу 4% в год",cov>=1?"pos":"")}
+  </div>`));
+  const target=fiTarget(), wrPct=(state.settings&&state.settings.withdrawRatePct)||4, mult=fiMultiplier();
+  const fic=h(`<div class="card"><h3>Путь к независимости (правило ${mult}×)</h3>
+    <div class="linrow"><span class="num" style="font-weight:700;font-size:16px">${fmtK(wc)}</span><span class="dim num">цель ${fmtK(target)}</span></div>
+    <div class="meter"><span style="width:${fi*100}%;background:var(--gold)"></span></div>
+    <div class="linrow" style="margin-top:6px;font-size:12px"><span class="dim">${pct(fi)} пути</span><span class="dim">цель = нужные траты × 12 ÷ ${wrPct}%</span></div>
+    <div class="field" style="margin:12px 0 0"><label>Ставка изъятия, % в год</label>
+      <input id="wr" class="num" inputmode="decimal" value="${wrPct}" style="width:120px;text-align:center">
+      <small class="hint">Сколько процентов капитала можно снимать в год, не проедая его. Классика — 4% (это и есть правило 25×). Осторожнее — 3–3,5% (больше множитель). Множитель = 100 ÷ ставку.</small></div>
+    <p class="muted" style="font-size:12px;margin-top:8px">Когда работающий капитал достигнет цели, доход от него (около ${wrPct}% в год) сможет покрывать ваши существенные расходы без работы.</p></div>`);
+  const wrInp=fic.querySelector("#wr"); wrInp.onchange=()=>{ let v=parseFloat(String(wrInp.value).replace(",","."))||4; v=Math.max(1,Math.min(20,v)); state.settings.withdrawRatePct=v; save(); render_current(); };
+  v.appendChild(fic);
+  const res=reserveCapital(), per=personalCapital(), totC=res+wc+per;
+  if(totC>0){
+    const seg=(val,color)=> val>0?`<div style="width:${clamp(val/totC*100,0,100)}%;background:${color}"></div>`:'';
+    v.appendChild(h(`<div class="card"><h3>Как разложен капитал</h3>
+      <div style="display:flex;height:16px;border-radius:8px;overflow:hidden;margin:4px 0 12px;background:var(--line)">${seg(res,'var(--grp2)')}${seg(wc,'var(--gold)')}${seg(per,'var(--grp4)')}</div>
+      <div class="linrow" style="padding:5px 0"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--grp2);margin-right:7px"></span>🛟 Резерв</span><span class="num dim">${pct(res/totC)} · ${fmtK(res)}</span></div>
+      <div class="linrow" style="padding:5px 0"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--gold);margin-right:7px"></span>⚙️ Работающий</span><span class="num dim">${pct(wc/totC)} · ${fmtK(wc)}</span></div>
+      <div class="linrow" style="padding:5px 0"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--grp4);margin-right:7px"></span>🏠 Личное</span><span class="num dim">${pct(per/totC)} · ${fmtK(per)}</span></div>
+      ${wc>0 && wc/totC>0.85?`<div class="warnbox" style="margin:10px 0 0">Почти весь капитал в одном классе — подумайте о распределении рисков.</div>`:''}</div>`));
+  } else {
+    v.appendChild(h(`<div class="card"><div class="empty"><div class="big">⚙️</div>Отметьте активы по ролям в «Балансе» (резерв / работающий / личное) и тип дохода в «Настройке» (труд / капитал) — и здесь появится картина вашего работающего капитала.</div></div>`));
+  }
+  v.appendChild(compoundCard(wc, Math.max(0,monthCapital(k))));
+}
+/* ============================================================
+   ПОМОЩЬ — пошаговое руководство (листаемые карточки)
+   ============================================================ */
+let helpIdx=0;
+const HELP=[
+ {icon:"👋",title:"Добро пожаловать",body:`<p>Это ваш семейный «финансовый директор». В нём два слоя.</p>
+   <p><b>Штурвал — каждый день.</b> Быстрый учёт: операции → план → факт → закрытие месяца. Держит бюджет под контролем.</p>
+   <p><b>Компас — стратегия.</b> «Путь к капиталу»: показывает, где вы на дороге к благосостоянию и какой сделать следующий шаг.</p>
+   <p>Листайте карточки кнопками «Далее»/«Назад» или свайпом. В любой момент можно перейти по ссылке, всё сделать и вернуться сюда — карточка запомнится.</p>`,links:[]},
+ {icon:"🧱",title:"Шаг 1. Заведите основу",body:`<p>Один раз настройте отправные данные:</p>
+   <p>• <b>Источники дохода</b> — в «Настройке». Для каждого укажите тип: 💪 труд (зарплата) или 📈 капитал (дивиденды, аренда, проценты).</p>
+   <p>• <b>Активы и долги</b> — в «Балансе». У активов задайте роль: 🛟 резерв, ⚙️ работающий, 🏠 личное. Отметьте, что ликвидно (кэш/вклад) — это ваша подушка.</p>
+   <p>• <b>Участники</b> семьи — по желанию, чтобы видеть, кто провёл операцию.</p>`,links:[{label:"Настройка",route:"settings"},{label:"Баланс",route:"balance"}]},
+ {icon:"📝",title:"Шаг 2. Ежедневный учёт",body:`<p>Вносите операции сразу — это занимает 5 секунд. Нажмите ➕, выберите «Доход» или «Расход», сумму и категорию.</p>
+   <p>Если у категории есть <b>подкатегории</b> — выберите нужную (например, «Продукты → рынок»). Не выбрали — операция попадёт в категорию целиком.</p>
+   <p>Частые категории всплывают первыми. Повторяющиеся платежи можно подтверждать в один тап на «Сегодня».</p>`,links:[{label:"Операции",route:"ops"}]},
+ {icon:"🎚️",title:"Шаг 3. План месяца",body:`<p>План — это лимиты, которые вы ставите деньгам заранее. Впишите суммы по категориям и подкатегориям, а доход — по каждому источнику.</p>
+   <p>Не с нуля: кнопка <b>«Из прошлого месяца»</b> копирует план и доход, а <b>«Собрать из целей»</b> раскладывает доход так, чтобы ваши цели выполнялись.</p>
+   <p>Внизу видно: план дохода, план расходов и сколько свободно.</p>`,links:[{label:"План",route:"plan"}]},
+ {icon:"✅",title:"Шаг 4. Факт vs план",body:`<p>Здесь видно, как реальные траты ложатся на план: по каждой группе и подкатегории — план, факт, остаток и полоска со светофором (жёлтый — близко к лимиту, красный — перерасход).</p>
+   <p>Сверху — сводка «Расходы · план/факт» и доход план/факт по источникам. Это ваш ежемесячный самоконтроль.</p>`,links:[{label:"Факт",route:"fact"}]},
+ {icon:"🎯",title:"Экран «Сегодня»",body:`<p>Короткий взгляд утром. Светофор показывает, укладываетесь ли вы в бюджет. Крупная цифра — сколько осталось в бюджете месяца.</p>
+   <p><b>Дефицит средств</b> = плановый бюджет − (плановый доход + остаток на счетах). Показывает, сколько ещё нужно заработать или найти, чтобы закрыть план. Если хватает — покажет запас.</p>`,links:[{label:"Сегодня",route:"today"}]},
+ {icon:"📊",title:"Дашборд и 50/30/20",body:`<p>Здоровье семьи как единицы: <b>норма сбережений</b> (цель 15–20%), <b>долговая нагрузка</b> (безопасно &lt;30%), <b>подушка</b> в месяцах, свободный поток.</p>
+   <p>Карточка <b>«Куда уходит доход»</b> раскладывает его на Нужное (≈50%), Приятное (≈30%), Пожертвования и Сбережения (≈20%) — это ориентир 50/30/20.</p>`,links:[{label:"Дашборд",route:"dash"}]},
+ {icon:"🔮",title:"Поток и прогноз",body:`<p><b>Денежный поток</b> — приход и расход помесячно за год. <b>Прогноз</b> — накопленный остаток на 12 месяцев вперёд с ранним предупреждением о кассовых разрывах.</p>
+   <p>Стартовая точка прогноза — остаток на счетах (из «Баланса»). Чем точнее план и остаток, тем точнее прогноз. Ожидаемые выплаты от работающих активов уже учтены.</p>`,links:[{label:"Прогноз",route:"forecast"}]},
+ {icon:"⚖️",title:"Баланс и чистый капитал",body:`<p>Чистый капитал = активы − долги. Ведите активы и обязательства актуальными.</p>
+   <p>Ключевое: у активов есть <b>роль</b>. 🛟 Резерв — подушка. ⚙️ Работающий — приносит доход (фонды, доля в бизнесе, доходная недвижимость). 🏠 Личное — дом, авто. Роль важна для «Пути к капиталу».</p>`,links:[{label:"Баланс",route:"balance"}]},
+ {icon:"🔻",title:"Долги: стратегия выхода",body:`<p>Выберите метод: <b>лавина</b> (гасить самый дорогой по ставке — минимум переплаты) или <b>снежный ком</b> (самый маленький — быстрые победы).</p>
+   <p>Приложение выстроит порядок «начните с…», а калькулятор перекредитования покажет, выгодно ли объединять кредиты. Есть и календарь платежей.</p>`,links:[{label:"Долги",route:"debts"}]},
+ {icon:"🐷",title:"Цели и копилки",body:`<p>Задавайте цели (подушка, первый взнос) и <b>копилки</b> на редкие крупные траты (отпуск, страховки, налоги) — приложение посчитает, сколько откладывать в месяц. Годовые копилки повторяются сами.</p>
+   <p>Каждая цель становится <b>подкатегорией в «Накоплениях»</b>: взнос вы делаете кнопкой «＋ Взнос» или обычной операцией в «Накопления → ваша цель».</p>`,links:[{label:"Цели",route:"goals"}]},
+ {icon:"🌟",title:"Путь к капиталу",body:`<p>Главный стратегический экран. Показывает <b>работающий капитал</b>, пассивный доход, «капитал работает на X%» и прогресс к независимости.</p>
+   <p><b>Правило 25×:</b> цель = годовые нужные траты × 25 (при ставке изъятия 4%). Ставку можно менять прямо там. Когда работающий капитал достигнет цели, доход от него покроет расходы без работы.</p>`,links:[{label:"Путь к капиталу",route:"capital"}]},
+ {icon:"📈",title:"Доходность активов",body:`<p>У работающего актива в «Балансе» задайте <b>доходность % годовых</b> и как приходит доход:</p>
+   <p>• <b>В кэш</b> (дивиденды, аренда) — выплаты падают в «Прогноз», а факт вы заводите операцией-доходом от источника «Капитал».</p>
+   <p>• <b>Капитализируется</b> (рост фонда) — доход не на счёте, а растит стоимость актива; фиксируется <b>переоценкой при закрытии месяца</b>.</p>
+   <p>Не задавайте один доход дважды (и источником, и доходностью актива) — прогноз посчитает вдвойне.</p>`,links:[{label:"Баланс",route:"balance"}]},
+ {icon:"🔒",title:"Закрытие месяца",body:`<p>Раз в месяц на «Сегодня» появится кнопка «Закрыть месяц». Там вы обновляете остатки по долгам, <b>остаток на счетах</b> и переоцениваете капитализирующие активы.</p>
+   <p>Показатели месяца сохранятся в историю (только чтение), и дашборд начнёт показывать динамику. Это важный ритуал точности.</p>`,links:[{label:"Сегодня",route:"today"}]},
+ {icon:"🛡",title:"Защита и синхронизация",body:`<p>В «Настройке»: код на входе, <b>шифрование</b> данных (и на устройстве, и в облаке) с входом по Face ID, синхронизация через <b>Dropbox</b> между устройствами (данные сливаются по записям — ничего не затирается).</p>
+   <p>Резервная копия — <b>Экспорт JSON</b> (для восстановления) и выгрузка в <b>Excel</b> (для просмотра). Выгрузки — в открытом виде, храните надёжно.</p>`,links:[{label:"Настройка",route:"settings"}]},
+ {icon:"💡",title:"Принципы благосостояния",body:`<p>Коротко о главном:</p>
+   <p>• Платите сначала себе (15–20%), тратьте меньше, чем зарабатываете.</p>
+   <p>• Подушка → гасить дорогие долги → регулярно откладывать → наращивать работающий капитал.</p>
+   <p>• Инвестируйте просто, дёшево и надолго; дайте сложному проценту работать.</p>
+   <p>• Растите доход, но не раздувайте траты. Учите детей на личном примере.</p>
+   <p><b>Поведение важнее математики, а достаточность — тоже богатство.</b></p>`,links:[{label:"Путь к капиталу",route:"capital"}]}
+];
+function pgHelp(v){
+  const cards=HELP; helpIdx=Math.max(0,Math.min(helpIdx,cards.length-1)); const i=helpIdx, c=cards[i];
+  v.appendChild(h(`<div><div class="page-title">❓ Помощь</div><div class="page-sub">Пошаговое руководство · карточка ${i+1} из ${cards.length}</div></div>`));
+  const card=h(`<div class="card"><div style="font-size:34px;line-height:1">${c.icon}</div><h3 style="margin:8px 0 8px">${esc(c.title)}</h3><div class="helpBody">${c.body}</div>
+    ${c.links&&c.links.length?`<div class="row" style="gap:8px;flex-wrap:wrap;margin-top:14px">${c.links.map(l=>`<button class="btn sm primary" data-nav="${l.route}">${esc(l.label)} →</button>`).join("")}</div>`:''}</div>`);
+  v.appendChild(card);
+  const dots=h(`<div style="display:flex;gap:5px;justify-content:center;flex-wrap:wrap;margin:14px 0">${cards.map((_,j)=>`<div style="width:${j===i?'20px':'7px'};height:7px;border-radius:4px;background:${j===i?'var(--gold)':'var(--line2)'};cursor:pointer;transition:width .2s" data-dot="${j}"></div>`).join("")}</div>`);
+  dots.querySelectorAll("[data-dot]").forEach(d=>d.onclick=()=>{ helpIdx=+d.dataset.dot; render_current(); window.scrollTo(0,0); });
+  v.appendChild(dots);
+  const navb=h(`<div class="row" style="gap:10px"><button class="btn block" id="hPrev" ${i<=0?'disabled':''} style="flex:1">‹ Назад</button><button class="btn primary block" id="hNext" ${i>=cards.length-1?'disabled':''} style="flex:1">Далее ›</button></div>`);
+  navb.querySelector("#hPrev").onclick=()=>{ if(helpIdx>0){helpIdx--;render_current();window.scrollTo(0,0);} };
+  navb.querySelector("#hNext").onclick=()=>{ if(helpIdx<cards.length-1){helpIdx++;render_current();window.scrollTo(0,0);} };
+  v.appendChild(navb);
+  let x0=null; card.addEventListener("touchstart",e=>{x0=e.touches[0].clientX;},{passive:true});
+  card.addEventListener("touchend",e=>{ if(x0==null)return; const dx=e.changedTouches[0].clientX-x0; if(dx<-45&&helpIdx<cards.length-1){helpIdx++;render_current();window.scrollTo(0,0);} else if(dx>45&&helpIdx>0){helpIdx--;render_current();window.scrollTo(0,0);} x0=null; },{passive:true});
+}
 function pgSettings(v){
   v.appendChild(h(`<div class="page-title">Настройка</div><div class="page-sub">Участники, статьи, доходы, данные и синхронизация</div>`));
 
@@ -1812,13 +2065,20 @@ function pgSettings(v){
   // income sources
   const ic=h(`<div class="card"><h3>Источники дохода <span class="tag num">${fmt(expectedIncome())}/мес</span></h3><p class="muted" style="font-size:12px;margin:-2px 0 2px">Список источников и типовая месячная сумма. Точный план по месяцам задаётся на вкладке «План».</p></div>`);
   state.incomeSources.forEach(s=>{
-    const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--grpI) 14%,transparent);color:var(--grpI)">💼</div>
+    const sk=s.kind||'labor';
+    const row=h(`<div class="lrow" style="flex-wrap:wrap"><div class="ic" style="background:color-mix(in srgb,var(--grpI) 14%,transparent);color:var(--grpI)">${sk==='capital'?'📈':'💼'}</div>
       <input style="flex:1;background:transparent;border:none;padding:0;font-weight:600" value="${esc(s.name)}" data-n>
       <input class="num right" style="width:120px" inputmode="numeric" value="${s.amount||''}" data-a>
-      <button class="iconbtn" data-del>✕</button></div>`);
+      <button class="iconbtn" data-del>✕</button>
+      <div class="chiprow" style="flex-basis:100%;margin-top:8px">
+        <button class="chip ${sk==='labor'?'active':''}" data-k="labor">💪 Труд</button>
+        <button class="chip ${sk==='capital'?'active':''}" data-k="capital">📈 Капитал</button>
+        <span class="dim" style="font-size:11px;align-self:center;margin-left:4px">капитал = дивиденды, проценты, аренда, прибыль бизнеса</span>
+      </div></div>`);
     row.querySelector("[data-n]").onchange=e=>{s.name=e.target.value;save();};
     row.querySelector("[data-a]").onchange=e=>{s.amount=parseFloat(String(e.target.value).replace(/\s/g,""))||0;save();render_current();};
     row.querySelector("[data-del]").onclick=()=>{state.incomeSources=state.incomeSources.filter(x=>x.id!==s.id);save();render_current();};
+    row.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); render_current(); });
     ic.appendChild(row);
   });
   ic.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" id="addInc">＋ Источник дохода</button>`));
@@ -2336,4 +2596,3 @@ console.log("Готово.");
 </script>
 </body>
 </html>
-
