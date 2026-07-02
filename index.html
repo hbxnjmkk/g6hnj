@@ -175,7 +175,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 #gate{position:fixed;inset:0;z-index:200;background:var(--bg);display:none;align-items:center;justify-content:center;padding:24px}
 #gate.show{display:flex}
 #gate .gbox{width:100%;max-width:300px;display:flex;flex-direction:column;gap:14px;align-items:center}
-#gate input{text-align:center;font-size:17px;letter-spacing:1px;padding:14px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);-webkit-text-security:disc;text-security:disc}
+#gate input{text-align:center;font-size:22px;letter-spacing:2px;padding:15px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);width:100%}
+#gate .gbtn2{width:100%;max-width:240px;padding:15px;border-radius:12px;background:var(--gold);color:#fff;border:none;font-size:17px;font-weight:700;cursor:pointer}
+#gate .gver{font-size:11px;color:var(--ink3);opacity:.65;margin-top:10px}
 #gate .gbtn{width:46px;height:46px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);display:grid;place-items:center;font-size:20px;color:var(--ink2)}
 #gate .gface{font-size:14px;color:var(--ink3);background:none;border:none;text-decoration:underline}
 #gate.shake .gbox{animation:shk .35s}
@@ -276,6 +278,7 @@ const LS_ME  = "famfin.me";   // текущий участник — локал�
 const LS_GATE= "famfin.gate"; // заглушка пройдена на этом браузере
 const LS_FACEID="famfin.faceid"; // id ключа Face ID для этого браузера
 const LS_ENCFACE="famfin.encface"; // код шифрования, хранимый на устройстве для входа по Face ID
+const APP_VERSION="версия 8 · 02.07";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -1830,17 +1833,16 @@ function showEncGate(env){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show");
   const faceEnc=!!localStorage.getItem(LS_ENCFACE);
-  box.innerHTML='<div style="font-size:13px;color:var(--ink3);text-align:center">🔒 Данные защищены. Введите код.</div>'+
-    '<input id="gcode" name="famfin_code" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" data-1p-ignore="true" data-lpignore="true" data-form-type="other" placeholder="код" readonly>'+
+  box.innerHTML=
+    '<div style="font-size:14px;color:var(--ink3);text-align:center">🔒 Данные защищены. Введите код.</div>'+
+    '<input id="gcode" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" name="famfin_code" data-1p-ignore="true" data-lpignore="true" data-form-type="other" placeholder="код">'+
     '<div id="gmsg" class="gmsg"></div>'+
-    '<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:2px"><button class="gface" id="gshow" type="button">показать</button><button class="gbtn" id="gok" type="button">→</button></div>'+
-    (faceEnc?'<button class="gface" id="gfaceEnc" type="button" style="margin-top:4px">🙂 Войти по Face ID</button>':'');
-  const inp=box.querySelector("#gcode"), ok=box.querySelector("#gok"), shw=box.querySelector("#gshow"), msg=box.querySelector("#gmsg");
-  const unlockRO=()=>inp.removeAttribute("readonly");
-  inp.addEventListener("touchstart",unlockRO,{passive:true}); inp.addEventListener("pointerdown",unlockRO); inp.addEventListener("keydown",unlockRO);
+    '<button class="gbtn2" id="gok" type="button">Войти</button>'+
+    (faceEnc?'<button class="gface" id="gfaceEnc" type="button" style="margin-top:8px">🙂 Войти по Face ID</button>':'')+
+    '<div class="gver">'+APP_VERSION+'</div>';
+  const inp=box.querySelector("#gcode"), ok=box.querySelector("#gok"), msg=box.querySelector("#gmsg");
   inp.addEventListener("input",()=>{ msg.textContent=""; });
-  let shown=false; shw.onclick=()=>{ shown=!shown; inp.style.webkitTextSecurity=shown?"none":"disc"; inp.style.textSecurity=shown?"none":"disc"; shw.textContent=shown?"скрыть":"показать"; unlockRO(); inp.focus(); };
-  function fail(){ msg.textContent="Неверный код"; g.classList.add("shake"); setTimeout(()=>g.classList.remove("shake"),400); inp.value=""; unlockRO(); inp.focus(); }
+  function fail(){ msg.textContent="Неверный код"; g.classList.add("shake"); setTimeout(()=>g.classList.remove("shake"),400); inp.focus(); try{inp.select();}catch(e){} }
   async function trySubmit(codeStr){
     const v=normCode(codeStr); if(!v){ fail(); return; }
     ok.disabled=true;
@@ -1852,14 +1854,14 @@ function showEncGate(env){
       g.classList.remove("show"); bootApp();
     }catch(err){ CRYPT.pass=null; CRYPT.keyCache={}; ok.disabled=false; fail(); }
   }
-  ok.onclick=()=>trySubmit(inp.value); inp.addEventListener("keydown",e=>{ if(e.key==="Enter")trySubmit(inp.value); });
+  ok.onclick=()=>trySubmit(inp.value); inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();trySubmit(inp.value);} });
   if(faceEnc){
     const fb=box.querySelector("#gfaceEnc");
-    const runFace=async()=>{ try{ await faceIdUnlock(); const code=_deobf(localStorage.getItem(LS_ENCFACE)); if(!code) throw 0; await trySubmit(code); }catch(e){ /* остаётся ручной ввод */ } };
+    const runFace=async()=>{ try{ await faceIdUnlock(); const code=_deobf(localStorage.getItem(LS_ENCFACE)); if(!code) throw 0; await trySubmit(code); }catch(e){} };
     if(fb) fb.onclick=runFace;
     faceIdAvailable().then(av=>{ if(av) runFace(); });
   }
-  setTimeout(()=>inp.focus(),120);
+  setTimeout(()=>inp.focus(),150);
 }
 function _obf(s){ try{ return btoa(unescape(encodeURIComponent(String(s)))); }catch(e){ return ""; } }
 function _deobf(s){ try{ return decodeURIComponent(escape(atob(String(s)))); }catch(e){ return ""; } }
@@ -1938,28 +1940,29 @@ function setupAutoSync(){
 function showGate(mode){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show");
-  box.innerHTML='<input id="gcode" name="famfin_code" type="text" inputmode="'+(mode==="gate"?"numeric":"text")+'" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" data-1p-ignore="true" data-lpignore="true" data-form-type="other" placeholder="код" readonly>'+
+  box.innerHTML=
+    '<div style="font-size:15px;color:var(--ink2);text-align:center;font-weight:600">Введите код</div>'+
+    '<input id="gcode" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="go" name="famfin_code" data-1p-ignore="true" data-lpignore="true" data-form-type="other" placeholder="код">'+
     '<div id="gmsg" class="gmsg"></div>'+
-    '<div style="display:flex;gap:12px;align-items:center;justify-content:center;margin-top:2px"><button class="gface" id="gshow" type="button">показать</button><button class="gbtn" id="gok" type="button">→</button></div>'+
-    (mode==="lock"?'<button class="gface" id="gface" style="display:none">Face ID</button>':'');
-  const inp=box.querySelector("#gcode"), ok=box.querySelector("#gok"), shw=box.querySelector("#gshow"), msg=box.querySelector("#gmsg");
-  const unlockRO=()=>inp.removeAttribute("readonly");
-  inp.addEventListener("touchstart",unlockRO,{passive:true}); inp.addEventListener("pointerdown",unlockRO); inp.addEventListener("keydown",unlockRO);
+    '<button class="gbtn2" id="gok" type="button">Войти</button>'+
+    (mode==="lock"?'<button class="gface" id="gface" style="display:none;margin-top:6px">Face ID</button>':'')+
+    '<div class="gver">'+APP_VERSION+'</div>';
+  const inp=box.querySelector("#gcode"), ok=box.querySelector("#gok"), msg=box.querySelector("#gmsg");
   inp.addEventListener("input",()=>{ msg.textContent=""; });
-  let shown=false; shw.onclick=()=>{ shown=!shown; inp.style.webkitTextSecurity=shown?"none":"disc"; inp.style.textSecurity=shown?"none":"disc"; shw.textContent=shown?"скрыть":"показать"; unlockRO(); inp.focus(); };
-  function fail(){ msg.textContent="Неверный код"; g.classList.add("shake"); setTimeout(()=>g.classList.remove("shake"),400); inp.value=""; unlockRO(); inp.focus(); }
+  function fail(){ msg.textContent="Неверный код"; g.classList.add("shake"); setTimeout(()=>g.classList.remove("shake"),400); inp.focus(); try{inp.select();}catch(e){} }
   function submit(){
-    const v=normCode(inp.value); if(!v){ fail(); return; }
-    if(mode==="gate"){ if(simpleHash(v)===GATE_HASH || simpleHash(v.toLowerCase())===GATE_HASH){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
-    else { if(state.lock&&state.lock.codeHash&&(simpleHash(v)===state.lock.codeHash||simpleHash(v.toLowerCase())===state.lock.codeHash)) bootApp(); else fail(); }
+    const raw=inp.value||""; const v=normCode(raw); const digits=raw.replace(/\D/g,"");
+    const cand=[v, v.toLowerCase(), digits].filter(Boolean);
+    if(mode==="gate"){ if(cand.some(x=>simpleHash(x)===GATE_HASH)){ try{localStorage.setItem(LS_GATE,"1");}catch(e){} afterGate(); } else fail(); }
+    else { const t=state.lock&&state.lock.codeHash; if(t && cand.some(x=>simpleHash(x)===t)) bootApp(); else fail(); }
   }
-  ok.onclick=submit; inp.addEventListener("keydown",e=>{ if(e.key==="Enter")submit(); });
+  ok.onclick=submit; inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();submit();} });
   if(mode==="lock" && localStorage.getItem(LS_FACEID)){
     faceIdAvailable().then(av=>{ if(!av)return; const fb=box.querySelector("#gface"); if(!fb)return; fb.style.display="";
       fb.onclick=async()=>{ try{ await faceIdUnlock(); bootApp(); }catch(e){ fail(); } };
       faceIdUnlock().then(()=>bootApp()).catch(()=>{}); });
   }
-  setTimeout(()=>inp.focus(),120);
+  setTimeout(()=>inp.focus(),150);
 }
 function afterGate(){ if(state.lock&&state.lock.enabled) showGate("lock"); else bootApp(); }
 function securityBoot(){
