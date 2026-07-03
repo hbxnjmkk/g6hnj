@@ -229,9 +229,9 @@ small.hint{color:var(--ink3);font-size:11.5px}
 @media(min-width:900px){
   .topbar{height:60px;padding:0 22px}
   .bottomnav,.fab{display:none}
-  .shell{}
-  .sidebar{display:flex;flex-direction:column;width:var(--sidebar-w);flex:none;align-self:flex-start;background:color-mix(in srgb,var(--panel) 82%,transparent);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
-    border-right:1px solid var(--line);padding:14px 12px;position:sticky;top:var(--top-h);height:calc(100dvh - var(--top-h));overflow-y:auto;gap:3px}
+  .shell{padding-left:var(--sidebar-w)}
+  .sidebar{display:flex;flex-direction:column;width:var(--sidebar-w);background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(14px) saturate(1.4);-webkit-backdrop-filter:blur(14px) saturate(1.4);
+    border-right:1px solid var(--line);padding:14px 12px;position:fixed;left:0;top:var(--top-h);height:calc(100dvh - var(--top-h));overflow-y:auto;gap:3px;z-index:30}
   .sidebar .navi{display:flex;align-items:center;gap:11px;padding:11px 13px;border-radius:11px;color:var(--ink2);font-weight:600;font-size:14px}
   .sidebar .navi .ic{font-size:18px;width:22px;text-align:center}
   .sidebar .navi.active{background:color-mix(in srgb,var(--gold) 13%,transparent);color:var(--gold)}
@@ -365,9 +365,10 @@ const LS_ACCT="famfin.acct";  // облачная сессия: {base, refresh, 
 const LS_DEK="famfin.dek";    // ключ данных, закэшированный на устройстве (режим «оставаться в системе»)
 const LS_REMEMBER="famfin.remember"; // «оставаться в системе на этом устройстве» (по умолчанию вкл)
 const LS_THEME="famfin.theme";   // light / dark / auto (пункт 14)
+const LS_SIMPLE="famfin.simple"; // простой режим (только «Сегодня» + «Настройки»), на устройстве
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v3.6";
+const APP_VERSION="v3.8";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -881,13 +882,16 @@ let route="today";
 let curMonth = ym(new Date());
 function horizonStart(){ return ym(new Date()); }
 
-function go(r){ route=r; renderNav(); render(); window.scrollTo(0,0); }
+const SIMPLE_NAV=["today","settings"];
+function isSimpleMode(){ try{ return localStorage.getItem(LS_SIMPLE)==="1"; }catch(e){ return false; } }
+function go(r){ if(isSimpleMode() && SIMPLE_NAV.indexOf(r)<0) r="today"; route=r; renderNav(); render(); window.scrollTo(0,0); }
 function renderNav(){
+  const simple=isSimpleMode();
   // sidebar
   const sb=document.getElementById("sidebar"); sb.innerHTML="";
   sb.appendChild(h('<button class="btn primary block desk-add" id="deskAdd">＋ Добавить операцию</button>'));
   let lastGrp="";
-  NAV.forEach(n=>{
+  NAV.filter(n=>!simple || SIMPLE_NAV.indexOf(n.id)>=0).forEach(n=>{
     if(n.grp!==lastGrp){ sb.appendChild(h('<div class="sgroup">'+esc(n.grp)+'</div>')); lastGrp=n.grp; }
     const b=h('<button class="navi'+(route===n.id?' active':'')+'"><span class="ic">'+n.icon+'</span><span>'+esc(n.name)+'</span></button>');
     b.onclick=()=>go(n.id); sb.appendChild(b);
@@ -895,12 +899,15 @@ function renderNav(){
   sb.querySelector("#deskAdd").onclick=openAddTxn;
   // bottom nav
   const bn=document.getElementById("bottomnav"); bn.innerHTML="";
-  BOTTOM.forEach(id=>{ const n=NAV.find(x=>x.id===id);
+  const bottomIds = simple ? SIMPLE_NAV : BOTTOM;
+  bottomIds.forEach(id=>{ const n=NAV.find(x=>x.id===id);
     const b=h('<button class="'+(route===id?'active':'')+'"><span class="ic">'+n.icon+'</span><span>'+esc(n.name)+'</span></button>');
     b.onclick=()=>go(id); bn.appendChild(b);
   });
-  const more=h('<button class="'+(BOTTOM.indexOf(route)<0?'active':'')+'"><span class="ic">⋯</span><span>Ещё</span></button>');
-  more.onclick=openMore; bn.appendChild(more);
+  if(!simple){
+    const more=h('<button class="'+(BOTTOM.indexOf(route)<0?'active':'')+'"><span class="ic">⋯</span><span>Ещё</span></button>');
+    more.onclick=openMore; bn.appendChild(more);
+  }
 }
 function openMore(){
   const items=NAV.filter(n=>BOTTOM.indexOf(n.id)<0);
@@ -1222,8 +1229,10 @@ function pgToday(v){
         <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
           <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">просрочено</span>':''} · ${p.type==='income'?'доход':'расход'}${p.repeat?' · ежемесячно':''}</div></div>
         <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt(p.amount)}</div>
-        <button class="btn sm primary" style="margin-left:10px">Подтвердить</button></div>`);
-      row.querySelector("button").onclick=()=>{ confirmPlanned(p,date); toast("Подтверждено"); render_current(); };
+        <button class="btn sm primary" data-yes style="margin-left:8px">Да</button>
+        <button class="btn sm" data-no style="margin-left:6px">Нет</button></div>`);
+      row.querySelector("[data-yes]").onclick=()=>{ confirmPlanned(p,date); toast("Подтверждено"); render_current(); };
+      row.querySelector("[data-no]").onclick=()=>{ skipPlanned(p); toast(p.repeat?"Пропущено в этом месяце":"Плановая удалена"); render_current(); };
       pcard.appendChild(row);
     });
   } else if(!totalPlanned){
@@ -1342,13 +1351,22 @@ function mlenOf(k){ return new Date(+k.slice(0,4),+k.slice(5,7),0).getDate(); }
 function plannedActive(){ return (state.planned||[]).filter(p=>p.active!==false); }
 // повторяющийся уже проведён в этом месяце?
 function plannedDoneInMonth(p,k){ return state.txns.some(t=>t.fromPlanned===p.id && ym(t.date)===k); }
+// повторяющийся пропущен («Нет») в этом месяце?
+function plannedSkippedInMonth(p,k){ return Array.isArray(p.skip) && p.skip.includes(k); }
+// «Нет»: разовый — удалить; повторяющийся — сбросить только этот месяц
+function skipPlanned(p){
+  const rm=realMonth();
+  if(!p.repeat){ state.planned=state.planned.filter(x=>x.id!==p.id); }
+  else { p.skip=Array.isArray(p.skip)?p.skip:[]; if(!p.skip.includes(rm)) p.skip.push(rm); }
+  save();
+}
 // эффективная дата планового пункта в месяце k (повтор — число, зажатое к длине месяца)
 function plannedDateInMonth(p,k){ if(p.repeat){ return k+"-"+String(Math.min(+p.day||1,mlenOf(k))).padStart(2,"0"); } return p.date; }
 // плановые пункты, применимые к месяцу k и ещё не проведённые (для календаря)
 function plannedForMonth(k){
   const out=[];
   plannedActive().forEach(p=>{
-    if(p.repeat){ if(!plannedDoneInMonth(p,k)) out.push({date:plannedDateInMonth(p,k),day:Math.min(+p.day||1,mlenOf(k)),type:p.type,amount:+p.amount||0,categoryId:p.categoryId,label:p.label||catName(p.categoryId),repeat:true,id:p.id}); }
+    if(p.repeat){ if(!plannedDoneInMonth(p,k) && !plannedSkippedInMonth(p,k)) out.push({date:plannedDateInMonth(p,k),day:Math.min(+p.day||1,mlenOf(k)),type:p.type,amount:+p.amount||0,categoryId:p.categoryId,label:p.label||catName(p.categoryId),repeat:true,id:p.id}); }
     else { if(p.date && ym(p.date)===k) out.push({date:p.date,day:+String(p.date).slice(8,10),type:p.type,amount:+p.amount||0,categoryId:p.categoryId,label:p.label||catName(p.categoryId),repeat:false,id:p.id}); }
   });
   return out;
@@ -1358,7 +1376,7 @@ function duePlanned(){
   const rm=realMonth(), today=todayISOdate();
   const list=[];
   plannedActive().forEach(p=>{
-    if(p.repeat){ const d=plannedDateInMonth(p,rm); if(d<=today && !plannedDoneInMonth(p,rm)) list.push({p,date:d,overdue:d<today}); }
+    if(p.repeat){ const d=plannedDateInMonth(p,rm); if(d<=today && !plannedDoneInMonth(p,rm) && !plannedSkippedInMonth(p,rm)) list.push({p,date:d,overdue:d<today}); }
     else { if(p.date && p.date<=today) list.push({p,date:p.date,overdue:p.date<today}); } // разовый: висит, пока не подтвердят
   });
   return list.sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0));
@@ -1404,9 +1422,10 @@ function openPlannedManager(){
 function editPlanned(id, preset){
   preset=preset||{};
   const p=id?byId(state.planned,id):{id:null,type:preset.type||"expense",amount:"",categoryId:(preset.categoryId||null),subId:(preset.subId||null),repeat:(preset.repeat!=null?preset.repeat:true),day:1,date:"",label:"",active:true};
-  const draft={type:p.type||"expense",categoryId:p.categoryId,repeat:p.repeat!==false,day:p.day||1,date:p.date||todayISOdate(),amount:p.amount,label:p.label||""};
+  const draft={type:p.type||"expense",categoryId:p.categoryId,subId:p.subId||null,repeat:p.repeat!==false,day:p.day||1,date:p.date||todayISOdate(),amount:p.amount,label:p.label||""};
   const render=()=>{
     const cats = draft.type==="income" ? state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'})) : frequentCats();
+    const subs = (draft.type==="expense" && draft.categoryId) ? subsOf(draft.categoryId) : [];
     openSheet(`<h3>${id?'Плановая операция':'Новая плановая'}</h3>
       <div class="seg" style="margin-bottom:12px">
         <button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button>
@@ -1415,6 +1434,7 @@ function editPlanned(id, preset){
       <input class="amount-big num" id="rAmt" inputmode="decimal" placeholder="0 ${CUR}" value="${draft.amount?esc(String(draft.amount)):''}">
       <div class="field" style="margin-top:12px"><label>${draft.type==='income'?'Источник':'Категория'}</label>
         <div class="opts" id="rCat">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}</div></div>
+      ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts" id="rSub">${subs.map(s=>`<button class="opt ${draft.subId===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Когда</label>
         <div class="seg" id="rMode"><button data-mode="repeat" class="${draft.repeat?'active':''}">🔁 Ежемесячно</button><button data-mode="once" class="${!draft.repeat?'active':''}">📅 Разово (дата)</button></div></div>
       ${draft.repeat
@@ -1426,8 +1446,9 @@ function editPlanned(id, preset){
       <button class="btn ghost block" id="rCancel" style="margin-top:8px">Отмена</button>`,
     el=>{
       const cap=()=>{ draft.amount=el.querySelector("#rAmt").value; draft.label=el.querySelector("#rLabel").value; if(el.querySelector("#rDay"))draft.day=el.querySelector("#rDay").value; if(el.querySelector("#rDate"))draft.date=el.querySelector("#rDate").value; };
-      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{ cap(); draft.type=b.dataset.type; draft.categoryId=null; render(); });
-      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{ cap(); draft.categoryId=b.dataset.cat; render(); });
+      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{ cap(); draft.type=b.dataset.type; draft.categoryId=null; draft.subId=null; render(); });
+      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{ cap(); draft.categoryId=b.dataset.cat; const ss=subsOf(draft.categoryId); draft.subId=ss.length===1?ss[0].id:null; render(); });
+      el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{ cap(); draft.subId=b.dataset.sub; render(); });
       el.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ cap(); draft.repeat=(b.dataset.mode==="repeat"); render(); });
       el.querySelector("#rCancel").onclick=openPlannedManager;
       el.querySelector("#rSave").onclick=()=>{
@@ -1435,11 +1456,12 @@ function editPlanned(id, preset){
         if(!amount||amount<=0){ toast("Введите сумму"); return; }
         if(!draft.categoryId){ toast("Выберите категорию"); return; }
         const label=el.querySelector("#rLabel").value.trim();
+        const subId = draft.type==="expense" ? (draft.subId||null) : null;
         let rec;
-        if(draft.repeat){ let day=parseInt(el.querySelector("#rDay").value,10)||1; if(day<1)day=1; if(day>31)day=31; rec={type:draft.type,amount,categoryId:draft.categoryId,repeat:true,day,date:null,label}; }
-        else { const date=el.querySelector("#rDate").value||todayISOdate(); rec={type:draft.type,amount,categoryId:draft.categoryId,repeat:false,day:null,date,label}; }
+        if(draft.repeat){ let day=parseInt(el.querySelector("#rDay").value,10)||1; if(day<1)day=1; if(day>31)day=31; rec={type:draft.type,amount,categoryId:draft.categoryId,subId,repeat:true,day,date:null,label}; }
+        else { const date=el.querySelector("#rDate").value||todayISOdate(); rec={type:draft.type,amount,categoryId:draft.categoryId,subId,repeat:false,day:null,date,label}; }
         if(id){ Object.assign(p,rec); }
-        else { state.planned.push({id:uid(),subId:null,memberId:curMember(),active:true,...rec}); }
+        else { state.planned.push({id:uid(),memberId:curMember(),active:true,...rec}); }
         save(); toast("Сохранено"); openPlannedManager();
       };
       if(id){ el.querySelector("#rDel").onclick=()=>{ if(confirm("Удалить плановую операцию?")){ state.planned=state.planned.filter(x=>x.id!==id); save(); toast("Удалено"); openPlannedManager(); } }; }
@@ -1586,7 +1608,7 @@ function pgPlan(v){
       <div class="lrow" style="gap:8px"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">💰</div>
         <input style="flex:1;min-width:0;background:transparent;border:none;padding:0;font-weight:600" value="${esc(s.name)}" data-sname>
         <input class="num right" style="width:118px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${incomeSrcPlanned(k,s.id)||''}" data-inc="${s.id}">
-        <button class="iconbtn" data-plan title="плановый доход">＋</button>
+        <button class="btn ghost" style="padding:5px 9px;font-size:11px;flex:none" data-plan title="плановый доход">＋ план</button>
         <button class="iconbtn" data-del title="удалить источник">✕</button></div>
       <div class="chiprow" style="margin-top:6px"><button class="chip ${sk==='labor'?'active':''}" data-k="labor">💪 Труд</button><button class="chip ${sk==='capital'?'active':''}" data-k="capital">📈 Капитал</button></div>
     </div>`);
@@ -1610,7 +1632,7 @@ function pgPlan(v){
       const subs=subsOf(c.id);
       const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:6px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}</span>
         ${subs.length?`<span class="num dim" data-ctag="${c.id}" style="font-size:12px">${fmt(subs.reduce((a,su)=>a+(+plan[su.id]||0),0))}</span>`:''}
-        <button class="iconbtn" data-cplan title="плановый платёж">📅</button>
+        <button class="btn ghost" style="padding:5px 9px;font-size:11px;flex:none" data-cplan title="плановый платёж">＋ план</button>
         <button class="iconbtn" data-caddsub title="подкатегория">＋</button>
         <button class="iconbtn" data-cedit title="переименовать">✎</button>
         <button class="iconbtn" data-cdel title="удалить">🗑</button></div>`);
@@ -1624,7 +1646,7 @@ function pgPlan(v){
           const row=h(`<div class="lrow" style="padding-left:8px;gap:6px"><div class="ic" style="width:24px;height:24px;font-size:11px;background:${tint(g.color,10)};color:${g.color}">•</div>
             <div class="t1" style="flex:1;min-width:0">${esc(su.name)}</div>
             <input class="num right" style="width:110px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[su.id]?plan[su.id]:''}" data-plan="${su.id}">
-            <button class="iconbtn" data-splan title="плановый платёж">📅</button>
+            <button class="btn ghost" style="padding:5px 8px;font-size:11px;flex:none" data-splan title="плановый платёж">план</button>
             <button class="iconbtn" data-sdel title="удалить">✕</button></div>`);
           wirePlan(row);
           row.querySelector("[data-splan]").onclick=()=>editPlanned(null,{type:'expense',categoryId:c.id,subId:su.id,repeat:false});
@@ -2713,6 +2735,13 @@ function pgSettings(v){
   v.appendChild(bar);
   const body=h(`<div></div>`); v.appendChild(body);
   const tabAppend=(t,el)=>{ if(settingsTab===t) body.appendChild(el); };
+  // Простой режим (на устройстве)
+  const simpleOn=isSimpleMode();
+  const simpleCard=h(`<div class="card"><h3>Простой режим ${simpleOn?'<span class="pill g" style="margin-left:auto">включён</span>':'<span class="pill" style="margin-left:auto">выключен</span>'}</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-6px">Оставляет только «Сегодня» и «Настройки»: быстро вносить доходы/расходы и видеть остаток на сегодня. Остальные разделы скрыты. Настройка только для этого устройства.</p>
+    <button class="btn ${simpleOn?'':'primary'} block" id="simpleToggle" style="padding:12px">${simpleOn?'Вернуть полный режим':'Включить простой режим'}</button></div>`);
+  simpleCard.querySelector("#simpleToggle").onclick=()=>{ try{ if(isSimpleMode())localStorage.removeItem(LS_SIMPLE); else localStorage.setItem(LS_SIMPLE,"1"); }catch(e){} renderNav(); render_current(); };
+  tabAppend("general", simpleCard);
   tabAppend("general", appearanceCard());
 
   // participants
@@ -3322,7 +3351,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.buildWorkbookSheets=buildWorkbookSheets; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); watchAutoTheme();
 ACCT.boot().then(()=>{
