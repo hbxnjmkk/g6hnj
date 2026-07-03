@@ -161,7 +161,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 .lrow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--line)}
 .lrow:last-child{border-bottom:none}
 .lrow .ic{width:38px;height:38px;border-radius:11px;display:grid;place-items:center;font-size:17px;flex:none;background:var(--panel2)}
-.lrow .t1{font-weight:600;font-size:14px} .lrow .t2{font-size:12px;color:var(--ink3);margin-top:1px}
+.lrow .t1{font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .lrow .t2{font-size:12px;color:var(--ink3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lrow .amt{margin-left:auto;font-weight:700;text-align:right;white-space:nowrap}
 .amt.exp{color:var(--ink)} .amt.inc{color:var(--green)}
 
@@ -367,7 +367,7 @@ const LS_REMEMBER="famfin.remember"; // «оставаться в системе
 const LS_THEME="famfin.theme";   // light / dark / auto (пункт 14)
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v3.2";
+const APP_VERSION="v3.6";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -445,7 +445,7 @@ function seedState(){
     version:1, updatedAt:nowISO(),
     settings:{currency:CUR,startMonth:"2026-06",horizon:12,withdrawRatePct:4},
     groups, categories:C, subcategories:S,
-    txns:[], plans:{}, recurring:[],
+    txns:[], plans:{}, recurring:[], planned:[],
     assets, liabilities:liab, incomeSources:income,
     goals:[], netWorthHistory:[],
     members:[],
@@ -464,7 +464,12 @@ function load(){
   try{ const raw=localStorage.getItem(LS_KEY); if(raw){ const s=JSON.parse(raw); if(s&&s.__enc){ __encEnv=s; return seedState(); } return migrate(s);} }catch(e){}
   const s=seedState(); try{localStorage.setItem(LS_KEY,JSON.stringify(s));}catch(e){} return s;
 }
-function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.incomePlans=s.incomePlans||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.netWorthHistory=s.netWorthHistory||[];
+function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||{enabled:false,codeHash:null}; s.snapshots=s.snapshots||{}; s.incomePlans=s.incomePlans||{}; s.goals=s.goals||[]; s.recurring=s.recurring||[]; s.planned=s.planned||[]; s.netWorthHistory=s.netWorthHistory||[];
+  // единая модель: старые «повторяющиеся» → плановые с повтором
+  if(Array.isArray(s.recurring) && s.recurring.length){
+    s.recurring.forEach(r=>{ if(!s.planned.some(p=>p.id===r.id)) s.planned.push({id:r.id,type:r.type||"expense",amount:r.amount,categoryId:r.categoryId,subId:r.subId,memberId:r.memberId,label:r.label,repeat:true,day:r.day||1,active:r.active!==false}); });
+    s.recurring=[];
+  }
   if(Array.isArray(s.groups) && !s.groups.some(g=>g.id==="g6")){ const idx=s.groups.findIndex(g=>g.id==="gi"); const g6={id:"g6",name:"Пожертвования",kind:"expense",color:"#C77DA6",note:"Giving — отдаём, не копим (это расход)"}; if(idx>=0)s.groups.splice(idx,0,g6); else s.groups.push(g6); }
   if(Array.isArray(s.categories)){ const cc=s.categories.find(c=>c.id==="c_char"); if(cc && cc.groupId==="g5") cc.groupId="g6"; }
   if(Array.isArray(s.categories)){ const cf=s.categories.find(c=>c.id==="c_cafe"); if(cf && cf.groupId==="g2") cf.groupId="g4"; }
@@ -494,7 +499,7 @@ function save(pushCloud=true){
 const SYNC_COLLS = {
   txns:{type:'array'}, assets:{type:'array'}, liabilities:{type:'array'},
   incomeSources:{type:'array'}, categories:{type:'array'}, subcategories:{type:'array'},
-  groups:{type:'array'}, members:{type:'array'}, goals:{type:'array'}, recurring:{type:'array'},
+  groups:{type:'array'}, members:{type:'array'}, goals:{type:'array'}, recurring:{type:'array'}, planned:{type:'array'},
   plans:{type:'map'}, incomePlans:{type:'map'}, snapshots:{type:'map'}, freq:{type:'map'},
   netWorthHistory:{type:'arraykey', key:'date'},
   settings:{type:'scalar'}, lock:{type:'scalar'}
@@ -1060,14 +1065,29 @@ function openAddTxn(preset){
         if(!amount||amount<=0){ toast("Введите сумму"); el.querySelector("#amt").focus(); return; }
         if(!draft.categoryId){ toast("Выберите категорию"); return; }
         const date=el.querySelector("#dt").value||todayISOdate();
-        const t={id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment:el.querySelector("#cm").value.trim(),memberId:draft.memberId||curMember(),createdAt:nowISO()};
+        const comment=el.querySelector("#cm").value.trim();
+        const today=todayISOdate();
+        const base={type:draft.type,amount,categoryId:draft.categoryId,subId:draft.subId,memberId:draft.memberId||curMember(),label:comment||catName(draft.categoryId)};
         if(repChk.checked){
+          // повторяющийся план (ежемесячно)
           let day=parseInt(repDay.value,10); if(!day||day<1)day=parseInt(date.slice(8,10),10)||1; if(day>31)day=31;
-          const rec={id:uid(),type:draft.type,amount,categoryId:draft.categoryId,subId:draft.subId,day,label:t.comment||catName(draft.categoryId),memberId:t.memberId,active:true};
-          state.recurring.push(rec); t.fromRecurring=rec.id;   // текущая уже проведена — не будет «ждать» в этом месяце
+          const pid=uid();
+          state.planned.push({id:pid,...base,repeat:true,day,date:null,active:true});
+          if(date<=today){ // сегодняшний/прошлый экземпляр — сразу факт
+            state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:base.memberId,createdAt:nowISO(),fromPlanned:pid});
+            state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
+            save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId);
+          } else { save(); closeSheet(); render_current(); toast("Плановый повторяющийся добавлен"); }
+        } else if(date>today){
+          // разовый плановый (дата в будущем) — в факт не идёт
+          state.planned.push({id:uid(),...base,repeat:false,day:null,date,active:true});
+          save(); closeSheet(); render_current(); toast("Плановая операция добавлена — подтвердите в её день");
+        } else {
+          // обычный факт
+          state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:base.memberId,createdAt:nowISO()});
+          state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
+          save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId);
         }
-        state.txns.push(t); state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1; save();
-        closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId);
       };
       el.querySelector("#cancelTxn").onclick=closeSheet;
     });
@@ -1190,22 +1210,28 @@ function pgToday(v){
     ${kpiCard("В капитал",fmt(m.capital),"накопления+долг","pos")}
   </div>`));
 
-  // recurring
-  const due=dueRecurring(k);
-  const allRec=(state.recurring||[]).filter(r=>r.active!==false);
-  const rcard=h(`<div class="card"><h3>🔁 Повторяющиеся платежи ${due.length?`<span class="tag">${due.length} ждут</span>`:''}<button class="btn sm ghost" id="recManage" style="margin-left:auto">Управление</button></h3></div>`);
-  rcard.querySelector("#recManage").onclick=openRecurringManager;
-  if(due.length){
-    due.forEach(r=>{ const row=h(`<div class="lrow"><div class="ic">🔁</div><div style="flex:1;min-width:0"><div class="t1">${esc(r.label||catName(r.categoryId))}</div><div class="t2">${esc(catName(r.categoryId))} · ${r.day} число${r.type==='income'?' · доход':''}</div></div>
-       <div class="amt">${fmt(r.amount)}</div><button class="btn sm primary" style="margin-left:10px">Провести</button></div>`);
-       row.querySelector("button").onclick=()=>{ const mlen=new Date(+k.slice(0,4),+k.slice(5,7),0).getDate(); const dd=Math.min(+r.day||1,mlen); const t={id:uid(),type:r.type||"expense",date:k+"-"+String(dd).padStart(2,"0"),amount:r.amount,categoryId:r.categoryId,subId:r.subId,comment:(r.label||"")+" (авто)",memberId:r.memberId||curMember(),createdAt:nowISO(),fromRecurring:r.id}; state.txns.push(t); save(); toast("Проведено"); render_current(); };
-       rcard.appendChild(row); });
-  } else if(!allRec.length){
-    rcard.appendChild(h(`<div class="empty" style="padding:12px 6px">Регулярных платежей нет. Отметьте «🔁 Повторять ежемесячно» при добавлении операции — аренда, кредит, подписки будут напоминать о себе и попадут в календарь по дням.</div>`));
+  // плановые к подтверждению на сегодня (доходы + расходы, разовые + повторяющиеся)
+  const duep = (k===realMonth()) ? duePlanned() : [];
+  const totalPlanned = plannedActive().length;
+  const pcard=h(`<div class="card"><h3>✅ Подтвердить плановые на сегодня ${duep.length?`<span class="tag">${duep.length}</span>`:''}<button class="btn sm ghost" id="planManage" style="margin-left:auto">Плановые</button></h3></div>`);
+  pcard.querySelector("#planManage").onclick=openPlannedManager;
+  if(duep.length){
+    duep.forEach(({p,date,overdue})=>{
+      const dstr=date.slice(8,10)+"."+date.slice(5,7);
+      const row=h(`<div class="lrow"><div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
+        <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
+          <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">просрочено</span>':''} · ${p.type==='income'?'доход':'расход'}${p.repeat?' · ежемесячно':''}</div></div>
+        <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt(p.amount)}</div>
+        <button class="btn sm primary" style="margin-left:10px">Подтвердить</button></div>`);
+      row.querySelector("button").onclick=()=>{ confirmPlanned(p,date); toast("Подтверждено"); render_current(); };
+      pcard.appendChild(row);
+    });
+  } else if(!totalPlanned){
+    pcard.appendChild(h(`<div class="empty" style="padding:12px 6px">Плановых операций нет. Поставьте у операции дату в будущем или отметьте «🔁 Повторять ежемесячно» — они появятся здесь в свой день и в календаре.</div>`));
   } else {
-    rcard.appendChild(h(`<div class="okbox" style="margin:0">Все повторяющиеся платежи за ${ymShort(k)} проведены. 👍</div>`));
+    pcard.appendChild(h(`<div class="okbox" style="margin:0">На сегодня всё подтверждено. 👍 Будущие плановые — в календаре.</div>`));
   }
-  v.appendChild(rcard);
+  v.appendChild(pcard);
 
   // recent
   const recent=state.txns.slice().sort((a,b)=>(b.date+b.createdAt).localeCompare(a.date+a.createdAt)).slice(0,6);
@@ -1224,7 +1250,7 @@ function dayPlan(k){
   const isCur=(k===rm), isFuture=(k>rm);
   const todayDay=isCur?new Date().getDate():(monthLen+1);
   const txM=txnsOfMonth(k);
-  const due=dueRecurring(k);
+  const plan=plannedForMonth(k);
   const days=[]; let bal=start, firstGap=null, plannedRecurExp=0;
   for(let d=1; d<=monthLen; d++){
     const date=k+"-"+String(d).padStart(2,"0");
@@ -1236,12 +1262,12 @@ function dayPlan(k){
       else { outs+=amt; items.push({kind:"fact",type:"expense",label:(t.comment||catName(t.categoryId)),amount:amt}); }
     });
     if(isFuture || (isCur && d>=todayDay)){
-      due.filter(r=>Math.min(+r.day||1,monthLen)===d).forEach(r=>{
-        const amt=+r.amount||0;
-        if(r.type==="income"){ ins+=amt; items.push({kind:"plan",type:"income",label:(r.label||catName(r.categoryId)),amount:amt}); }
+      plan.filter(p=>p.day===d).forEach(p=>{
+        const amt=+p.amount||0;
+        if(p.type==="income"){ ins+=amt; items.push({kind:"plan",type:"income",label:p.label,amount:amt}); }
         else { plannedRecurExp+=amt;
-          if(isCapCat(r.categoryId)){ items.push({kind:"plan",type:"expense",capital:true,label:(r.label||catName(r.categoryId)),amount:amt}); }
-          else { outs+=amt; items.push({kind:"plan",type:"expense",label:(r.label||catName(r.categoryId)),amount:amt}); }
+          if(isCapCat(p.categoryId)){ items.push({kind:"plan",type:"expense",capital:true,label:p.label,amount:amt}); }
+          else { outs+=amt; items.push({kind:"plan",type:"expense",label:p.label,amount:amt}); }
         }
       });
     }
@@ -1265,9 +1291,9 @@ function pgCalendar(v){
       ${kpiCard("С учётом плана",fmt(dp.endWithPlan,{plus:true}),dp.undated>0?"−"+fmt(dp.undated,{bare:true})+" без даты":"всё с датами",dp.endWithPlan>=0?"pos":"neg")}
     </div>
     ${dp.firstGap!==null?`<div class="warnbox" style="margin:12px 0 0">⚠️ Кассовый разрыв: баланс уходит в минус ${dp.firstGap} числа. Перенесите платёж или добавьте поступление.</div>`:''}
-    <div class="linrow" style="margin-top:10px"><span class="dim" style="font-size:12px">Регулярные платежи раскладываются по числам сами.</span><button class="btn sm ghost" id="calRec">🔁 Повторяющиеся</button></div>
+    <div class="linrow" style="margin-top:10px"><span class="dim" style="font-size:12px">Регулярные платежи раскладываются по числам сами.</span><button class="btn sm ghost" id="calRec">📅 Плановые</button></div>
   </div>`);
-  sum.querySelector("#calRec").onclick=openRecurringManager;
+  sum.querySelector("#calRec").onclick=openPlannedManager;
   v.appendChild(sum);
 
   if(dp.undated>0) v.appendChild(h(`<div class="infobox">Плановые расходы без конкретной даты: <b>${fmt(dp.undated)}</b>. По дням они не разложены (учтены только в «на конец месяца с учётом плана»). Задайте им день через повторяющиеся платежи — и они встанут в календарь.</div>`));
@@ -1312,36 +1338,76 @@ function txnRow(t){
 }
 function fmtDate(d){ const x=new Date(d); return x.getDate()+" "+MONTHS_RU_SHORT[x.getMonth()]; }
 function planMonthTotal(k){ const p=state.plans[k]||{}; return Object.values(p).reduce((a,x)=>a+(+x||0),0); }
-function dueRecurring(k){ return (state.recurring||[]).filter(r=>r.active!==false).filter(r=>!state.txns.some(t=>t.fromRecurring===r.id&&ym(t.date)===k)); }
+function mlenOf(k){ return new Date(+k.slice(0,4),+k.slice(5,7),0).getDate(); }
+function plannedActive(){ return (state.planned||[]).filter(p=>p.active!==false); }
+// повторяющийся уже проведён в этом месяце?
+function plannedDoneInMonth(p,k){ return state.txns.some(t=>t.fromPlanned===p.id && ym(t.date)===k); }
+// эффективная дата планового пункта в месяце k (повтор — число, зажатое к длине месяца)
+function plannedDateInMonth(p,k){ if(p.repeat){ return k+"-"+String(Math.min(+p.day||1,mlenOf(k))).padStart(2,"0"); } return p.date; }
+// плановые пункты, применимые к месяцу k и ещё не проведённые (для календаря)
+function plannedForMonth(k){
+  const out=[];
+  plannedActive().forEach(p=>{
+    if(p.repeat){ if(!plannedDoneInMonth(p,k)) out.push({date:plannedDateInMonth(p,k),day:Math.min(+p.day||1,mlenOf(k)),type:p.type,amount:+p.amount||0,categoryId:p.categoryId,label:p.label||catName(p.categoryId),repeat:true,id:p.id}); }
+    else { if(p.date && ym(p.date)===k) out.push({date:p.date,day:+String(p.date).slice(8,10),type:p.type,amount:+p.amount||0,categoryId:p.categoryId,label:p.label||catName(p.categoryId),repeat:false,id:p.id}); }
+  });
+  return out;
+}
+// плановые «к подтверждению на сегодня»: наступил день/дата и ещё не проведены (старые → новые)
+function duePlanned(){
+  const rm=realMonth(), today=todayISOdate();
+  const list=[];
+  plannedActive().forEach(p=>{
+    if(p.repeat){ const d=plannedDateInMonth(p,rm); if(d<=today && !plannedDoneInMonth(p,rm)) list.push({p,date:d,overdue:d<today}); }
+    else { if(p.date && p.date<=today) list.push({p,date:p.date,overdue:p.date<today}); } // разовый: висит, пока не подтвердят
+  });
+  return list.sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0));
+}
+// подтвердить плановый пункт → создать факт-операцию; разовый удаляется
+function confirmPlanned(p,dateStr,amount){
+  const amt=amount!=null?amount:(+p.amount||0);
+  state.txns.push({id:uid(),type:p.type||"expense",date:dateStr,amount:amt,categoryId:p.categoryId,subId:p.subId,comment:(p.label||catName(p.categoryId))+(p.repeat?" (авто)":" (план)"),memberId:p.memberId||curMember(),createdAt:nowISO(),fromPlanned:p.id});
+  state.freq[p.categoryId]=(state.freq[p.categoryId]||0)+1;
+  if(!p.repeat){ state.planned=state.planned.filter(x=>x.id!==p.id); }
+  save();
+}
 
-function openRecurringManager(){
-  const list=(state.recurring||[]).slice().sort((a,b)=>(a.day||0)-(b.day||0));
-  const rows = list.length ? list.map(r=>`<div class="lrow" data-r="${r.id}">
-      <div class="ic">${r.type==='income'?'💰':'🔁'}</div>
-      <div style="flex:1;min-width:0"><div class="t1">${esc(r.label||catName(r.categoryId))}</div>
-        <div class="t2">${esc(catName(r.categoryId))} · ${r.day} число · ${r.type==='income'?'доход':'расход'}${r.active===false?' · <span style="color:var(--ink3)">выключен</span>':''}</div></div>
-      <div class="amt">${fmt(r.amount)}</div>
-      <button class="iconbtn" data-toggle title="${r.active===false?'включить':'пауза'}">${r.active===false?'▶️':'⏸'}</button>
-      <button class="iconbtn" data-edit title="изменить">✎</button></div>`).join("")
-    : `<div class="empty" style="padding:14px 6px">Пока нет повторяющихся платежей. Добавьте — они будут напоминать о себе на «Сегодня» и появятся в календаре по дням.</div>`;
-  openSheet(`<h3>Повторяющиеся платежи</h3>
-    <p class="muted" style="font-size:12.5px;margin-top:-6px">Регулярные платежи с числом месяца: аренда, кредит, подписки, зарплата. Проводятся в один тап на «Сегодня» и учитываются в календаре.</p>
+function openPlannedManager(){
+  const list=(state.planned||[]).slice().sort((a,b)=>{
+    const ka=a.repeat?("A"+String(a.day||0).padStart(2,"0")):("B"+(a.date||""));
+    const kb=b.repeat?("A"+String(b.day||0).padStart(2,"0")):("B"+(b.date||""));
+    return ka<kb?-1:1;
+  });
+  const rows = list.length ? list.map(p=>{
+    const when = p.repeat ? (p.day+" число · ежемесячно") : ("дата "+(p.date||"—"));
+    return `<div class="lrow" data-r="${p.id}">
+      <div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
+      <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
+        <div class="t2">${when} · ${p.type==='income'?'доход':'расход'}${p.active===false?' · <span style="color:var(--ink3)">пауза</span>':''}</div></div>
+      <div class="amt">${fmt(p.amount)}</div>
+      ${p.repeat?`<button class="iconbtn" data-toggle title="${p.active===false?'включить':'пауза'}">${p.active===false?'▶️':'⏸'}</button>`:''}
+      <button class="iconbtn" data-edit title="изменить">✎</button></div>`;
+  }).join("")
+    : `<div class="empty" style="padding:14px 6px">Плановых операций нет. Поставьте у операции дату в будущем (разовый план) или отметьте «🔁 Повторять ежемесячно» — они появятся здесь, на «Сегодня» в свой день и в календаре.</div>`;
+  openSheet(`<h3>Плановые и повторяющиеся</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-6px">Будущие и регулярные операции. Подтверждаются в свой день на «Сегодня» и учитываются в календаре. В факт попадают только после подтверждения.</p>
     <div id="recList">${rows}</div>
-    <button class="btn primary block" id="recAdd" style="margin-top:10px;padding:13px">＋ Добавить повторяющийся платёж</button>
+    <button class="btn primary block" id="recAdd" style="margin-top:10px;padding:13px">＋ Добавить плановую</button>
     <button class="btn ghost block" id="recClose" style="margin-top:8px">Закрыть</button>`,
   el=>{
     el.querySelector("#recClose").onclick=closeSheet;
-    el.querySelector("#recAdd").onclick=()=>editRecurring(null);
-    el.querySelectorAll("[data-toggle]").forEach(b=>b.onclick=()=>{ const id=b.closest("[data-r]").dataset.r; const r=byId(state.recurring,id); if(r){ r.active=(r.active===false); save(); openRecurringManager(); } });
-    el.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{ const id=b.closest("[data-r]").dataset.r; editRecurring(id); });
+    el.querySelector("#recAdd").onclick=()=>editPlanned(null);
+    el.querySelectorAll("[data-toggle]").forEach(b=>b.onclick=()=>{ const id=b.closest("[data-r]").dataset.r; const p=byId(state.planned,id); if(p){ p.active=(p.active===false); save(); openPlannedManager(); } });
+    el.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{ const id=b.closest("[data-r]").dataset.r; editPlanned(id); });
   });
 }
-function editRecurring(id){
-  const r=id?byId(state.recurring,id):{id:null,type:"expense",amount:"",categoryId:null,subId:null,day:1,label:"",active:true};
-  const draft={type:r.type||"expense",categoryId:r.categoryId,day:r.day||1,amount:r.amount,label:r.label||""};
+function editPlanned(id, preset){
+  preset=preset||{};
+  const p=id?byId(state.planned,id):{id:null,type:preset.type||"expense",amount:"",categoryId:(preset.categoryId||null),subId:(preset.subId||null),repeat:(preset.repeat!=null?preset.repeat:true),day:1,date:"",label:"",active:true};
+  const draft={type:p.type||"expense",categoryId:p.categoryId,repeat:p.repeat!==false,day:p.day||1,date:p.date||todayISOdate(),amount:p.amount,label:p.label||""};
   const render=()=>{
     const cats = draft.type==="income" ? state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'})) : frequentCats();
-    openSheet(`<h3>${id?'Повторяющийся платёж':'Новый повторяющийся платёж'}</h3>
+    openSheet(`<h3>${id?'Плановая операция':'Новая плановая'}</h3>
       <div class="seg" style="margin-bottom:12px">
         <button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button>
         <button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button>
@@ -1349,26 +1415,34 @@ function editRecurring(id){
       <input class="amount-big num" id="rAmt" inputmode="decimal" placeholder="0 ${CUR}" value="${draft.amount?esc(String(draft.amount)):''}">
       <div class="field" style="margin-top:12px"><label>${draft.type==='income'?'Источник':'Категория'}</label>
         <div class="opts" id="rCat">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}</div></div>
-      <div class="field"><label>Число месяца (1–31)</label><input type="number" id="rDay" min="1" max="31" value="${draft.day||1}" style="width:120px"></div>
+      <div class="field"><label>Когда</label>
+        <div class="seg" id="rMode"><button data-mode="repeat" class="${draft.repeat?'active':''}">🔁 Ежемесячно</button><button data-mode="once" class="${!draft.repeat?'active':''}">📅 Разово (дата)</button></div></div>
+      ${draft.repeat
+        ? `<div class="field"><label>Число месяца (1–31)</label><input type="number" id="rDay" min="1" max="31" value="${draft.day||1}" style="width:120px"></div>`
+        : `<div class="field"><label>Дата</label><input type="date" id="rDate" value="${draft.date}"></div>`}
       <div class="field"><label>Название (необязательно)</label><input id="rLabel" value="${esc(draft.label)}" placeholder="напр. Аренда квартиры"></div>
       <button class="btn primary block" id="rSave" style="padding:13px">Сохранить</button>
       ${id?'<button class="btn danger block" id="rDel" style="margin-top:8px">Удалить</button>':''}
       <button class="btn ghost block" id="rCancel" style="margin-top:8px">Отмена</button>`,
     el=>{
-      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{ draft.amount=el.querySelector("#rAmt").value; draft.type=b.dataset.type; draft.categoryId=null; render(); });
-      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{ draft.amount=el.querySelector("#rAmt").value; draft.day=el.querySelector("#rDay").value; draft.label=el.querySelector("#rLabel").value; draft.categoryId=b.dataset.cat; render(); });
-      el.querySelector("#rCancel").onclick=openRecurringManager;
+      const cap=()=>{ draft.amount=el.querySelector("#rAmt").value; draft.label=el.querySelector("#rLabel").value; if(el.querySelector("#rDay"))draft.day=el.querySelector("#rDay").value; if(el.querySelector("#rDate"))draft.date=el.querySelector("#rDate").value; };
+      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{ cap(); draft.type=b.dataset.type; draft.categoryId=null; render(); });
+      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{ cap(); draft.categoryId=b.dataset.cat; render(); });
+      el.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ cap(); draft.repeat=(b.dataset.mode==="repeat"); render(); });
+      el.querySelector("#rCancel").onclick=openPlannedManager;
       el.querySelector("#rSave").onclick=()=>{
         const amount=parseFloat(String(el.querySelector("#rAmt").value).replace(/\s/g,"").replace(",",".")); 
         if(!amount||amount<=0){ toast("Введите сумму"); return; }
         if(!draft.categoryId){ toast("Выберите категорию"); return; }
-        let day=parseInt(el.querySelector("#rDay").value,10)||1; if(day<1)day=1; if(day>31)day=31;
         const label=el.querySelector("#rLabel").value.trim();
-        if(id){ Object.assign(r,{type:draft.type,amount,categoryId:draft.categoryId,day,label}); }
-        else { state.recurring.push({id:uid(),type:draft.type,amount,categoryId:draft.categoryId,subId:null,day,label,memberId:curMember(),active:true}); }
-        save(); toast("Сохранено"); openRecurringManager();
+        let rec;
+        if(draft.repeat){ let day=parseInt(el.querySelector("#rDay").value,10)||1; if(day<1)day=1; if(day>31)day=31; rec={type:draft.type,amount,categoryId:draft.categoryId,repeat:true,day,date:null,label}; }
+        else { const date=el.querySelector("#rDate").value||todayISOdate(); rec={type:draft.type,amount,categoryId:draft.categoryId,repeat:false,day:null,date,label}; }
+        if(id){ Object.assign(p,rec); }
+        else { state.planned.push({id:uid(),subId:null,memberId:curMember(),active:true,...rec}); }
+        save(); toast("Сохранено"); openPlannedManager();
       };
-      if(id){ el.querySelector("#rDel").onclick=()=>{ if(confirm("Удалить повторяющийся платёж?")){ state.recurring=state.recurring.filter(x=>x.id!==id); save(); toast("Удалено"); openRecurringManager(); } }; }
+      if(id){ el.querySelector("#rDel").onclick=()=>{ if(confirm("Удалить плановую операцию?")){ state.planned=state.planned.filter(x=>x.id!==id); save(); toast("Удалено"); openPlannedManager(); } }; }
     });
   };
   render();
@@ -1377,7 +1451,7 @@ function editRecurring(id){
 /* ============================================================
    PAGE: ОПЕРАЦИИ
    ============================================================ */
-let opsFilter={type:null,cat:null,sub:null,member:null,q:"",period:{mode:"month",from:"",to:""}};
+let opsFilter={type:null,cat:null,sub:null,member:null,q:"",planned:false,period:{mode:"month",from:"",to:""}};
 function opsPeriodLabel(){ const p=opsFilter.period; if(p.mode==="year")return curMonth.slice(0,4)+" год"; if(p.mode==="all")return "всё время"; if(p.mode==="range")return (p.from?fmtDate(p.from):"…")+" – "+(p.to?fmtDate(p.to):"…"); return ymLabel(curMonth); }
 function opsBaseTxns(){
   const p=opsFilter.period||{mode:"month"};
@@ -1399,6 +1473,10 @@ function pgOps(v){
   </div>`));
 
   const fbox=h(`<div></div>`);
+  // режим: факт / плановые
+  const modeRow=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${!opsFilter.planned?'active':''}" data-mode="fact">Факт</button><button class="chip ${opsFilter.planned?'active':''}" data-mode="planned">📅 Плановые / повторяющиеся</button></div>`);
+  modeRow.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ opsFilter.planned=(b.dataset.mode==="planned"); render_current(); });
+  fbox.appendChild(modeRow);
   // период
   const pm=opsFilter.period.mode;
   const perRow=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${pm==='month'?'active':''}" data-p="month">Месяц</button><button class="chip ${pm==='year'?'active':''}" data-p="year">Год</button><button class="chip ${pm==='all'?'active':''}" data-p="all">Всё время</button><button class="chip ${pm==='range'?'active':''}" data-p="range">Период…</button></div>`);
@@ -1441,13 +1519,28 @@ function pgOps(v){
   search.querySelector("#opsQ").oninput=e=>{opsFilter.q=e.target.value; renderOpsList();};
   const cont=h(`<div class="card" id="opsList"></div>`); v.appendChild(cont);
   function renderOpsList(){
+    const box=document.getElementById("opsList"); box.innerHTML="";
+    if(opsFilter.planned){
+      let pl=(state.planned||[]).slice().sort((a,b)=>{ const ka=a.repeat?("A"+String(a.day||0).padStart(2,"0")):("B"+(a.date||"")); const kb=b.repeat?("A"+String(b.day||0).padStart(2,"0")):("B"+(b.date||"")); return ka<kb?-1:1; });
+      if(opsFilter.type) pl=pl.filter(p=>p.type===opsFilter.type);
+      if(opsFilter.member) pl=pl.filter(p=>(p.memberId||null)===opsFilter.member);
+      if(opsFilter.q) pl=pl.filter(p=>((p.label||"")+catName(p.categoryId)).toLowerCase().includes(opsFilter.q.toLowerCase()));
+      if(!pl.length){ box.appendChild(h(`<div class="empty"><div class="big">📅</div>Плановых операций нет.<br>Заведите их на «Плане» (＋ у категории) или поставьте будущую дату/повтор у операции.</div>`)); return; }
+      box.appendChild(h(`<div class="linrow" style="padding:2px 2px 10px;border-bottom:1px solid var(--line);font-size:12px"><span class="dim">Плановых: ${pl.length}</span><span class="dim">нажмите, чтобы изменить</span></div>`));
+      pl.forEach(p=>{ const when=p.repeat?(p.day+" число · ежемесячно"):("дата "+((p.date||"").slice(8,10)+"."+(p.date||"").slice(5,7))); 
+        const row=h(`<div class="lrow" style="cursor:pointer"><div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
+          <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}${p.active===false?' <span class="dim">· пауза</span>':''}</div>
+            <div class="t2">${when} · ${p.type==='income'?'доход':'расход'}</div></div>
+          <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt(p.amount)}</div></div>`);
+        row.onclick=()=>editPlanned(p.id); box.appendChild(row); });
+      return;
+    }
     let l=opsBaseTxns().slice().sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
     if(opsFilter.type) l=l.filter(t=>t.type===opsFilter.type);
     if(opsFilter.member) l=l.filter(t=>t.memberId===opsFilter.member);
     if(opsFilter.cat) l=l.filter(t=>t.categoryId===opsFilter.cat);
     if(opsFilter.sub) l=l.filter(t=>t.subId===opsFilter.sub);
     if(opsFilter.q) l=l.filter(t=>((t.comment||"")+catName(t.categoryId)+subName(t.subId)).toLowerCase().includes(opsFilter.q.toLowerCase()));
-    const box=document.getElementById("opsList"); box.innerHTML="";
     if(!l.length){ box.appendChild(h(`<div class="empty"><div class="big">🗂️</div>Нет операций по фильтру за этот месяц.</div>`)); return; }
     const fi=l.filter(t=>t.type==='income').reduce((a,t)=>a+ +t.amount,0), fe=l.filter(t=>t.type==='expense').reduce((a,t)=>a+ +t.amount,0);
     box.appendChild(h(`<div class="linrow" style="padding:2px 2px 10px;border-bottom:1px solid var(--line);font-size:12px"><span class="dim">Найдено: ${l.length}</span><span class="num dim">${fi?'+'+fmt(fi,{bare:true}):''}${fi&&fe?' · ':''}${fe?'−'+fmt(fe,{bare:true}):''}</span></div>`));
@@ -1463,7 +1556,7 @@ function fullDate(d){ const x=new Date(d); const wd=["вс","пн","вт","ср"
 function pgPlan(v){
   const k=curMonth; const plan=state.plans[k]||{};
   const total=planMonthTotal(k);
-  v.appendChild(h(`<div class="page-title">План месяца</div><div class="page-sub">${ymLabel(k)} · лимиты по категориям</div>`));
+  v.appendChild(h(`<div class="page-title">План месяца</div><div class="page-sub">${ymLabel(k)} · лимиты, статьи, источники и плановые платежи</div>`));
   v.appendChild(h(`<div class="card"><div class="row"><div><div class="eyebrow" style="margin:0">Плановый бюджет</div><div class="num" id="planBudgetBig" style="font-size:26px;font-weight:800;margin-top:4px">${fmt(total)}</div></div>
      <div class="row" style="margin-left:auto;gap:8px">
        <button class="btn sm" id="copyPrev">⇦ Из прошлого месяца</button>
@@ -1482,40 +1575,64 @@ function pgPlan(v){
   };
   v.querySelector("#fromGoals").onclick=()=>suggestPlanFromGoals();
 
-  // ---- планирование дохода по источникам ----
-  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход (план)<span class="tag num" id="planIncTag">${fmt(plannedIncome(k))}</span></h3>
-    <p class="muted" style="font-size:12px;margin:-2px 0 4px">Сколько ждёте с каждого источника в этом месяце. По умолчанию — типовая сумма из «Настройки», меняйте под конкретный месяц.</p></div>`);
-  if(!state.incomeSources.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет. Добавьте их в «Настройке».<br><button class="btn sm" style="margin-top:10px" data-nav="settings">В настройку →</button></div>`)); }
+  // ---- планирование дохода по источникам + управление источниками ----
+  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход (план)<span class="tag num" id="planIncTag">${fmt(plannedIncome(k))}</span><button class="btn sm ghost" id="addSrc" style="margin-left:auto">＋ источник</button></h3>
+    <p class="muted" style="font-size:12px;margin:-2px 0 4px">Сколько ждёте с каждого источника в этом месяце. Здесь же управляйте списком источников. «＋» у строки — разовый плановый доход с датой.</p></div>`);
+  incCard.querySelector("#addSrc").onclick=()=>{ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ state.incomeSources.push({id:uid(),name:nm.trim(),amount:0,kind:'labor'}); save(); render_current(); } };
+  if(!state.incomeSources.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет — добавьте кнопкой «＋ источник».</div>`)); }
   state.incomeSources.forEach(s=>{
-    const row=h(`<div class="lrow"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">💰</div>
-      <div class="t1" style="flex:1">${esc(s.name)}</div>
-      <input class="num right" style="width:130px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${incomeSrcPlanned(k,s.id)||''}" data-inc="${s.id}"></div>`);
-    const inp=row.querySelector("input");
+    const sk=s.kind||'labor';
+    const row=h(`<div style="padding:9px 2px;border-bottom:1px solid var(--line)">
+      <div class="lrow" style="gap:8px"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">💰</div>
+        <input style="flex:1;min-width:0;background:transparent;border:none;padding:0;font-weight:600" value="${esc(s.name)}" data-sname>
+        <input class="num right" style="width:118px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${incomeSrcPlanned(k,s.id)||''}" data-inc="${s.id}">
+        <button class="iconbtn" data-plan title="плановый доход">＋</button>
+        <button class="iconbtn" data-del title="удалить источник">✕</button></div>
+      <div class="chiprow" style="margin-top:6px"><button class="chip ${sk==='labor'?'active':''}" data-k="labor">💪 Труд</button><button class="chip ${sk==='capital'?'active':''}" data-k="capital">📈 Капитал</button></div>
+    </div>`);
+    row.querySelector("[data-sname]").onchange=e=>{ s.name=e.target.value.trim()||s.name; save(); };
+    const inp=row.querySelector("[data-inc]");
     inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; state.incomePlans[k]=state.incomePlans[k]||{}; state.incomePlans[k][s.id]=val; save(); refreshPlanTotals(); };
+    row.querySelector("[data-plan]").onclick=()=>editPlanned(null,{type:'income',categoryId:s.id,repeat:false});
+    row.querySelector("[data-del]").onclick=()=>{ if(confirm("Удалить источник «"+s.name+"»? Прошлые доходы останутся.")){ state.incomeSources=state.incomeSources.filter(x=>x.id!==s.id); save(); render_current(); } };
+    row.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); render_current(); });
     incCard.appendChild(row);
   });
   v.appendChild(incCard);
 
-  const wirePlan=(row)=>{ const inp=row.querySelector("input"); inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; const id=inp.dataset.plan; state.plans[k]=state.plans[k]||{}; if(val)state.plans[k][id]=val; else delete state.plans[k][id]; save(); refreshPlanTotals(); }; };
+  const wirePlan=(row)=>{ const inp=row.querySelector("input[data-plan]"); inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; const id=inp.dataset.plan; state.plans[k]=state.plans[k]||{}; if(val)state.plans[k][id]=val; else delete state.plans[k][id]; save(); refreshPlanTotals(); }; };
   expenseGroups().forEach(g=>{
-    const cats=catsOf(g.id); if(!cats.length)return;
+    const cats=catsOf(g.id);
     let gTot=0; cats.forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>gTot+=(+plan[su.id]||0)); else gTot+=(+plan[c.id]||0); });
-    const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}<span class="tag num" data-gtag="${g.id}">${fmt(gTot)}</span></h3></div>`);
+    const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}<span class="tag num" data-gtag="${g.id}">${fmt(gTot)}</span><button class="btn sm ghost" data-addcat style="margin-left:auto">＋ категория</button></h3></div>`);
+    card.querySelector("[data-addcat]").onclick=()=>{ const nm=prompt("Название новой категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ state.categories.push({id:uid(),groupId:g.id,name:nm.trim(),icon:"•"}); save(); render_current(); } };
     cats.forEach(c=>{
       const subs=subsOf(c.id);
+      const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:6px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}</span>
+        ${subs.length?`<span class="num dim" data-ctag="${c.id}" style="font-size:12px">${fmt(subs.reduce((a,su)=>a+(+plan[su.id]||0),0))}</span>`:''}
+        <button class="iconbtn" data-cplan title="плановый платёж">📅</button>
+        <button class="iconbtn" data-caddsub title="подкатегория">＋</button>
+        <button class="iconbtn" data-cedit title="переименовать">✎</button>
+        <button class="iconbtn" data-cdel title="удалить">🗑</button></div>`);
+      chead.querySelector("[data-cplan]").onclick=()=>editPlanned(null,{type:'expense',categoryId:c.id,repeat:false});
+      chead.querySelector("[data-caddsub]").onclick=()=>{ const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ state.subcategories.push({id:uid(),categoryId:c.id,name:nm.trim()}); save(); render_current(); } };
+      chead.querySelector("[data-cedit]").onclick=()=>{ const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){ c.name=nm.trim(); save(); render_current(); } };
+      chead.querySelector("[data-cdel]").onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); render_current(); } };
+      card.appendChild(chead);
       if(subs.length){
-        const cTot=subs.reduce((a,su)=>a+(+plan[su.id]||0),0);
-        card.appendChild(h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600"><span>${esc(c.icon||'•')} ${esc(c.name)}</span><span class="num dim" data-ctag="${c.id}" style="font-size:12px">${fmt(cTot)}</span></div>`));
         subs.forEach(su=>{
-          const row=h(`<div class="lrow" style="padding-left:8px"><div class="ic" style="width:24px;height:24px;font-size:11px;background:${tint(g.color,10)};color:${g.color}">•</div>
-            <div class="t1" style="flex:1">${esc(su.name)}</div>
-            <input class="num right" style="width:126px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[su.id]?plan[su.id]:''}" data-plan="${su.id}"></div>`);
-          wirePlan(row); card.appendChild(row);
+          const row=h(`<div class="lrow" style="padding-left:8px;gap:6px"><div class="ic" style="width:24px;height:24px;font-size:11px;background:${tint(g.color,10)};color:${g.color}">•</div>
+            <div class="t1" style="flex:1;min-width:0">${esc(su.name)}</div>
+            <input class="num right" style="width:110px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[su.id]?plan[su.id]:''}" data-plan="${su.id}">
+            <button class="iconbtn" data-splan title="плановый платёж">📅</button>
+            <button class="iconbtn" data-sdel title="удалить">✕</button></div>`);
+          wirePlan(row);
+          row.querySelector("[data-splan]").onclick=()=>editPlanned(null,{type:'expense',categoryId:c.id,subId:su.id,repeat:false});
+          row.querySelector("[data-sdel]").onclick=()=>{ if(confirm("Удалить подкатегорию «"+su.name+"»? История сохранится.")){ su.deleted=true; save(); render_current(); } };
+          card.appendChild(row);
         });
       } else {
-        const row=h(`<div class="lrow"><div class="ic" style="background:${tint(g.color,13)};color:${g.color}">${esc(c.icon||'•')}</div>
-          <div class="t1" style="flex:1">${esc(c.name)}</div>
-          <input class="num right" style="width:130px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[c.id]?plan[c.id]:''}" data-plan="${c.id}"></div>`);
+        const row=h(`<div class="lrow" style="gap:6px;padding-left:8px"><input class="num right" style="width:130px;padding:8px 10px;margin-left:auto" inputmode="numeric" placeholder="0" value="${plan[c.id]?plan[c.id]:''}" data-plan="${c.id}"></div>`);
         wirePlan(row); card.appendChild(row);
       }
     });
@@ -2195,16 +2312,54 @@ function capitalStage(){
   if(sr<0.15)return 4;
   return 5;
 }
-function compoundCard(start, monthlyAdd){
-  const r=0.07, years=20, pts=[]; let cap=start;
-  for(let y=0;y<=years;y++){ pts.push(cap); cap=cap*(1+r)+monthlyAdd*12; }
-  const max=Math.max(1,...pts), w=300, ht=90;
-  const coords=pts.map((p,i)=>`${(i/years*w).toFixed(1)},${(ht-p/max*ht).toFixed(1)}`).join(" ");
-  return h(`<div class="card"><h3>Сила сложного процента</h3>
-    <p class="muted" style="font-size:12px;margin:-2px 0 8px">Если работающий капитал ${fmtK(start)} и вы вкладываете ${fmt(monthlyAdd)}/мес под ~7% годовых с реинвестированием:</p>
-    <svg viewBox="0 0 ${w} ${ht}" style="width:100%;height:90px"><polygon points="0,${ht} ${coords} ${w},${ht}" fill="color-mix(in srgb,var(--gold) 12%,transparent)"/><polyline points="${coords}" fill="none" stroke="var(--gold)" stroke-width="2.5"/></svg>
-    <div class="grid g2" style="margin-top:10px">${kpiCard("Через 10 лет",fmtK(pts[10]),"","gold")}${kpiCard("Через 20 лет",fmtK(pts[20]),"","gold")}</div>
-    <p class="muted" style="font-size:11px;margin-top:8px">Это ориентир, а не обещание: реальная доходность колеблется. Главное — регулярность и время.</p></div>`);
+function compoundFV(start, monthly, ratePct, years){ const r=(+ratePct||0)/100; let cap=+start||0; const y=Math.max(0,Math.round(years)); for(let i=0;i<y;i++) cap=cap*(1+r)+(+monthly||0)*12; return cap; }
+function compoundCalcCard(defStart, defMonthly){
+  const card=h(`<div class="card"><h3>🧮 Калькулятор капитала</h3>
+    <p class="muted" style="font-size:12px;margin:-2px 0 10px">Сила сложного процента наглядно: деньги приносят доход, доход тоже начинает приносить доход. Значения подставлены из ваших данных — меняйте свободно.</p>
+    <div class="seg" id="ccMode" style="margin-bottom:12px"><button type="button" data-m="fwd" class="active">Накопить капитал</button><button type="button" data-m="rev">Достичь цели</button></div>
+    <div id="ccFwd">
+      <div class="field"><label>Стартовый капитал (что уже работает)</label><input class="num" id="ccStart" inputmode="numeric" value="${Math.round(defStart)}"></div>
+      <div class="field"><label>Взнос в месяц</label><input class="num" id="ccMon" inputmode="numeric" value="${Math.round(defMonthly)}"></div>
+      <div class="row" style="gap:10px"><div class="field" style="flex:1"><label>Доходность, %/год</label><input class="num" id="ccRate" inputmode="decimal" value="7"></div>
+        <div class="field" style="flex:1"><label>Срок, лет</label><input class="num" id="ccYears" inputmode="numeric" value="20"></div></div>
+    </div>
+    <div id="ccRev" style="display:none">
+      <div class="field"><label>Цель (капитал)</label><input class="num" id="ccTarget" inputmode="numeric" value="${Math.round(Math.max(defStart*2,3000000))}"></div>
+      <div class="field"><label>Стартовый капитал</label><input class="num" id="ccStart2" inputmode="numeric" value="${Math.round(defStart)}"></div>
+      <div class="row" style="gap:10px"><div class="field" style="flex:1"><label>Доходность, %/год</label><input class="num" id="ccRate2" inputmode="decimal" value="7"></div>
+        <div class="field" style="flex:1"><label>Срок, лет</label><input class="num" id="ccYears2" inputmode="numeric" value="15"></div></div>
+    </div>
+    <svg id="ccChart" viewBox="0 0 300 90" style="width:100%;height:90px;margin-top:4px"></svg>
+    <div id="ccOut" style="margin-top:8px"></div>
+    <p class="muted" style="font-size:11px;margin-top:8px">Ориентир, а не обещание: реальная доходность колеблется год к году. Что в вашей власти — <b>сколько откладывать</b> и <b>как долго не прерывать</b>.</p></div>`);
+  const $=(s)=>card.querySelector(s);
+  const num=(el)=>parseFloat(String(el.value).replace(/\s/g,"").replace(",","."))||0;
+  function drawChart(pts, years){ const max=Math.max(1,...pts), w=300, ht=90; const coords=pts.map((p,i)=>`${(i/Math.max(1,years)*w).toFixed(1)},${(ht-p/max*ht).toFixed(1)}`).join(" "); $("#ccChart").innerHTML=`<polygon points="0,${ht} ${coords} ${w},${ht}" fill="color-mix(in srgb,var(--gold) 12%,transparent)"/><polyline points="${coords}" fill="none" stroke="var(--gold)" stroke-width="2.5"/>`; }
+  function recompute(){
+    const mode=($("#ccMode .active")||{}).dataset?($("#ccMode .active").dataset.m):"fwd";
+    if(mode!=="rev"){
+      const start=num($("#ccStart")), mon=num($("#ccMon")), rate=num($("#ccRate")), years=Math.max(1,Math.min(60,Math.round(num($("#ccYears"))||1)));
+      const r=rate/100, pts=[]; let cap=start; for(let y=0;y<=years;y++){ pts.push(cap); cap=cap*(1+r)+mon*12; }
+      const final=pts[years], contrib=start+mon*12*years, growth=Math.max(0,final-contrib);
+      drawChart(pts, years);
+      $("#ccOut").innerHTML=`<div class="grid g2"><div class="kpi"><div class="k-lbl">Через ${years} лет</div><div class="k-val gold num">${fmtK(final)}</div></div>
+        <div class="kpi"><div class="k-lbl">Из них наросло само</div><div class="k-val pos num">${fmtK(growth)}</div><div class="k-sub">ваши взносы ${fmtK(contrib)}</div></div></div>
+        <p class="muted" style="font-size:11.5px;margin-top:8px">Вы вложите ${fmtK(contrib)}, а <b>${fmtK(growth)}</b> создаст сложный процент. Увеличьте срок или взнос — и доля «наросло само» вырастет заметно.</p>`;
+    } else {
+      const target=num($("#ccTarget")), start=num($("#ccStart2")), rate=num($("#ccRate2")), years=Math.max(1,Math.min(60,Math.round(num($("#ccYears2"))||1)));
+      const r=rate/100, f=Math.pow(1+r,years);
+      let monthly = r<=0 ? Math.max(0,(target-start)/(years*12)) : Math.max(0, (target-start*f)*r/(f-1)/12);
+      const pts=[]; let cap=start; for(let y=0;y<=years;y++){ pts.push(cap); cap=cap*(1+r)+monthly*12; }
+      drawChart(pts, years);
+      const more = monthly>(defMonthly||0)+1;
+      $("#ccOut").innerHTML=`<div class="kpi"><div class="k-lbl">Откладывать в месяц</div><div class="k-val gold num">${fmt(Math.round(monthly))}</div><div class="k-sub">чтобы получить ${fmtK(target)} за ${years} лет под ${rate}%</div></div>
+        <p class="muted" style="font-size:11.5px;margin-top:8px">${more?'Это больше, чем вы откладываете сейчас — поищите, что сократить, или увеличьте срок/доходность.':'Вы уже откладываете достаточно для этой цели при такой доходности. 👍'}</p>`;
+    }
+  }
+  card.querySelectorAll("#ccMode [data-m]").forEach(b=>b.onclick=()=>{ card.querySelectorAll("#ccMode [data-m]").forEach(x=>x.classList.toggle("active",x===b)); $("#ccFwd").style.display=b.dataset.m==="fwd"?"":"none"; $("#ccRev").style.display=b.dataset.m==="rev"?"":"none"; recompute(); });
+  card.querySelectorAll("input").forEach(inp=>inp.oninput=recompute);
+  recompute();
+  return card;
 }
 function pgCapital(v){
   const k=curMonth;
@@ -2222,6 +2377,12 @@ function pgCapital(v){
     ${kpiCard("Пассивный доход",fmt(pass),"в месяц, от капитала",pass>0?"pos":"")}
     ${kpiCard("Покрытие расходов",pct(cov),"по правилу 4% в год",cov>=1?"pos":"")}
   </div>`));
+  v.appendChild(h(`<div class="card"><h3>Что означают эти цифры</h3>
+    <p class="muted" style="font-size:12.5px;margin:-2px 0 0">
+      <b>Работающий капитал</b> — активы, которые приносят доход (фонды, доля в бизнесе, доходная недвижимость). Задаётся ролью «⚙️ работающий» у актива в «Балансе». Растить его — главная цель.<br><br>
+      <b>Капитал работает на X%</b> — какая доля вашего дохода уже приходит от капитала, а не от труда. Чем выше — тем меньше вы зависите от работы.<br><br>
+      <b>Пассивный доход</b> — сколько в месяц приносит капитал. Складывается из доходности работающих активов и доходов-источников типа «капитал».<br><br>
+      <b>Покрытие расходов</b> — какую часть ваших нужных трат уже мог бы покрыть капитал (по правилу 4% в год). 100% = финансовая независимость.</p></div>`));
   const target=fiTarget(), wrPct=(state.settings&&state.settings.withdrawRatePct)||4, mult=fiMultiplier();
   const fic=h(`<div class="card"><h3>Путь к независимости (правило ${mult}×)</h3>
     <div class="linrow"><span class="num" style="font-weight:700;font-size:16px">${fmtK(wc)}</span><span class="dim num">цель ${fmtK(target)}</span></div>
@@ -2245,7 +2406,19 @@ function pgCapital(v){
   } else {
     v.appendChild(h(`<div class="card"><div class="empty"><div class="big">⚙️</div>Отметьте активы по ролям в «Балансе» (резерв / работающий / личное) и тип дохода в «Настройке» (труд / капитал) — и здесь появится картина вашего работающего капитала.</div></div>`));
   }
-  v.appendChild(compoundCard(wc, Math.max(0,monthCapital(k))));
+  // Что делать, чтобы расти
+  const M=metrics(k), sr=M.savingsRate||0, dl=M.debtLoad||0, cushion=M.cushionMonths||0;
+  const steps=[];
+  if(cushion<3) steps.push("Соберите <b>подушку</b> 3–6 месяцев нужных трат на резервном счёте — это фундамент, без него инвестиции рискованны.");
+  if(dl>0.3) steps.push("<b>Гасите дорогой долг лавиной</b> (сначала самый высокий процент) — это гарантированная «доходность», равная ставке кредита.");
+  if(sr<0.15) steps.push("Поднимите <b>норму сбережений</b> к 15–20%: срежьте необязательные траты в «Качестве жизни», а не в нужном.");
+  steps.push("Каждый месяц направляйте свободные деньги в <b>работающий капитал</b> (фонды, инвестиции), а не в новый уровень трат.");
+  steps.push("Не прерывайте процесс: <b>время</b> и <b>регулярность</b> важнее удачного момента — ниже это видно на калькуляторе.");
+  v.appendChild(h(`<div class="card"><h3>Как улучшить положение и нарастить капитал</h3>
+    <ol style="margin:6px 0 0;padding-left:20px;font-size:13px;line-height:1.7">${steps.map(s=>`<li style="margin-bottom:6px">${s}</li>`).join("")}</ol>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn sm" data-nav="dash">Дашборд →</button><button class="btn sm" data-nav="debts">Долги →</button><button class="btn sm" data-nav="goals">Цели →</button><button class="btn sm" data-nav="balance">Баланс →</button></div></div>`));
+
+  v.appendChild(compoundCalcCard(wc, Math.max(0, monthCapital(k))));
 }
 /* ============================================================
    ПОМОЩЬ — пошаговое руководство (листаемые карточки)
@@ -2534,7 +2707,7 @@ function appearanceCard(){
 let settingsTab="general";
 function pgSettings(v){
   v.appendChild(h(`<div class="page-title">Настройка</div>`));
-  const tabs=[["general","Общие"],["account","Аккаунт"],["income","Источники дохода"]];
+  const tabs=[["general","Общие"],["account","Аккаунт"]];
   const bar=h(`<div class="chiprow" style="margin:2px 0 12px">${tabs.map(t=>`<button type="button" class="chip ${settingsTab===t[0]?'active':''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>`);
   bar.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{ settingsTab=b.dataset.tab; render_current(); });
   v.appendChild(bar);
@@ -2555,51 +2728,6 @@ function pgSettings(v){
   pc.querySelector("#addMember").onclick=()=>editMember();
   tabAppend("account",pc);
 
-  // income sources
-  const ic=h(`<div class="card"><h3>Источники дохода <span class="tag num">${fmt(expectedIncome())}/мес</span></h3><p class="muted" style="font-size:12px;margin:-2px 0 2px">Список источников и типовая месячная сумма. Точный план по месяцам задаётся на вкладке «План».</p></div>`);
-  state.incomeSources.forEach(s=>{
-    const sk=s.kind||'labor';
-    const row=h(`<div class="lrow" style="flex-wrap:wrap"><div class="ic" style="background:color-mix(in srgb,var(--grpI) 14%,transparent);color:var(--grpI)">${sk==='capital'?'📈':'💼'}</div>
-      <input style="flex:1;background:transparent;border:none;padding:0;font-weight:600" value="${esc(s.name)}" data-n>
-      <input class="num right" style="width:120px" inputmode="numeric" value="${s.amount||''}" data-a>
-      <button class="iconbtn" data-del>✕</button>
-      <div class="chiprow" style="flex-basis:100%;margin-top:8px">
-        <button class="chip ${sk==='labor'?'active':''}" data-k="labor">💪 Труд</button>
-        <button class="chip ${sk==='capital'?'active':''}" data-k="capital">📈 Капитал</button>
-        <span class="dim" style="font-size:11px;align-self:center;margin-left:4px">капитал = дивиденды, проценты, аренда, прибыль бизнеса</span>
-      </div></div>`);
-    row.querySelector("[data-n]").onchange=e=>{s.name=e.target.value;save();};
-    row.querySelector("[data-a]").onchange=e=>{s.amount=parseFloat(String(e.target.value).replace(/\s/g,""))||0;save();render_current();};
-    row.querySelector("[data-del]").onclick=()=>{state.incomeSources=state.incomeSources.filter(x=>x.id!==s.id);save();render_current();};
-    row.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); render_current(); });
-    ic.appendChild(row);
-  });
-  ic.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" id="addInc">＋ Источник дохода</button>`));
-  ic.querySelector("#addInc").onclick=()=>{state.incomeSources.push({id:uid(),name:"Новый доход",amount:0});save();render_current();};
-  tabAppend("income",ic);
-
-  // categories editor
-  const cc=h(`<div class="card"><h3>Статьи и подкатегории</h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Добавляйте, переименовывайте и удаляйте категории и подкатегории. Всё, что вы настроите, появится в быстром вводе.</p></div>`);
-  expenseGroups().forEach(g=>{
-    const gEl=h(`<div style="margin-bottom:10px"><div class="linrow" style="padding:8px 2px"><span style="font-weight:700;color:${g.color}">● ${esc(g.name)}</span><button class="btn sm ghost" data-addcat>＋ категория</button></div></div>`);
-    catsOf(g.id).forEach(c=>{
-      const row=h(`<div style="padding:8px 2px 8px 12px;border-left:2px solid var(--line2);margin-left:4px">
-        <div class="row"><span style="font-size:15px">${esc(c.icon||'•')}</span><span style="font-weight:600;flex:1">${esc(c.name)}</span>
-          <button class="iconbtn" data-editcat title="переименовать">✎</button><button class="iconbtn" data-delcat title="удалить">🗑</button></div>
-        <div class="row" style="flex-wrap:wrap;gap:6px;margin-top:6px;padding-left:26px">
-          ${subsOf(c.id).map(s=>`<span class="pill" data-sub="${s.id}" style="cursor:pointer">${esc(s.name)} <span style="opacity:.5">✕</span></span>`).join("")}
-          <button class="pill" data-addsub style="border-style:dashed;cursor:pointer">＋ подкатегория</button>
-        </div></div>`);
-      row.querySelector("[data-editcat]").onclick=()=>{const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){c.name=nm.trim();save();render_current();}};
-      row.querySelector("[data-delcat]").onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); render_current(); } };
-      row.querySelector("[data-addsub]").onclick=()=>{const nm=prompt("Новая подкатегория:"); if(nm&&nm.trim()){state.subcategories.push({id:uid(),categoryId:c.id,name:nm.trim()});save();render_current();}};
-      row.querySelectorAll("[data-sub]").forEach(p=>p.onclick=()=>{ if(confirm("Удалить подкатегорию «"+subName(p.dataset.sub)+"»? История сохранится.")){ const su=byId(state.subcategories,p.dataset.sub); if(su)su.deleted=true; save(); render_current(); } });
-      gEl.appendChild(row);
-    });
-    gEl.querySelector("[data-addcat]").onclick=()=>{const nm=prompt("Название новой категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){const id=uid();state.categories.push({id,groupId:g.id,name:nm.trim(),icon:"•"});save();render_current();}};
-    cc.appendChild(gEl);
-  });
-  tabAppend("general",cc);
 
   // data + sync
   const dc=h(`<div class="card"><h3>Данные и резервные копии</h3>
@@ -2701,6 +2829,14 @@ function buildWorkbookSheets(){
     mRows.push([k, Math.round(inc||0), Math.round(exp||0), Math.round(cap||0), Math.round((inc||0)-(exp||0)), sn?Math.round(sn.net||0):"", sn?"да":"нет"]);
   });
   sheets.push({name:"Помесячно",rows:mRows});
+  // Плановые / повторяющиеся
+  if((state.planned||[]).length){
+    const pRows=[["Тип","Повтор","Когда","Статья","Сумма","Название","Статус"]];
+    (state.planned||[]).slice().sort((a,b)=>{ const ka=a.repeat?("A"+String(a.day||0).padStart(2,"0")):("B"+(a.date||"")); const kb=b.repeat?("A"+String(b.day||0).padStart(2,"0")):("B"+(b.date||"")); return ka<kb?-1:1; }).forEach(p=>{
+      pRows.push([ p.type==="income"?"Доход":"Расход", p.repeat?"ежемесячно":"разово", p.repeat?(p.day+" число"):(p.date||""), catName(p.categoryId), Math.round(+p.amount||0), p.label||"", p.active===false?"пауза":"активен" ]);
+    });
+    sheets.push({name:"Плановые",rows:pRows});
+  }
   // Активы
   if(state.assets.length){ const aRows=[["Название","Тип","Стоимость","Ликвидный"]];
     state.assets.forEach(a=>aRows.push([a.name,a.kind||"",Math.round(+a.value||0),a.liquid?"да":"нет"]));
@@ -3186,7 +3322,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.buildWorkbookSheets=buildWorkbookSheets; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); watchAutoTheme();
 ACCT.boot().then(()=>{
