@@ -327,7 +327,11 @@ const LS_GATE= "famfin.gate"; // заглушка пройдена на этом
 const LS_FACEID="famfin.faceid"; // id ключа Face ID для этого браузера
 const LS_ENCFACE="famfin.encface"; // код шифрования, хранимый на устройстве для входа по Face ID
 const LS_QUOTE="famfin.quoteStart"; // дата первого «совета дня» (локально, свой счёт на устройстве)
-const APP_VERSION="v2.3 · помощь+ставка · 02.07";
+const LS_ACCT="famfin.acct";  // облачная сессия: {base, refresh, email, keybag}
+const LS_DEK="famfin.dek";    // ключ данных, закэшированный на устройстве (режим «оставаться в системе»)
+const LS_REMEMBER="famfin.remember"; // «оставаться в системе на этом устройстве» (по умолчанию вкл)
+const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
+const APP_VERSION="v2.4 · облако+один пароль · 03.07";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -443,6 +447,7 @@ function save(pushCloud=true){
   if(CRYPT.on){ persistLocal(); }
   else { try{ localStorage.setItem(LS_KEY,JSON.stringify(state)); }catch(e){ toast("Не удалось сохранить локально"); } }
   if(pushCloud && DBX.linked){ setSync("dirty"); clearTimeout(dbxTimer); dbxTimer=setTimeout(()=>DBX.syncNow(false),1500); }
+  if(pushCloud && ACCT.linked && ACCT.dek){ setSync("dirty"); clearTimeout(srvTimer); srvTimer=setTimeout(()=>SRV.syncNow(false),1500); }
 }
 
 /* ============================================================
@@ -2046,6 +2051,204 @@ function pgHelp(v){
   let x0=null; card.addEventListener("touchstart",e=>{x0=e.touches[0].clientX;},{passive:true});
   card.addEventListener("touchend",e=>{ if(x0==null)return; const dx=e.changedTouches[0].clientX-x0; if(dx<-45&&helpIdx<cards.length-1){helpIdx++;render_current();window.scrollTo(0,0);} else if(dx>45&&helpIdx>0){helpIdx--;render_current();window.scrollTo(0,0);} x0=null; },{passive:true});
 }
+/* ---------- Облако (аккаунт): карточка и экраны ---------- */
+function cloudCard(){
+  if(ACCT.linked){
+    const c=h(`<div class="card"><h3>Облако (аккаунт) <span class="pill g" style="margin-left:auto">вход выполнен</span></h3>
+      <p class="muted" style="font-size:12.5px;margin-top:-4px">Синхронизация между устройствами через ваш сервер. Данные шифруются вашим паролем — сервер хранит только шифротекст и не может их прочитать.</p>
+      <div class="okbox" style="margin-bottom:10px">Аккаунт: <b>${esc(ACCT.email||'—')}</b>${ACCT.dek?'':' <span class="pill" style="margin-left:6px">🔒 введите пароль</span>'}</div>
+      <label class="row" style="gap:8px;margin:0 2px 10px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="clRemember" ${ACCT.remembered()?'checked':''} style="margin-top:3px"><span style="font-size:12.5px">Оставаться в системе на этом устройстве. <span class="muted">Удобно, но на общем или потерянном устройстве данные будут доступны без пароля.</span></span></label>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn" id="clSync">⟳ Синхронизировать</button>
+        <button class="btn" id="clPass">🔑 Сменить пароль</button>
+        <button class="btn" id="clRec">🧷 Ключ восстановления</button>
+        <button class="btn danger" id="clOut">Выйти</button>
+      </div></div>`);
+    c.querySelector("#clRemember").onchange=(e)=>{ ACCT.setRemember(e.target.checked); toast(e.target.checked?"Ключ сохранён на устройстве":"Ключ на устройстве удалён"); };
+    c.querySelector("#clSync").onclick=()=>SRV.forcePull();
+    c.querySelector("#clPass").onclick=openChangePassword;
+    c.querySelector("#clRec").onclick=openRegenerateRecovery;
+    c.querySelector("#clOut").onclick=()=>{ if(confirm("Выйти из аккаунта на этом устройстве? Локальные данные останутся.")) ACCT.logout(); };
+    return c;
+  }
+  const c=h(`<div class="card"><h3>Облако (аккаунт) <span class="pill" style="margin-left:auto">не подключено</span></h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Синхронизация между телефоном, планшетом и компьютером через ваш сервер. Строгое шифрование: данные запираются вашим паролем, сервер их прочитать не может.</p>
+    <div class="row" style="gap:8px"><button class="btn primary" id="clReg" style="flex:1;padding:12px">Создать аккаунт</button><button class="btn" id="clLogin" style="flex:1;padding:12px">Войти</button></div></div>`);
+  c.querySelector("#clReg").onclick=openCloudRegister;
+  c.querySelector("#clLogin").onclick=openCloudLogin;
+  return c;
+}
+function apiField(){ return `<div class="field"><label>Адрес сервера (API)</label><input id="clBase" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="https://ваш-сервер" value="${esc(ACCT.base||PROD_API_URL||'')}"></div>`; }
+function openCloudRegister(){
+  openSheet(`<h3>Создать аккаунт</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Пароль станет ключом к вашим данным. Мы его не храним и не видим — поэтому его важно запомнить.</p>
+    ${apiField()}
+    <div class="field"><label>Email</label><input id="clEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="you@mail.ru"></div>
+    <div class="field"><label>Пароль</label><input id="clPw" type="password" autocomplete="new-password" placeholder="не короче 8 символов"></div>
+    <div class="field"><label>Повторите пароль</label><input id="clPw2" type="password" autocomplete="new-password"></div>
+    <label class="row" style="gap:8px;margin:2px 2px 8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="clConsent" style="margin-top:3px"><span style="font-size:12.5px">Я соглашаюсь на обработку персональных данных и принимаю <a href="#" id="clPolicy" style="color:var(--acc,#4a9)">политику конфиденциальности</a>.</span></label>
+    <div id="clMsg" class="gmsg" style="min-height:16px;color:var(--bad)"></div>
+    <button class="btn primary block" id="clGo" style="padding:13px">Создать аккаунт</button>
+    <button class="btn ghost block" id="clCancel" style="margin-top:8px">Отмена</button>`,
+  el=>{
+    el.querySelector("#clCancel").onclick=closeSheet;
+    el.querySelector("#clPolicy").onclick=(e)=>{ e.preventDefault(); openPrivacyPolicy(); };
+    el.querySelector("#clGo").onclick=async()=>{
+      const base=el.querySelector("#clBase").value.trim(), email=el.querySelector("#clEmail").value.trim();
+      const pw=el.querySelector("#clPw").value, pw2=el.querySelector("#clPw2").value, msg=el.querySelector("#clMsg");
+      msg.textContent="";
+      if(!base){ msg.textContent="Укажите адрес сервера"; return; }
+      if(!/^\S+@\S+\.\S+$/.test(email)){ msg.textContent="Проверьте email"; return; }
+      if(pw.length<8){ msg.textContent="Пароль не короче 8 символов"; return; }
+      if(pw!==pw2){ msg.textContent="Пароли не совпадают"; return; }
+      if(!el.querySelector("#clConsent").checked){ msg.textContent="Нужно согласие на обработку персональных данных"; return; }
+      const btn=el.querySelector("#clGo"); btn.disabled=true; btn.textContent="Создаю…";
+      try{ const rk=await ACCT.register(base,email,pw); showRecoveryKeyModal(rk,true); }
+      catch(e){ btn.disabled=false; btn.textContent="Создать аккаунт"; msg.textContent = e.message==="email_taken"?"Такой email уже зарегистрирован":"Не удалось создать аккаунт (проверьте адрес сервера)"; }
+    };
+  });
+}
+function openCloudLogin(){
+  openSheet(`<h3>Войти в аккаунт</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Введите тот же пароль, что и при регистрации — им расшифруются ваши данные на этом устройстве.</p>
+    ${apiField()}
+    <div class="field"><label>Email</label><input id="clEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
+    <div class="field"><label>Пароль</label><input id="clPw" type="password" autocomplete="current-password"></div>
+    <div id="clMsg" class="gmsg" style="min-height:16px;color:var(--bad)"></div>
+    <button class="btn primary block" id="clGo" style="padding:13px">Войти</button>
+    <button class="btn ghost block" id="clForgot" style="margin-top:8px">Забыли пароль?</button>
+    <button class="btn ghost block" id="clCancel" style="margin-top:4px">Отмена</button>`,
+  el=>{
+    el.querySelector("#clCancel").onclick=closeSheet;
+    el.querySelector("#clForgot").onclick=()=>{ const base=el.querySelector("#clBase").value.trim(), email=el.querySelector("#clEmail").value.trim(); openForgotPassword(base,email); };
+    el.querySelector("#clGo").onclick=async()=>{
+      const base=el.querySelector("#clBase").value.trim(), email=el.querySelector("#clEmail").value.trim();
+      const pw=el.querySelector("#clPw").value, msg=el.querySelector("#clMsg"); msg.textContent="";
+      if(!base||!email||!pw){ msg.textContent="Заполните все поля"; return; }
+      const btn=el.querySelector("#clGo"); btn.disabled=true; btn.textContent="Вхожу…";
+      try{ await ACCT.login(base,email,pw); closeSheet(); toast("Вход выполнен — данные синхронизированы"); render_current(); }
+      catch(e){ btn.disabled=false; btn.textContent="Войти"; msg.textContent = e.message==="bad-pass"?"Неверный пароль (данные не расшифровать)":(e.message==="invalid_credentials"?"Неверный email или пароль":"Не удалось войти"); }
+    };
+  });
+}
+function recoverySheetText(rk){
+  return "АВАРИЙНЫЙ ЛИСТ — Семейная финансовая ERP\n\n"+
+    "Ключ восстановления:\n\n    "+rk+"\n\n"+
+    "Зачем он нужен: если вы забудете пароль, этот ключ — единственный способ\n"+
+    "восстановить доступ к данным. Мы (сервер) его не храним и восстановить не можем.\n\n"+
+    "Что делать при утере пароля: на экране входа выберите «Забыли пароль», задайте\n"+
+    "новый пароль и введите этот ключ восстановления — данные сохранятся.\n\n"+
+    "Храните этот лист в надёжном месте (сейф, менеджер паролей). Никому не передавайте.\n"+
+    "Дата создания: "+new Date().toLocaleString("ru-RU")+"\n";
+}
+function downloadRecoverySheet(rk){
+  try{ const blob=new Blob([recoverySheetText(rk)],{type:"text/plain;charset=utf-8"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="Аварийный-лист-famfin.txt";
+    document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove();},500);
+  }catch(e){ toast("Не удалось скачать файл"); }
+}
+function showRecoveryKeyModal(rk, finishLogin){
+  openSheet(`<h3>Сохраните ключ восстановления</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Это единственный способ вернуть данные, если вы забудете пароль. Мы его не храним — покажем только сейчас.</p>
+    <div style="font-family:ui-monospace,Menlo,monospace;font-size:17px;letter-spacing:1px;background:var(--card2,#111);border:1px solid var(--line2);border-radius:12px;padding:14px;text-align:center;margin:10px 0;word-break:break-all" id="rkBox">${esc(rk)}</div>
+    <div class="row" style="gap:8px"><button class="btn" id="rkCopy" style="flex:1">📋 Скопировать</button><button class="btn" id="rkDl" style="flex:1">⬇ Аварийный лист</button></div>
+    <label class="row" style="gap:8px;margin:14px 2px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="rkChk" style="margin-top:3px"><span style="font-size:13px">Я сохранил ключ восстановления в надёжном месте и понимаю, что без него и без пароля данные не восстановить.</span></label>
+    <button class="btn primary block" id="rkDone" style="padding:13px" disabled>Готово</button>`,
+  el=>{
+    el.querySelector("#rkCopy").onclick=()=>{ try{navigator.clipboard.writeText(rk);toast("Ключ скопирован");}catch(e){ try{const t=el.querySelector("#rkBox");const r=document.createRange();r.selectNode(t);getSelection().removeAllRanges();getSelection().addRange(r);document.execCommand("copy");toast("Ключ скопирован");}catch(_){} } };
+    el.querySelector("#rkDl").onclick=()=>downloadRecoverySheet(rk);
+    const chk=el.querySelector("#rkChk"), done=el.querySelector("#rkDone");
+    chk.onchange=()=>{ done.disabled=!chk.checked; };
+    done.onclick=()=>{ closeSheet(); if(finishLogin){ toast("Аккаунт создан — синхронизация включена"); } render_current(); };
+  });
+}
+function openChangePassword(){
+  openSheet(`<h3>Сменить пароль</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Данные не перешифровываются — меняется только замок на ключе. На других устройствах нужно будет войти заново.</p>
+    <label class="row" style="gap:8px;margin:2px 2px 10px;align-items:center;cursor:pointer"><input type="checkbox" id="cpForgot"><span style="font-size:13px">Я не помню текущий пароль (вход на этом устройстве активен)</span></label>
+    <div class="field" id="cpCurWrap"><label>Текущий пароль</label><input id="cpCur" type="password" autocomplete="current-password"></div>
+    <div class="field"><label>Новый пароль</label><input id="cpNew" type="password" autocomplete="new-password" placeholder="не короче 8 символов"></div>
+    <div class="field"><label>Повторите новый пароль</label><input id="cpNew2" type="password" autocomplete="new-password"></div>
+    <div id="cpMsg" class="gmsg" style="min-height:16px;color:var(--bad)"></div>
+    <button class="btn primary block" id="cpGo" style="padding:13px">Сменить пароль</button>
+    <button class="btn ghost block" id="cpCancel" style="margin-top:8px">Отмена</button>`,
+  el=>{
+    const forgot=el.querySelector("#cpForgot"), curWrap=el.querySelector("#cpCurWrap");
+    forgot.onchange=()=>{ curWrap.style.display=forgot.checked?"none":""; };
+    el.querySelector("#cpCancel").onclick=closeSheet;
+    el.querySelector("#cpGo").onclick=async()=>{
+      const cur=el.querySelector("#cpCur").value, nw=el.querySelector("#cpNew").value, nw2=el.querySelector("#cpNew2").value, msg=el.querySelector("#cpMsg"); msg.textContent="";
+      if(nw.length<8){ msg.textContent="Новый пароль не короче 8 символов"; return; }
+      if(nw!==nw2){ msg.textContent="Пароли не совпадают"; return; }
+      if(!forgot.checked && !cur){ msg.textContent="Введите текущий пароль (или отметьте «не помню»)"; return; }
+      const btn=el.querySelector("#cpGo"); btn.disabled=true; btn.textContent="Меняю…";
+      try{ await ACCT.changePassword(nw, forgot.checked?{}:{current:cur}); closeSheet(); toast("Пароль изменён"); render_current(); }
+      catch(e){ btn.disabled=false; btn.textContent="Сменить пароль"; msg.textContent = e.message==="invalid_credentials"?"Текущий пароль неверен":(e.message==="locked"?"Сначала войдите в аккаунт":"Не удалось сменить пароль"); }
+    };
+  });
+}
+function openRegenerateRecovery(){
+  if(!ACCT.dek){ toast("Войдите в аккаунт паролем"); return; }
+  openSheet(`<h3>Ключ восстановления</h3>
+    <p class="muted" style="font-size:13px">Можно сгенерировать новый ключ восстановления. Старый после этого перестанет работать. Показать новый ключ и обновить его на сервере?</p>
+    <button class="btn primary block" id="rrGo" style="padding:13px;margin-top:6px">Сгенерировать новый ключ</button>
+    <button class="btn ghost block" id="rrCancel" style="margin-top:8px">Отмена</button>`,
+  el=>{
+    el.querySelector("#rrCancel").onclick=closeSheet;
+    el.querySelector("#rrGo").onclick=async()=>{
+      const btn=el.querySelector("#rrGo"); btn.disabled=true; btn.textContent="…";
+      try{ const rk=await ACCT.regenerateRecovery(); showRecoveryKeyModal(rk,false); }
+      catch(e){ btn.disabled=false; btn.textContent="Сгенерировать новый ключ"; toast("Не удалось обновить ключ"); }
+    };
+  });
+}
+
+function openForgotPassword(base0,email0){
+  openSheet(`<h3>Восстановление доступа</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Забыли пароль? Восстановите доступ с помощью ключа восстановления, который вы сохранили при регистрации.</p>
+    ${'<div class="field"><label>Адрес сервера (API)</label><input id="fpBase" autocapitalize="off" autocomplete="off" spellcheck="false" value="'+esc(base0||ACCT.base||PROD_API_URL||'')+'"></div>'}
+    <div class="field"><label>Email</label><input id="fpEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="off" spellcheck="false" value="${esc(email0||'')}"></div>
+    <div class="row" style="gap:8px"><button class="btn" id="fpSend" style="flex:1">✉️ Отправить письмо</button></div>
+    <p class="muted" style="font-size:12px;margin:8px 0 4px">Из письма скопируйте код сброса и вставьте ниже.</p>
+    <div class="field"><label>Код из письма</label><input id="fpToken" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="вставьте код"></div>
+    <div class="field"><label>Ключ восстановления</label><input id="fpRk" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="XXXX-XXXX-XXXX-…"></div>
+    <div class="field"><label>Новый пароль</label><input id="fpNew" type="password" autocomplete="new-password" placeholder="не короче 8 символов"></div>
+    <div id="fpMsg" class="gmsg" style="min-height:16px;color:var(--bad)"></div>
+    <button class="btn primary block" id="fpGo" style="padding:13px">Восстановить доступ</button>
+    <button class="btn ghost block" id="fpCancel" style="margin-top:8px">Отмена</button>`,
+  el=>{
+    el.querySelector("#fpCancel").onclick=closeSheet;
+    el.querySelector("#fpSend").onclick=async()=>{
+      const base=el.querySelector("#fpBase").value.trim(), email=el.querySelector("#fpEmail").value.trim(), msg=el.querySelector("#fpMsg"); msg.textContent="";
+      if(!base||!email){ msg.textContent="Укажите сервер и email"; return; }
+      const b=el.querySelector("#fpSend"); b.disabled=true; b.textContent="Отправляю…";
+      try{ const d=await ACCT.requestReset(base,email); b.textContent="Письмо отправлено"; if(d&&d.dev_reset_token){ el.querySelector("#fpToken").value=d.dev_reset_token; toast("dev: код подставлен"); } }
+      catch(e){ b.disabled=false; b.textContent="✉️ Отправить письмо"; msg.textContent="Не удалось отправить (проверьте адрес сервера)"; }
+    };
+    el.querySelector("#fpGo").onclick=async()=>{
+      const base=el.querySelector("#fpBase").value.trim(), email=el.querySelector("#fpEmail").value.trim();
+      const token=el.querySelector("#fpToken").value.trim(), rk=el.querySelector("#fpRk").value.trim(), nw=el.querySelector("#fpNew").value, msg=el.querySelector("#fpMsg"); msg.textContent="";
+      if(!base||!email||!token||!rk){ msg.textContent="Заполните код, ключ восстановления и новый пароль"; return; }
+      if(nw.length<8){ msg.textContent="Пароль не короче 8 символов"; return; }
+      const btn=el.querySelector("#fpGo"); btn.disabled=true; btn.textContent="Восстанавливаю…";
+      try{ await ACCT.resetWithRecovery(base,email,token,rk,nw); closeSheet(); toast("Доступ восстановлен, данные на месте"); render_current(); }
+      catch(e){ btn.disabled=false; btn.textContent="Восстановить доступ";
+        msg.textContent = e.message==="bad-recovery"?"Неверный ключ восстановления":(e.message==="invalid_reset"?"Код сброса недействителен или истёк":"Не удалось восстановить доступ"); }
+    };
+  });
+}
+function openPrivacyPolicy(){
+  openSheet(`<h3>Политика конфиденциальности</h3>
+    <div style="font-size:13px;line-height:1.5;max-height:60vh;overflow:auto">
+      <p><b>Черновик — заполнить перед запуском (Фаза 3, 152-ФЗ).</b></p>
+      <p>Мы обрабатываем ваши персональные данные (email) для входа в сервис. Финансовые данные шифруются на вашем устройстве вашим паролем по принципу нулевого знания — сервер хранит только зашифрованный вид и не может их прочитать.</p>
+      <p>Данные размещаются на серверах в Российской Федерации. Вы можете удалить аккаунт и данные в любой момент.</p>
+      <p>Полный текст политики и согласия оформляются оператором ПДн до публичного запуска.</p>
+    </div>
+    <button class="btn primary block" id="ppOk" style="padding:12px;margin-top:10px">Понятно</button>`,
+  el=>{ el.querySelector("#ppOk").onclick=closeSheet; });
+}
+
 function pgSettings(v){
   v.appendChild(h(`<div class="page-title">Настройка</div><div class="page-sub">Участники, статьи, доходы, данные и синхронизация</div>`));
 
@@ -2132,6 +2335,9 @@ function pgSettings(v){
   if(linked){ sc.querySelector("#dbxPull").onclick=()=>DBX.forcePull(); sc.querySelector("#dbxPush").onclick=()=>DBX.push(true); sc.querySelector("#dbxOff").onclick=()=>DBX.unlink(); }
   else sc.querySelector("#dbxOn").onclick=DBX.startLink;
   v.appendChild(sc);
+
+  // Облако (аккаунт) — синхронизация через сервер, E2E «один пароль»
+  v.appendChild(cloudCard());
 
   // login protection (optional)
   const faceLinked=!!localStorage.getItem(LS_FACEID);
@@ -2439,6 +2645,153 @@ async function applyRemote(remote, manual){
     setSync("err"); if(manual)toast("Не удалось расшифровать данные из Dropbox — код не совпадает"); console.warn(err); return false;
   }
 }
+/* ============================================================
+   ОБЛАКО (аккаунт) — модель «один пароль» (E2E, нулевое знание).
+   VaultCrypto: DEK шифрует сейф; DEK завёрнут под пароль и под ключ
+   восстановления. ACCT: сессия и ключ данных. SRV: синхронизация сейфа
+   с оптимистической блокировкой (409 → слияние тем же движком → повтор).
+   ============================================================ */
+const VaultCrypto = (function(){
+  const C = crypto, subtle = crypto.subtle, te=new TextEncoder(), td=new TextDecoder();
+  const KDF_ITERS=210000, RKAB='ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const b64=b=>{const a=new Uint8Array(b);let s='';for(let i=0;i<a.length;i++)s+=String.fromCharCode(a[i]);return btoa(s);};
+  const ub64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+  const nEmail=e=>String(e||'').trim().toLowerCase();
+  const nRec=s=>String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+  async function pbkdf2(sec,salt,it){ const km=await subtle.importKey('raw',te.encode(sec),'PBKDF2',false,['deriveBits']); return new Uint8Array(await subtle.deriveBits({name:'PBKDF2',salt,iterations:it,hash:'SHA-256'},km,256)); }
+  async function hkdfKey(mb,info){ const km=await subtle.importKey('raw',mb,'HKDF',false,['deriveKey']); return subtle.deriveKey({name:'HKDF',hash:'SHA-256',salt:new Uint8Array(0),info:te.encode(info)},km,{name:'AES-GCM',length:256},false,['encrypt','decrypt']); }
+  async function hkdfBits(mb,info,len){ const km=await subtle.importKey('raw',mb,'HKDF',false,['deriveBits']); return new Uint8Array(await subtle.deriveBits({name:'HKDF',hash:'SHA-256',salt:new Uint8Array(0),info:te.encode(info)},km,len*8)); }
+  async function fromPassword(pw,email){ const m=await pbkdf2(normCode(pw),te.encode('famfin|'+nEmail(email)),KDF_ITERS); return {authHash:b64(await hkdfBits(m,'famfin-auth',32)), wrapKey:await hkdfKey(m,'famfin-wrap')}; }
+  async function fromRecovery(rk,rsalt){ const m=await pbkdf2(nRec(rk),ub64(rsalt),KDF_ITERS); return hkdfKey(m,'famfin-rwrap'); }
+  async function genDEK(){ return subtle.generateKey({name:'AES-GCM',length:256},true,['encrypt','decrypt']); }
+  async function wrap(dek,wk){ const raw=new Uint8Array(await subtle.exportKey('raw',dek)); const iv=C.getRandomValues(new Uint8Array(12)); const ct=new Uint8Array(await subtle.encrypt({name:'AES-GCM',iv},wk,raw)); return b64(iv)+'.'+b64(ct); }
+  async function unwrap(blob,wk){ const [i,c]=String(blob).split('.'); const raw=await subtle.decrypt({name:'AES-GCM',iv:ub64(i)},wk,ub64(c)); return subtle.importKey('raw',new Uint8Array(raw),{name:'AES-GCM',length:256},true,['encrypt','decrypt']); }
+  function genRecoveryKey(g=6,l=4){ const b=C.getRandomValues(new Uint8Array(g*l)),o=[]; for(let x=0;x<g;x++){let s='';for(let i=0;i<l;i++)s+=RKAB[b[x*l+i]%RKAB.length];o.push(s);} return o.join('-'); }
+  async function buildKeybag(dek,pw,email,rk){ const {wrapKey}=await fromPassword(pw,email); const rsalt=b64(C.getRandomValues(new Uint8Array(16))); const rw=await fromRecovery(rk,rsalt); return {v:1,kdf:{alg:'pbkdf2-sha256',iters:KDF_ITERS,saltMode:'email',rsalt},protected_key:await wrap(dek,wrapKey),protected_key_recovery:await wrap(dek,rw)}; }
+  return {
+    genRecoveryKey,
+    async createAccount(pw,email){ const dek=await genDEK(),rk=genRecoveryKey(),keybag=await buildKeybag(dek,pw,email,rk),{authHash}=await fromPassword(pw,email); return {dek,recoveryKey:rk,keybag,authHash}; },
+    async authHash(pw,email){ return (await fromPassword(pw,email)).authHash; },
+    async unlockWithPassword(pw,email,kb){ const {wrapKey}=await fromPassword(pw,email); try{return await unwrap(kb.protected_key,wrapKey);}catch(e){const x=new Error('bad-pass');x.code='bad-pass';throw x;} },
+    async unlockWithRecovery(rk,kb){ const rw=await fromRecovery(rk,kb.kdf.rsalt); try{return await unwrap(kb.protected_key_recovery,rw);}catch(e){const x=new Error('bad-recovery');x.code='bad-recovery';throw x;} },
+    async rewrapForNewPassword(dek,pw,email,kb){ const {wrapKey}=await fromPassword(pw,email); return {keybag:{...kb,protected_key:await wrap(dek,wrapKey)},authHash:(await fromPassword(pw,email)).authHash}; },
+    async regenerateRecovery(dek,kb){ const rk=genRecoveryKey(),rsalt=b64(C.getRandomValues(new Uint8Array(16))),rw=await fromRecovery(rk,rsalt); return {keybag:{...kb,kdf:{...kb.kdf,rsalt},protected_key_recovery:await wrap(dek,rw)},recoveryKey:rk}; },
+    async exportDEK(dek){ return b64(await subtle.exportKey('raw',dek)); },
+    async importDEK(s){ return subtle.importKey('raw',ub64(s),{name:'AES-GCM',length:256},true,['encrypt','decrypt']); },
+    async encryptVault(obj,dek){ const iv=C.getRandomValues(new Uint8Array(12)); const ct=new Uint8Array(await subtle.encrypt({name:'AES-GCM',iv},dek,te.encode(JSON.stringify(obj)))); return {ciphertext:b64(ct),iv:b64(iv),salt:'-',enc_v:1,updatedAt:obj.updatedAt||nowISO()}; },
+    async decryptVault(env,dek){ const pt=await subtle.decrypt({name:'AES-GCM',iv:ub64(env.iv)},dek,ub64(env.ciphertext)); return JSON.parse(td.decode(pt)); },
+  };
+})();
+
+const ACCT = {
+  base:PROD_API_URL, access:null, refresh:null, email:null, keybag:null, dek:null, linked:false,
+  boot(){
+    try{ const d=JSON.parse(localStorage.getItem(LS_ACCT)||"{}"); this.base=d.base||this.base; this.refresh=d.refresh||null; this.email=d.email||null; this.keybag=d.keybag||null; this.linked=!!this.refresh; }catch(e){}
+    // восстановить закэшированный ключ данных (режим «оставаться в системе»)
+    try{ const c=localStorage.getItem(LS_DEK); if(c && this.remembered()){ VaultCrypto.importDEK(_deobf(c)).then(k=>{ this.dek=k; if(this.linked) SRV.syncNow(false); }).catch(()=>{}); } }catch(e){}
+    if(this.linked){ this.doRefresh().then(ok=>{ if(ok && this.dek) SRV.syncNow(false); }); }
+  },
+  remembered(){ try{ return localStorage.getItem(LS_REMEMBER)!=="0"; }catch(e){ return true; } },
+  setRemember(on){ try{ localStorage.setItem(LS_REMEMBER, on?"1":"0"); }catch(e){} if(on) this.cacheDEK(); else this.clearDEKCache(); },
+  persist(){ try{ localStorage.setItem(LS_ACCT,JSON.stringify({base:this.base,refresh:this.refresh,email:this.email,keybag:this.keybag})); }catch(e){} },
+  async cacheDEK(){ try{ if(this.dek && this.remembered()) localStorage.setItem(LS_DEK, _obf(await VaultCrypto.exportDEK(this.dek))); }catch(e){} },
+  clearDEKCache(){ try{ localStorage.removeItem(LS_DEK); }catch(e){} },
+  async raw(path,opts){ return fetch((this.base||"").replace(/\/$/,"")+path, opts); },
+  async api(path,opts){ opts=opts||{}; opts.headers=Object.assign({},opts.headers,this.access?{Authorization:"Bearer "+this.access}:{}); let r=await this.raw(path,opts); if(r.status===401&&this.refresh){ if(await this.doRefresh()){ opts.headers.Authorization="Bearer "+this.access; r=await this.raw(path,opts);} } return r; },
+  async doRefresh(){ try{ const r=await this.raw("/auth/refresh",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh:this.refresh})}); if(!r.ok){ this.forget(); return false; } const d=await r.json(); this.access=d.access; this.refresh=d.refresh; this.email=d.user.email; this.persist(); return true; }catch(e){ return false; } },
+  forget(){ this.access=this.refresh=this.dek=this.keybag=null; this.linked=false; this.clearDEKCache(); try{localStorage.removeItem(LS_ACCT);}catch(e){} },
+  async register(base,email,password){
+    this.base=base; const acc=await VaultCrypto.createAccount(password,email);
+    const r=await this.raw("/auth/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:acc.authHash,keybag:acc.keybag})});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error((e.error&&e.error.code)||"register_failed"); }
+    const d=await r.json(); this.access=d.access; this.refresh=d.refresh; this.email=d.user.email; this.keybag=acc.keybag; this.dek=acc.dek; this.linked=true; this.persist(); await this.cacheDEK();
+    await SRV.push(true); return acc.recoveryKey;   // показать пользователю ОДИН раз
+  },
+  async login(base,email,password){
+    this.base=base; const authHash=await VaultCrypto.authHash(password,email);
+    const r=await this.raw("/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:authHash})});
+    if(!r.ok) throw new Error("invalid_credentials");
+    const d=await r.json(); this.access=d.access; this.refresh=d.refresh; this.email=d.user.email; this.keybag=d.keybag; this.linked=true; this.persist();
+    if(!this.keybag) throw new Error("no_keybag");
+    this.dek=await VaultCrypto.unlockWithPassword(password,email,this.keybag);  // бросит bad-pass
+    await this.cacheDEK(); await SRV.syncNow(true);
+  },
+  // отправить письмо со ссылкой сброса
+  async requestReset(base,email){
+    this.base=base;
+    const r=await this.raw("/auth/request-reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email})});
+    if(!r.ok) throw new Error("request_failed");
+    return r.json().catch(()=>({}));   // в dev может вернуть dev_reset_token
+  },
+  // сценарий 3: забыл пароль, не залогинен, но есть ключ восстановления
+  async resetWithRecovery(base,email,token,recoveryKey,newPassword){
+    this.base=base;
+    const r1=await this.raw("/auth/reset-keybag",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token})});
+    if(!r1.ok) throw new Error("invalid_reset");
+    const {keybag}=await r1.json(); if(!keybag) throw new Error("no_keybag");
+    const dek=await VaultCrypto.unlockWithRecovery(recoveryKey,keybag);           // бросит bad-recovery
+    const {keybag:kb2,authHash}=await VaultCrypto.rewrapForNewPassword(dek,newPassword,email,keybag);
+    const r2=await this.raw("/auth/reset",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({token,password:authHash,keybag:kb2})});
+    if(!r2.ok) throw new Error("reset_failed");
+    await this.login(base,email,newPassword);   // установить сессию и DEK новым паролем
+  },
+  async changePassword(newPassword,{current}={}){
+    if(!this.dek) throw new Error("locked");
+    const {keybag,authHash}=await VaultCrypto.rewrapForNewPassword(this.dek,newPassword,this.email,this.keybag);
+    const body={next:authHash,keybag}; if(current!=null) body.current=await VaultCrypto.authHash(current,this.email);
+    const r=await this.api("/auth/change-password",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(!r.ok){ const e=await r.json().catch(()=>({})); throw new Error((e.error&&e.error.code)||"change_failed"); }
+    const d=await r.json(); this.access=d.access; this.refresh=d.refresh; this.keybag=keybag; this.persist(); await this.cacheDEK();
+  },
+  async regenerateRecovery(){
+    if(!this.dek) throw new Error("locked");
+    const {keybag,recoveryKey}=await VaultCrypto.regenerateRecovery(this.dek,this.keybag);
+    const r=await this.api("/auth/keybag",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({keybag})});
+    if(!r.ok) throw new Error("keybag_update_failed");
+    this.keybag=keybag; this.persist(); return recoveryKey;
+  },
+  async logout(){ try{ if(this.refresh) await this.raw("/auth/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh:this.refresh})}); }catch(e){} this.forget(); setSync(null); render_current(); },
+};
+
+const SRV = {
+  baseUpdatedAt:null,
+  _env(s){ return {ciphertext:s.ciphertext,iv:s.iv,salt:s.salt,enc_v:s.enc_v,updatedAt:s.updatedAt}; },
+  async applyServer(env){
+    const obj=await VaultCrypto.decryptVault(env,ACCT.dek);
+    const rem=migrate(obj); if(!rem.__meta) buildMetaBaseline(rem);
+    const merged=mergeStates(state,rem); const ahead=metaAhead(merged.__meta,rem.__meta);
+    state=merged; __lastSaved=_clone(state); save(false); if(!isTyping())render_current(); return ahead;
+  },
+  async push(manual){
+    if(!ACCT.linked||!ACCT.dek) return;
+    setSync("dirty");
+    for(let t=0;t<4;t++){
+      const env=await VaultCrypto.encryptVault(state,ACCT.dek);
+      const body={ciphertext:env.ciphertext,salt:env.salt,iv:env.iv,enc_v:env.enc_v,updatedAt:env.updatedAt,baseUpdatedAt:SRV.baseUpdatedAt||null};
+      const r=await ACCT.api("/vault",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+      if(r.status===200||r.status===201){ const d=await r.json(); SRV.baseUpdatedAt=d.updatedAt; setSync("ok"); if(manual)toast("Отправлено в облако"); return; }
+      if(r.status===409){ const d=await r.json(); try{ await SRV.applyServer(SRV._env(d.server)); SRV.baseUpdatedAt=d.server.updatedAt; }catch(e){ setSync("err"); if(manual)toast("Не удалось расшифровать облако"); return; } continue; }
+      if(r.status===413){ setSync("err"); if(manual)toast("Данные превышают лимит облака"); return; }
+      setSync("err"); if(manual)toast("Ошибка отправки в облако"); return;
+    }
+    setSync("err"); if(manual)toast("Слишком много конфликтов — повторите");
+  },
+  async syncNow(manual){
+    if(!ACCT.linked){ if(manual)go("settings"); return; }
+    if(!ACCT.dek){ if(manual)toast("Войдите в аккаунт, чтобы синхронизировать"); return; }
+    try{ setSync("dirty");
+      const r=await ACCT.api("/vault",{method:"GET"});
+      if(r.status===204){ SRV.baseUpdatedAt=null; await SRV.push(manual); return; }
+      if(!r.ok) throw new Error("vault get "+r.status);
+      const s=await r.json(); const ahead=await SRV.applyServer(SRV._env(s)); SRV.baseUpdatedAt=s.updatedAt;
+      if(ahead) await SRV.push(false);
+      setSync("ok"); if(manual)toast("Синхронизировано");
+    }catch(e){ setSync("err"); if(manual)toast("Ошибка синхронизации"); console.warn(e); }
+  },
+  async forcePull(){ SRV.baseUpdatedAt=null; return SRV.syncNow(true); },
+};
+let srvTimer=null;
+
 // экран ввода кода при запуске, если локальные данные зашифрованы
 function showEncGate(env){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
@@ -2505,7 +2858,7 @@ document.getElementById("view").addEventListener("click",e=>{
 document.getElementById("mPrev").onclick=()=>{curMonth=addMonths(curMonth,-1);render_current();};
 document.getElementById("mNext").onclick=()=>{curMonth=addMonths(curMonth,1);render_current();};
 document.getElementById("mLbl").onclick=openMonthPicker;
-document.getElementById("syncBtn").onclick=()=>{ DBX.syncNow(true); };
+document.getElementById("syncBtn").onclick=()=>{ if(ACCT.linked) SRV.syncNow(true); else DBX.syncNow(true); };
 document.getElementById("meBtn").onclick=openMemberPicker;
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet(); });
 ["gesturestart","gesturechange","gestureend"].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
@@ -2589,7 +2942,11 @@ function securityBoot(){
 
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
+// хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go;
+  Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 DBX.boot();
+ACCT.boot();
 if(__encEnv){ showEncGate(__encEnv); }
 else { securityBoot(); }
 console.log("Готово.");
