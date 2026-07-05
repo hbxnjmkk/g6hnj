@@ -387,7 +387,7 @@ const LS_SIMPLE="famfin.simple"; // простой режим (только «С
 const LS_FONT="famfin.font";     // размер шрифта интерфейса: sm/md/lg (на устройстве)
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v4.2";
+const APP_VERSION="v4.3";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -678,6 +678,12 @@ const netWorth=()=>totalAssets()-totalLiab();
 const totalMinPayment=()=>state.liabilities.reduce((a,x)=>a+(+x.minPayment||0),0);
 const expectedIncome=()=>state.incomeSources.reduce((a,x)=>a+(+x.amount||0),0);
 function incomeSrcPlanned(k,sid){ const p=state.incomePlans[k]; if(p && (sid in p)) return +p[sid]||0; const s=incomeSrcById(sid); return s?+s.amount||0:0; }
+function planDeficit(k){
+  const planTotal=planMonthTotal(k), plannedInc=plannedIncome(k), factInc=monthIncome(k);
+  const cashToday=cashLeftToday(k).cash, spentAll=monthExpense(k)+monthCapital(k);
+  const remInc=Math.max(0, plannedInc-factInc), remExp=Math.max(0, planTotal-spentAll);
+  return { defWith: cashToday+remInc-remExp, defNo: plannedInc-planTotal, planTotal, plannedInc, factInc, cashToday, remInc, remExp };
+}
 function plannedIncome(k){ if(!state.incomeSources.length) return 0; return state.incomeSources.reduce((a,s)=>a+incomeSrcPlanned(k,s.id),0); }
 function monthIncomeBySource(k,sid){ return txnsOfMonth(k).filter(t=>t.type==="income"&&t.categoryId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
 function incomeForMonth(k){ const real=monthIncome(k); return real>0?real:plannedIncome(k); }
@@ -1244,10 +1250,7 @@ function pgToday(v){
   const cap=monthCapital(k);
   const plannedInc=plannedIncome(k), factInc=monthIncome(k);
   const ctf=cashLeftToday(k), cashToday=ctf.cash;
-  const remInc=plannedInc-factInc;                    // ожидаемый остаток прихода
-  const remExp=planTotal-spentAll;                    // остаток плановых трат
-  const defWith = cashToday + remInc - remExp;        // с учётом кэша на сегодня
-  const defNo   = remInc - remExp;                    // без учёта кэша на сегодня
+  const {defWith,defNo}=planDeficit(k);               // единый расчёт дефицита
   const expPct = planTotal>0 ? clamp(spentAll/planTotal*100,0,100) : 0;
   const incPct = plannedInc>0 ? clamp(factInc/plannedInc*100,0,100) : 0;
   const monthNom = MONTHS_RU[+k.slice(5,7)-1];
@@ -1699,7 +1702,10 @@ function pgPlan(v){
     </div>`);
     row.querySelector("[data-sname]").onchange=e=>{ s.name=e.target.value.trim()||s.name; save(); };
     const inp=row.querySelector("[data-inc]");
-    attachNum(inp); inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; state.incomePlans[k]=state.incomePlans[k]||{}; state.incomePlans[k][s.id]=val; save(); refreshPlanTotals(); };
+    attachNum(inp);
+    const commitInc=(persist)=>{ const val=parseNum(inp.value)||0; state.incomePlans[k]=state.incomePlans[k]||{}; state.incomePlans[k][s.id]=val; refreshPlanTotals(); if(persist)save(); };
+    inp.addEventListener("input",()=>commitInc(false));
+    inp.onchange=()=>commitInc(true);
     row.querySelector("[data-plan]").onclick=()=>editPlanned(null,{type:'income',categoryId:s.id,repeat:false});
     row.querySelector("[data-del]").onclick=()=>{ if(confirm("Удалить источник «"+s.name+"»? Прошлые доходы останутся.")){ state.incomeSources=state.incomeSources.filter(x=>x.id!==s.id); save(); render_current(); } };
     row.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); render_current(); });
@@ -1707,7 +1713,7 @@ function pgPlan(v){
   });
   v.appendChild(incCard);
 
-  const wirePlan=(row)=>{ const inp=row.querySelector("input[data-plan]"); attachNum(inp); inp.onchange=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,"").replace(",","."))||0; const id=inp.dataset.plan; state.plans[k]=state.plans[k]||{}; if(val)state.plans[k][id]=val; else delete state.plans[k][id]; save(); refreshPlanTotals(); }; };
+  const wirePlan=(row)=>{ const inp=row.querySelector("input[data-plan]"); attachNum(inp); const commitP=(persist)=>{ const val=parseNum(inp.value)||0; const id=inp.dataset.plan; state.plans[k]=state.plans[k]||{}; if(val)state.plans[k][id]=val; else delete state.plans[k][id]; refreshPlanTotals(); if(persist)save(); }; inp.addEventListener("input",()=>commitP(false)); inp.onchange=()=>commitP(true); };
   expenseGroups().forEach(g=>{
     const cats=catsOf(g.id);
     let gTot=0; cats.forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>gTot+=(+plan[su.id]||0)); else gTot+=(+plan[c.id]||0); });
@@ -3508,7 +3514,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
