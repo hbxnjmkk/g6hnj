@@ -385,9 +385,10 @@ const LS_REMEMBER="famfin.remember"; // «оставаться в системе
 const LS_THEME="famfin.theme";   // light / dark / auto (пункт 14)
 const LS_SIMPLE="famfin.simple"; // простой режим (только «Сегодня» + «Настройки»), на устройстве
 const LS_FONT="famfin.font";     // размер шрифта интерфейса: sm/md/lg (на устройстве)
+const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v4.3";
+const APP_VERSION="v4.4";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -919,6 +920,9 @@ function horizonStart(){ return ym(new Date()); }
 
 const SIMPLE_NAV=["today","settings"];
 function isSimpleMode(){ try{ return localStorage.getItem(LS_SIMPLE)==="1"; }catch(e){ return false; } }
+// Роль «Участник»: только ввод + своя история. Owner может включить предпросмотр.
+function isParticipant(){ try{ if(localStorage.getItem(LS_PREVIEW)==="1") return true; }catch(e){} return (ACCT&&ACCT.role)==="member"; }
+function participantMemberId(){ if(ACCT&&ACCT.memberId&&memberById(ACCT.memberId)) return ACCT.memberId; return curMember(); }
 function getFontSize(){ try{ return localStorage.getItem(LS_FONT)||"md"; }catch(e){ return "md"; } }
 function applyFont(){ try{ const z={sm:0.9,md:1,lg:1.12}[getFontSize()]||1; document.body.style.zoom=z; }catch(e){} }
 function fontSizeCard(){
@@ -929,9 +933,9 @@ function fontSizeCard(){
   card.querySelectorAll("[data-fs]").forEach(b=>b.onclick=()=>{ try{ localStorage.setItem(LS_FONT,b.dataset.fs); }catch(e){} applyFont(); card.querySelectorAll("[data-fs]").forEach(x=>x.classList.toggle("active",x===b)); });
   return card;
 }
-function go(r){ if(isSimpleMode() && SIMPLE_NAV.indexOf(r)<0) r="today"; route=r; renderNav(); render(); window.scrollTo(0,0); }
+function go(r){ if((isSimpleMode()||isParticipant()) && SIMPLE_NAV.indexOf(r)<0) r="today"; route=r; renderNav(); render(); window.scrollTo(0,0); }
 function renderNav(){
-  const simple=isSimpleMode();
+  const simple=isSimpleMode()||isParticipant();
   // sidebar
   const sb=document.getElementById("sidebar"); sb.innerHTML="";
   sb.appendChild(h('<button class="btn primary block desk-add" id="deskAdd">＋ Добавить операцию</button>'));
@@ -1075,7 +1079,7 @@ function openSubPicker(categoryId, current, onPick){
      <div class="dim" style="font-size:12px;margin-bottom:12px">${esc(catName(categoryId))}</div>
      <div class="opts" style="flex-direction:column;gap:0">
        ${subs.map(s=>`<button class="opt ${current===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}
-       <button class="opt" data-sub="__add" style="color:var(--ink3)">＋ новая подкатегория</button>
+       ${isParticipant()?'':'<button class="opt" data-sub="__add" style="color:var(--ink3)">＋ новая подкатегория</button>'}
      </div>
      <div class="dim" style="text-align:center;font-size:11px;margin-top:6px">Тап вне окна — сменить категорию</div>
   </div></div>`);
@@ -1088,7 +1092,8 @@ function openSubPicker(categoryId, current, onPick){
   document.body.appendChild(ov);
 }
 function openAddTxn(preset){
-  let draft={type:"expense",date:todayISOdate(),amount:"",categoryId:null,subId:null,comment:"",memberId:curMember(),...(preset||{})};
+  const part=isParticipant();
+  let draft={type:"expense",date:todayISOdate(),amount:"",categoryId:null,subId:null,comment:"",memberId:(part?participantMemberId():curMember()),...(preset||{})};
   const render=()=>{
     const cats = draft.type==="income" ? state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'})) : frequentCats();
     const subs = draft.categoryId?subsOf(draft.categoryId):[];
@@ -1105,21 +1110,21 @@ function openAddTxn(preset){
         <label>${draft.type==='income'?'Источник дохода':'Категория'}</label>
         <div class="opts" id="catOpts">
           ${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}
-          ${draft.type==='income'?`<button class="opt" data-cat="__addsrc">＋ источник</button>`:''}
+          ${(!part && draft.type==='income')?`<button class="opt" data-cat="__addsrc">＋ источник</button>`:''}
         </div>
       </div>
       ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts" id="subOpts">
           ${subs.map(s=>`<button class="opt ${draft.subId===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}
-          <button class="opt" data-sub="__add">＋ новая</button>
+          ${part?'':'<button class="opt" data-sub="__add">＋ новая</button>'}
         </div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
-      ${state.members.length?`<div class="field"><label>Кто</label><div class="opts" id="whoOpts">
+      ${(!part && state.members.length)?`<div class="field"><label>Кто</label><div class="opts" id="whoOpts">
           ${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${esc(m.emoji||'👤')} ${esc(m.name)}</button>`).join("")}
         </div></div>`:''}
       <div class="field"><label>Комментарий</label><input id="cm" placeholder="необязательно" value="${esc(draft.comment)}"></div>
-      <div class="field"><label class="row" style="gap:8px;cursor:pointer;margin:0"><input type="checkbox" id="repChk" style="width:auto" ${draft.repeat?'checked':''}> 🔁 Повторять ежемесячно</label>
+      ${part?'':`<div class="field"><label class="row" style="gap:8px;cursor:pointer;margin:0"><input type="checkbox" id="repChk" style="width:auto" ${draft.repeat?'checked':''}> 🔁 Повторять ежемесячно</label>
         <div id="repDayWrap" style="margin-top:8px;${draft.repeat?'':'display:none'}"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">Число месяца (1–31)</label><input type="number" id="repDay" min="1" max="31" value="${draft.repDay||''}" style="width:120px" placeholder="напр. 5"></div>
-      </div>
+      </div>`}
       <button class="btn primary block" id="saveTxn" style="padding:14px;font-size:16px;margin-top:4px">Сохранить</button>
       <button class="btn ghost block" id="cancelTxn" style="margin-top:8px">Отмена</button>
     `, el=>{
@@ -1128,9 +1133,11 @@ function openAddTxn(preset){
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{ if(b.dataset.sub==="__add"){ const nm=prompt("Название новой подкатегории:"); if(nm&&nm.trim()){ const s={id:uid(),categoryId:draft.categoryId,name:nm.trim()}; state.subcategories.push(s); save(); draft.subId=s.id; } } else { draft.subId=b.dataset.sub; } draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;} render(); });
       el.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{ draft.memberId=b.dataset.who; el.querySelectorAll("[data-who]").forEach(x=>x.classList.toggle("active",x.dataset.who===draft.memberId)); });
       const repChk=el.querySelector("#repChk"), repWrap=el.querySelector("#repDayWrap"), repDay=el.querySelector("#repDay");
-      const capRep=()=>{ draft.repeat=repChk.checked; draft.repDay=repDay.value; };
-      repChk.onchange=()=>{ repWrap.style.display=repChk.checked?"":"none"; if(repChk.checked && !repDay.value){ const d=el.querySelector("#dt").value||draft.date; repDay.value=parseInt(String(d).slice(8,10),10)||1; } capRep(); };
-      repDay.onchange=capRep;
+      if(repChk){
+        const capRep=()=>{ draft.repeat=repChk.checked; draft.repDay=repDay.value; };
+        repChk.onchange=()=>{ repWrap.style.display=repChk.checked?"":"none"; if(repChk.checked && !repDay.value){ const d=el.querySelector("#dt").value||draft.date; repDay.value=parseInt(String(d).slice(8,10),10)||1; } capRep(); };
+        repDay.onchange=capRep;
+      }
       attachNum(el.querySelector("#amt"));
       if(!draft.__opened){ draft.__opened=true; el.querySelector("#amt").focus(); }
       else if(draft.__focusDate){ draft.__focusDate=false; const dt=el.querySelector("#dt"); if(dt){ setTimeout(()=>{ try{ dt.scrollIntoView({behavior:'smooth',block:'center'}); dt.focus(); }catch(e){} },50); } }
@@ -1143,24 +1150,26 @@ function openAddTxn(preset){
         const date=el.querySelector("#dt").value||todayISOdate();
         const comment=el.querySelector("#cm").value.trim();
         const today=todayISOdate();
-        const base={type:draft.type,amount,categoryId:draft.categoryId,subId:draft.subId,memberId:draft.memberId||curMember(),label:comment||catName(draft.categoryId)};
-        if(repChk.checked){
+        const mid = part ? participantMemberId() : (draft.memberId||curMember());
+        const base={type:draft.type,amount,categoryId:draft.categoryId,subId:draft.subId,memberId:mid,label:comment||catName(draft.categoryId)};
+        const wantRepeat = !part && repChk && repChk.checked;
+        if(wantRepeat){
           // повторяющийся план (ежемесячно)
           let day=parseInt(repDay.value,10); if(!day||day<1)day=parseInt(date.slice(8,10),10)||1; if(day>31)day=31;
           const pid=uid();
           state.planned.push({id:pid,...base,repeat:true,day,date:null,active:true});
           if(date<=today){ // сегодняшний/прошлый экземпляр — сразу факт
-            state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:base.memberId,createdAt:nowISO(),fromPlanned:pid});
+            state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:mid,createdAt:nowISO(),fromPlanned:pid});
             state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
             save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId);
           } else { save(); closeSheet(); render_current(); toast("Плановый повторяющийся добавлен"); }
-        } else if(date>today){
+        } else if(!part && date>today){
           // разовый плановый (дата в будущем) — в факт не идёт
           state.planned.push({id:uid(),...base,repeat:false,day:null,date,active:true});
           save(); closeSheet(); render_current(); toast("Плановая операция добавлена — подтвердите в её день");
         } else {
-          // обычный факт
-          state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:base.memberId,createdAt:nowISO()});
+          // обычный факт (участник всегда сюда)
+          state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:mid,createdAt:nowISO()});
           state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
           save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId);
         }
@@ -1221,7 +1230,30 @@ function render_current(){
 /* ============================================================
    PAGE: СЕГОДНЯ (светофор)
    ============================================================ */
+function pgParticipantToday(v){
+  const k=curMonth, mid=participantMemberId();
+  const meName=(mid&&memberById(mid))?memberById(mid).name:(ACCT.email||'участник');
+  v.appendChild(h(`<div><div class="page-title">Ввод операций</div><div class="page-sub hide-mobile">${esc(meName)} · ваши доходы и расходы идут в общий семейный бюджет</div></div>`));
+  const add=h(`<button class="btn primary block" style="padding:16px;font-size:17px">＋ Добавить операцию</button>`);
+  add.onclick=()=>openAddTxn();
+  v.appendChild(add);
+  // своя история за месяц
+  const mine=state.txns.filter(t=>(t.memberId||null)===mid && ym(t.date)===k).sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
+  const card=h(`<div class="card" style="margin-top:12px"><h3>Мои операции <span class="dim" style="font-weight:500;font-size:13px">${ymShort(k)}</span></h3></div>`);
+  if(!mine.length){ card.appendChild(h(`<div class="empty" style="padding:16px;text-align:left">За ${ymShort(k)} операций нет. Нажмите «＋ Добавить операцию».</div>`)); }
+  else mine.forEach(t=>{
+    const inc=t.type==="income";
+    const row=h(`<div class="lrow" style="cursor:pointer"><div class="ic">${inc?'💰':'🧾'}</div>
+      <div style="flex:1;min-width:0"><div class="t1">${esc(t.comment||catName(t.categoryId))}</div>
+        <div class="t2">${esc(catName(t.categoryId))}${t.subId?' · '+esc(subName(t.subId)):''} · ${t.date.slice(8,10)}.${t.date.slice(5,7)}</div></div>
+      <div class="amt" style="color:${inc?'var(--green)':'var(--ink)'}">${inc?'+':'−'}${fmt(t.amount,{bare:true})}</div></div>`);
+    row.onclick=()=>editTxn(t.id);
+    card.appendChild(row);
+  });
+  v.appendChild(card);
+}
 function pgToday(v){
+  if(isParticipant()){ return pgParticipantToday(v); }
   const k=curMonth, m=metrics(k);
   const planTotal=planMonthTotal(k);
   const spent=monthExpense(k);
@@ -2821,21 +2853,34 @@ function appearanceCard(){
 let settingsTab="general";
 function pgSettings(v){
   v.appendChild(h(`<div class="page-title">Настройка</div>`));
-  const tabs=[["general","Общие"],["account","Аккаунт"]];
+  const part=isParticipant();
+  if(part) settingsTab='account';
+  const tabs = part ? [["account","Аккаунт"]] : [["general","Общие"],["account","Аккаунт"]];
   const bar=h(`<div class="chiprow" style="margin:2px 0 12px">${tabs.map(t=>`<button type="button" class="chip ${settingsTab===t[0]?'active':''}" data-tab="${t[0]}">${t[1]}</button>`).join('')}</div>`);
   bar.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{ settingsTab=b.dataset.tab; render_current(); });
   v.appendChild(bar);
   const body=h(`<div></div>`); v.appendChild(body);
   const tabAppend=(t,el)=>{ if(settingsTab===t) body.appendChild(el); };
-  // Простой режим (на устройстве)
+  // Предпросмотр режима участника (owner) / выход из него
+  const prevOn=(function(){try{return localStorage.getItem(LS_PREVIEW)==="1";}catch(e){return false;}})();
+  if(prevOn){
+    const c=h(`<div class="card" style="border-color:color-mix(in srgb,var(--gold) 40%,var(--line))"><h3>Предпросмотр участника</h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Вы смотрите приложение глазами члена семьи (только ввод и своя история).</p><button class="btn primary block" id="prevOff" style="padding:12px">Выйти из предпросмотра</button></div>`);
+    c.querySelector("#prevOff").onclick=()=>{ try{localStorage.removeItem(LS_PREVIEW);}catch(e){} settingsTab='general'; go('today'); };
+    tabAppend("account", c);
+  } else if(ACCT.role!=='member'){
+    const c=h(`<div class="card"><h3>Предпросмотр режима участника</h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Посмотреть, как выглядит приложение у члена семьи: только ввод операций и своя история, без аналитики. Предпросмотр на этом устройстве — данные не меняются.</p><button class="btn primary block" id="prevOnBtn" style="padding:12px">Включить предпросмотр</button></div>`);
+    c.querySelector("#prevOnBtn").onclick=()=>{ try{localStorage.setItem(LS_PREVIEW,"1");}catch(e){} go('today'); };
+    tabAppend("general", c);
+  }
+  // Простой режим (на устройстве) — только для полноправного аккаунта
   const simpleOn=isSimpleMode();
   const simpleCard=h(`<div class="card"><h3>Простой режим ${simpleOn?'<span class="pill g" style="margin-left:auto">включён</span>':'<span class="pill" style="margin-left:auto">выключен</span>'}</h3>
     <p class="muted" style="font-size:12.5px;margin-top:-6px">Оставляет только «Сегодня» и «Настройки»: быстро вносить доходы/расходы и видеть остаток на сегодня. Остальные разделы скрыты. Настройка только для этого устройства.</p>
     <button class="btn ${simpleOn?'':'primary'} block" id="simpleToggle" style="padding:12px">${simpleOn?'Вернуть полный режим':'Включить простой режим'}</button></div>`);
   simpleCard.querySelector("#simpleToggle").onclick=()=>{ try{ if(isSimpleMode())localStorage.removeItem(LS_SIMPLE); else localStorage.setItem(LS_SIMPLE,"1"); }catch(e){} renderNav(); render_current(); };
-  tabAppend("general", simpleCard);
-  tabAppend("general", fontSizeCard());
-  tabAppend("general", appearanceCard());
+  if(!part) tabAppend("general", simpleCard);
+  tabAppend(part?"account":"general", fontSizeCard());
+  tabAppend(part?"account":"general", appearanceCard());
 
   // participants
   const pc=h(`<div class="card"><h3>Участники <span class="tag">кто ведёт учёт</span></h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Добавьте членов семьи — в операциях можно отмечать автора, а в дашборде видеть, кто сколько тратит и зарабатывает.</p></div>`);
@@ -2848,7 +2893,7 @@ function pgSettings(v){
   });
   pc.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" id="addMember">＋ Добавить участника</button>`));
   pc.querySelector("#addMember").onclick=()=>editMember();
-  tabAppend("account",pc);
+  if(!part) tabAppend("account",pc);
 
 
   // data + sync
@@ -2862,7 +2907,7 @@ function pgSettings(v){
   dc.querySelector("#exp").onclick=exportJSON;
   dc.querySelector("#imp").onclick=()=>dc.querySelector("#impFile").click();
   dc.querySelector("#impFile").onchange=importJSON;
-  v.appendChild(dc);
+  if(!part) v.appendChild(dc);
 
   // Облако (аккаунт) — синхронизация через сервер, E2E «один пароль»
   tabAppend("account",cloudCard());
@@ -2884,7 +2929,7 @@ function pgSettings(v){
       btn.onclick=()=>{ if(!ok())return; try{localStorage.removeItem(LS_KEY);localStorage.removeItem(LS_ENCFACE);}catch(e){} state=seedState(); __lastSaved=_clone(state); save(false); closeSheet(); toast("Все данные удалены"); render_current(); };
     });
   };
-  v.appendChild(rc);
+  if(!part) v.appendChild(rc);
 
   v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">7Я ФИН · данные остаются у вас</p>`));
 }
@@ -3074,15 +3119,19 @@ const VaultCrypto = (function(){
     async regenerateRecovery(dek,kb){ const rk=genRecoveryKey(),rsalt=b64(C.getRandomValues(new Uint8Array(16))),rw=await fromRecovery(rk,rsalt); return {keybag:{...kb,kdf:{...kb.kdf,rsalt},protected_key_recovery:await wrap(dek,rw)},recoveryKey:rk}; },
     async exportDEK(dek){ return b64(await subtle.exportKey('raw',dek)); },
     async importDEK(s){ return subtle.importKey('raw',ub64(s),{name:'AES-GCM',length:256},true,['encrypt','decrypt']); },
+    // Передача ключа общего сейфа через ссылку-приглашение: секрет живёт в ссылке, на сервер уходит только обёртка
+    async wrapForInvite(dek, inviteSecret){ const m=await pbkdf2(String(inviteSecret), te.encode('famfin|invite'), KDF_ITERS); const wk=await hkdfKey(m,'famfin-invite'); return wrap(dek, wk); },
+    async unwrapForInvite(blob, inviteSecret){ const m=await pbkdf2(String(inviteSecret), te.encode('famfin|invite'), KDF_ITERS); const wk=await hkdfKey(m,'famfin-invite'); return unwrap(blob, wk); },
+    genInviteSecret(){ return b64(C.getRandomValues(new Uint8Array(24))).replace(/[^A-Za-z0-9]/g,'').slice(0,32); },
     async encryptVault(obj,dek){ const iv=C.getRandomValues(new Uint8Array(12)); const ct=new Uint8Array(await subtle.encrypt({name:'AES-GCM',iv},dek,te.encode(JSON.stringify(obj)))); return {ciphertext:b64(ct),iv:b64(iv),salt:'-',enc_v:1,updatedAt:obj.updatedAt||nowISO()}; },
     async decryptVault(env,dek){ const pt=await subtle.decrypt({name:'AES-GCM',iv:ub64(env.iv)},dek,ub64(env.ciphertext)); return JSON.parse(td.decode(pt)); },
   };
 })();
 
 const ACCT = {
-  base:PROD_API_URL, access:null, refresh:null, email:null, keybag:null, dek:null, linked:false,
+  base:PROD_API_URL, access:null, refresh:null, email:null, keybag:null, dek:null, linked:false, role:'owner', memberId:null,
   async boot(){
-    try{ const d=JSON.parse(localStorage.getItem(LS_ACCT)||"{}"); this.base=d.base||this.base; this.refresh=d.refresh||null; this.email=d.email||null; this.keybag=d.keybag||null; this.linked=!!this.refresh; }catch(e){}
+    try{ const d=JSON.parse(localStorage.getItem(LS_ACCT)||"{}"); this.base=d.base||this.base; this.refresh=d.refresh||null; this.email=d.email||null; this.keybag=d.keybag||null; this.role=d.role||'owner'; this.memberId=d.memberId||null; this.linked=!!this.refresh; }catch(e){}
     // восстановить закэшированный ключ данных (режим «оставаться в системе»),
     // но НЕ при включённой биометрии — тогда данные заперты до Face ID/отпечатка
     if(this.linked && this.remembered() && !this.biometricOn()){
@@ -3099,7 +3148,7 @@ const ACCT = {
   },
   remembered(){ try{ return localStorage.getItem(LS_REMEMBER)!=="0"; }catch(e){ return true; } },
   setRemember(on){ try{ localStorage.setItem(LS_REMEMBER, on?"1":"0"); }catch(e){} if(on) this.cacheDEK(); else this.clearDEKCache(); },
-  persist(){ try{ localStorage.setItem(LS_ACCT,JSON.stringify({base:this.base,refresh:this.refresh,email:this.email,keybag:this.keybag})); }catch(e){} },
+  persist(){ try{ localStorage.setItem(LS_ACCT,JSON.stringify({base:this.base,refresh:this.refresh,email:this.email,keybag:this.keybag,role:this.role,memberId:this.memberId})); }catch(e){} },
   async cacheDEK(){ try{ if(this.dek && this.remembered()) localStorage.setItem(LS_DEK, _obf(await VaultCrypto.exportDEK(this.dek))); }catch(e){} },
   clearDEKCache(){ try{ localStorage.removeItem(LS_DEK); }catch(e){} },
   // ---- Биометрический вход (Face ID / Touch ID / отпечаток) на этом устройстве ----
@@ -3514,7 +3563,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
