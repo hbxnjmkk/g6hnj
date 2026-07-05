@@ -222,6 +222,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 #gate.show{display:flex}
 #gate .gbox{width:100%;max-width:300px;display:flex;flex-direction:column;gap:14px;align-items:center}
 #gate input{text-align:center;font-size:22px;letter-spacing:2px;padding:15px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);width:100%}
+#gate input[type=checkbox]{width:24px;height:24px;min-width:24px;flex:none;padding:0;margin:0;letter-spacing:0}
 #gate .gbtn2{width:100%;max-width:240px;padding:15px;border-radius:12px;background:var(--gold);color:var(--on-accent);border:none;font-size:17px;font-weight:700;cursor:pointer}
 #gate .gver{font-size:11px;color:var(--ink3);opacity:.65;margin-top:10px}
 #gate .gbtn{width:46px;height:46px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);display:grid;place-items:center;font-size:20px;color:var(--ink2)}
@@ -2690,7 +2691,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v4.5";
+const APP_VERSION="v4.6";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3235,24 +3236,34 @@ let pendingInvite=null;   // {token,secret} — если приложение о
 
 // Мастер: создать ссылку-приглашение (со ссылкой + QR)
 function openInviteSheet(){
+  const labels=(state.members||[]).map(m=>m.name).filter(Boolean);
   openSheet(`<h3>Пригласить участника</h3>
-    <p class="muted" style="font-size:12.5px;margin-top:-6px">Введите имя — под ним операции участника будут видны в общем бюджете. Затем отправьте ссылку или покажите QR-код.</p>
-    <div class="field"><label>Имя участника</label><input id="invName" placeholder="Напр. Даша" autocomplete="off"></div>
+    <p class="muted" style="font-size:12.5px;margin-top:-6px">Выберите, под каким именем участник будет отмечаться в общем бюджете (или введите новое). Затем отправьте ссылку или покажите QR-код.</p>
+    <div class="field"><label>Имя участника</label>
+      <div class="opts" id="invLabels">${labels.map(n=>`<button class="opt" data-lbl="${esc(n)}">${esc(n)}</button>`).join('')}<button class="opt" data-lbl="__new">＋ Другое имя</button></div>
+      <input id="invName" placeholder="имя участника" autocomplete="off" style="margin-top:8px;${labels.length?'display:none':''}"></div>
     <button class="btn primary block" id="invMake" style="padding:13px">Создать ссылку-приглашение</button>
     <div id="invOut" style="margin-top:12px"></div>`, el=>{
-    setTimeout(()=>{ const n=el.querySelector("#invName"); if(n)n.focus(); },100);
+    let chosen = labels.length ? null : '';                 // если меток нет — сразу ручной ввод
+    const nameInp=el.querySelector("#invName");
+    el.querySelectorAll("[data-lbl]").forEach(b=>b.onclick=()=>{
+      el.querySelectorAll("[data-lbl]").forEach(x=>x.classList.remove("active")); b.classList.add("active");
+      if(b.dataset.lbl==="__new"){ chosen=null; nameInp.style.display=""; setTimeout(()=>nameInp.focus(),50); }
+      else { chosen=b.dataset.lbl; nameInp.style.display="none"; }
+    });
     el.querySelector("#invMake").onclick=async()=>{
-      const name=el.querySelector("#invName").value.trim();
+      const name = (chosen!=null ? chosen : nameInp.value.trim());
+      if(!name){ toast("Выберите или введите имя участника"); return; }
       const btn=el.querySelector("#invMake"); btn.disabled=true; btn.textContent="Создаём…";
       try{
         const {token,secret}=await ACCT.createInvite(name,72);
         const link=inviteLink(token,secret);
         const out=el.querySelector("#invOut");
-        out.innerHTML=`<div class="okbox" style="margin:0 0 10px">Ссылка готова${name?' для «'+esc(name)+'»':''}. Действует 72 часа и рассчитана на одного участника.</div>
+        out.innerHTML=`<div class="okbox" style="margin:0 0 10px">Ссылка готова для «${esc(name)}». Действует 72 часа и рассчитана на одного участника.</div>
           <div class="field"><label>Ссылка-приглашение</label><input id="invLink" readonly value="${esc(link)}" style="font-size:12px"></div>
           <div class="row" style="gap:8px"><button class="btn primary" id="invCopy" style="flex:1;padding:12px">📋 Скопировать ссылку</button><button class="btn" id="invQr" style="padding:12px">▦ QR-код</button></div>
           <div id="invQrBox" style="margin-top:12px;display:none;text-align:center"></div>
-          <p class="muted" style="font-size:12px;margin-top:10px">Отправьте ссылку в мессенджере или дайте отсканировать QR. Участник откроет её, создаст свой вход и попадёт в общий бюджет.</p>`;
+          <p class="muted" style="font-size:12px;margin-top:10px">Отправьте ссылку в мессенджере или дайте отсканировать QR. Участник откроет её, создаст свой вход и попадёт в общий бюджет под именем «${esc(name)}».</p>`;
         out.querySelector("#invCopy").onclick=()=>copyText(link);
         out.querySelector("#invLink").onclick=e=>{ try{e.target.select();}catch(_){}}; 
         out.querySelector("#invQr").onclick=()=>{ const b=out.querySelector("#invQrBox"); if(b.style.display==='none'){ b.innerHTML=`<div style="max-width:230px;margin:0 auto;background:#fff;padding:12px;border-radius:14px">${qrSVG(link,4,2)}</div>`; b.style.display='block'; } else b.style.display='none'; };
@@ -3275,12 +3286,13 @@ function familyCard(){
     ml.innerHTML='';
     members.filter(m=>m.role!=='owner').forEach(m=>{
       const row=h(`<div class="lrow" style="padding:8px 2px"><div class="ic">👤</div>
-        <div style="flex:1;min-width:0"><div class="t1">${esc(m.member_label||m.email)}</div><div class="t2">${esc(m.email)} · участник</div></div>
+        <div style="flex:1;min-width:0"><div class="t1">${esc(m.member_label||m.email)}</div><div class="t2">${esc(m.email)} · метка в бюджете: «${esc(m.member_label||'—')}»</div></div>
         <button class="btn sm ghost" data-rev="${esc(m.user_id)}">Отвязать</button></div>`);
-      row.querySelector("[data-rev]").onclick=()=>{ if(confirm("Отвязать участника «"+(m.member_label||m.email)+"»? Он потеряет доступ к общему бюджету.")){ ACCT.revokeMember(m.user_id).then(()=>{toast("Участник отвязан"); render_current();}).catch(()=>toast("Не удалось отвязать")); } };
+      row.querySelector("[data-rev]").onclick=()=>{ if(confirm("Отвязать участника «"+(m.member_label||m.email)+"»? Он потеряет доступ к общему бюджету (прошлые операции и метка останутся).")){ ACCT.revokeMember(m.user_id).then(()=>{toast("Участник отвязан"); render_current();}).catch(()=>toast("Не удалось отвязать")); } };
       ml.appendChild(row);
     });
     if(!members.filter(m=>m.role!=='owner').length) ml.innerHTML='<div class="dim" style="font-size:12px;padding:2px">Пока только вы. Пригласите участника кнопкой выше.</div>';
+    else ml.appendChild(h('<p class="muted" style="font-size:11.5px;margin:8px 2px 0">«Метка» — имя, под которым операции участника попадают в общий бюджет (раздел «Участники»). Доступ даёт/забирает эта карточка, авторство операций — метка.</p>'));
   }).catch(()=>{ ml.innerHTML='<div class="dim" style="font-size:12px;padding:6px 2px">Не удалось загрузить участников (нет связи с сервером).</div>'; });
   return card;
 }
@@ -3421,7 +3433,7 @@ function editMember(id){
     el=>{ let color=m.color;
       el.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{ color=b.dataset.c; el.querySelectorAll("[data-c]").forEach(x=>x.style.borderColor="transparent"); b.style.borderColor="#fff"; });
       el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#mn").value.trim(),emoji:el.querySelector("#me_e").value.trim()||"🙂",color:color}; if(!o.name){toast("Введите имя");return;} if(id)Object.assign(m,o); else{ const nid=uid(); state.members.push({id:nid,...o}); if(!localStorage.getItem(LS_ME))setCurMember(nid); } save(); closeSheet(); renderMe(); render_current(); };
-      if(id)el.querySelector("#del").onclick=()=>{ if(confirm("Удалить участника «"+m.name+"»? Его прошлые операции останутся, но без автора.")){ state.members=state.members.filter(x=>x.id!==id); if(curMember()===id)setCurMember(state.members[0]?state.members[0].id:""); save(); closeSheet(); renderMe(); render_current(); } };
+      if(id)el.querySelector("#del").onclick=()=>{ if(confirm("Удалить метку «"+m.name+"»? Прошлые операции останутся без автора.\n\nЭто НЕ закрывает доступ к бюджету. Если под этим именем в семью входит участник — чтобы забрать доступ, откройте Настройки → Аккаунт → «Семья» → «Отвязать».")){ state.members=state.members.filter(x=>x.id!==id); if(curMember()===id)setCurMember(state.members[0]?state.members[0].id:""); save(); closeSheet(); renderMe(); render_current(); } };
     });
 }
 
@@ -5832,9 +5844,9 @@ function showAuthGate(mode){
   function renderRecovery(rk){
     box.innerHTML='<div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:4px">Сохраните ключ восстановления</div>'+
       '<div style="font-size:12px;color:var(--ink3);text-align:center;margin-bottom:8px">Единственный способ вернуть данные, если забудете пароль. Мы его не храним — покажем только сейчас.</div>'+
-      '<div style="font-family:ui-monospace,Menlo,monospace;font-size:15px;letter-spacing:1px;background:rgba(255,255,255,.06);border-radius:10px;padding:12px;text-align:center;word-break:break-all">'+esc(rk)+'</div>'+
-      '<div style="display:flex;gap:8px;margin-top:8px"><button class="gbtn2" id="rkCopy" type="button" style="flex:1;'+ghost+'">Скопировать</button><button class="gbtn2" id="rkDl" type="button" style="flex:1;'+ghost+'">Аварийный лист</button></div>'+
-      '<label style="display:flex;gap:8px;align-items:flex-start;margin:12px 2px;font-size:12px;cursor:pointer"><input type="checkbox" id="rkChk" style="margin-top:2px"><span>Я сохранил ключ восстановления в надёжном месте</span></label>'+
+      '<div style="font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:700;letter-spacing:2px;background:rgba(127,127,127,.1);border:1px solid var(--line2);border-radius:12px;padding:16px 12px;text-align:center;word-break:break-all;line-height:1.5">'+esc(rk)+'</div>'+
+      '<div style="display:flex;gap:8px;margin-top:10px"><button class="gbtn2" id="rkCopy" type="button" style="flex:1;'+ghost+'">Скопировать</button><button class="gbtn2" id="rkDl" type="button" style="flex:1;'+ghost+'">Аварийный лист</button></div>'+
+      '<label style="display:flex;gap:10px;align-items:center;margin:14px 2px;font-size:13px;line-height:1.35;cursor:pointer"><input type="checkbox" id="rkChk"><span style="flex:1">Я сохранил ключ восстановления в надёжном месте</span></label>'+
       '<button class="gbtn2" id="rkDone" type="button" disabled style="opacity:.5">Готово</button>'+V;
     box.querySelector('#rkCopy').onclick=()=>{ try{navigator.clipboard.writeText(rk);toast('Скопировано');}catch(e){} };
     box.querySelector('#rkDl').onclick=()=>downloadRecoverySheet(rk);
@@ -6005,7 +6017,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
