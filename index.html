@@ -51,6 +51,7 @@ button{font-family:inherit;cursor:pointer;color:inherit;border:none;background:n
 input,select,textarea{font-family:inherit;font-size:16px;color:var(--ink);background:var(--panel2);
   border:1px solid var(--line2);border-radius:var(--r3);padding:11px 12px;width:100%;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--gold)}
+input[type=checkbox],input[type=radio]{width:auto;flex:none;accent-color:var(--gold);cursor:pointer}
 .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;font-family:var(--f-num)}
 ::-webkit-scrollbar{width:9px;height:9px}
 ::-webkit-scrollbar-thumb{background:var(--line2);border-radius:6px}
@@ -155,6 +156,12 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold)}
 .cal-grid{display:none}
 .two-up{display:grid;gap:12px;grid-template-columns:1fr;margin-bottom:12px}
 @media(min-width:560px){ .two-up{grid-template-columns:1fr 1fr} }
+/* Модалка выбора подкатегории */
+.subov{position:fixed;inset:0;z-index:80;background:rgba(0,0,0,.5);display:flex;align-items:flex-end;justify-content:center;animation:subfade .15s ease}
+@keyframes subfade{from{opacity:0}to{opacity:1}}
+.subplate{background:var(--bg2);border-radius:22px 22px 0 0;max-width:520px;width:100%;padding:18px 16px calc(18px + env(safe-area-inset-bottom));box-shadow:var(--shadow);max-height:78vh;overflow:auto}
+@media(min-width:560px){ .subov{align-items:center} .subplate{border-radius:22px;margin:0 16px} }
+.subplate .opt{width:100%;justify-content:flex-start;margin-bottom:7px;padding:13px 14px;font-size:15px}
 .meter>span{display:block;height:100%;border-radius:999px;background:var(--green);transition:width .5s ease}
 .meter.warn>span{background:var(--amber)} .meter.bad>span{background:var(--red)}
 .linrow{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;margin-bottom:6px}
@@ -209,7 +216,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 #gate.show{display:flex}
 #gate .gbox{width:100%;max-width:300px;display:flex;flex-direction:column;gap:14px;align-items:center}
 #gate input{text-align:center;font-size:22px;letter-spacing:2px;padding:15px;border-radius:12px;background:var(--panel2);border:1px solid var(--line2);width:100%}
-#gate .gbtn2{width:100%;max-width:240px;padding:15px;border-radius:12px;background:var(--gold);color:#fff;border:none;font-size:17px;font-weight:700;cursor:pointer}
+#gate .gbtn2{width:100%;max-width:240px;padding:15px;border-radius:12px;background:var(--gold);color:var(--on-accent);border:none;font-size:17px;font-weight:700;cursor:pointer}
 #gate .gver{font-size:11px;color:var(--ink3);opacity:.65;margin-top:10px}
 #gate .gbtn{width:46px;height:46px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);display:grid;place-items:center;font-size:20px;color:var(--ink2)}
 #gate .gface{font-size:14px;color:var(--ink3);background:none;border:none;text-decoration:underline}
@@ -370,9 +377,10 @@ const LS_DEK="famfin.dek";    // ключ данных, закэшированн
 const LS_REMEMBER="famfin.remember"; // «оставаться в системе на этом устройстве» (по умолчанию вкл)
 const LS_THEME="famfin.theme";   // light / dark / auto (пункт 14)
 const LS_SIMPLE="famfin.simple"; // простой режим (только «Сегодня» + «Настройки»), на устройстве
+const LS_FONT="famfin.font";     // размер шрифта интерфейса: sm/md/lg (на устройстве)
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v4.0";
+const APP_VERSION="v4.1";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -889,6 +897,16 @@ function horizonStart(){ return ym(new Date()); }
 
 const SIMPLE_NAV=["today","settings"];
 function isSimpleMode(){ try{ return localStorage.getItem(LS_SIMPLE)==="1"; }catch(e){ return false; } }
+function getFontSize(){ try{ return localStorage.getItem(LS_FONT)||"md"; }catch(e){ return "md"; } }
+function applyFont(){ try{ const z={sm:0.9,md:1,lg:1.12}[getFontSize()]||1; document.body.style.zoom=z; }catch(e){} }
+function fontSizeCard(){
+  const cur=getFontSize();
+  const card=h(`<div class="card"><h3>Размер шрифта</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-6px">Крупнее или мельче для всего приложения. Настройка на этом устройстве.</p>
+    <div class="seg" id="fsSeg"><button data-fs="sm" class="${cur==='sm'?'active':''}">Мелко</button><button data-fs="md" class="${cur==='md'?'active':''}">Средне</button><button data-fs="lg" class="${cur==='lg'?'active':''}">Крупно</button></div></div>`);
+  card.querySelectorAll("[data-fs]").forEach(b=>b.onclick=()=>{ try{ localStorage.setItem(LS_FONT,b.dataset.fs); }catch(e){} applyFont(); card.querySelectorAll("[data-fs]").forEach(x=>x.classList.toggle("active",x===b)); });
+  return card;
+}
 function go(r){ if(isSimpleMode() && SIMPLE_NAV.indexOf(r)<0) r="today"; route=r; renderNav(); render(); window.scrollTo(0,0); }
 function renderNav(){
   const simple=isSimpleMode();
@@ -1027,6 +1045,26 @@ function frequentCats(){
   const f=state.freq||{};
   return expenseCats().slice().sort((a,b)=>(f[b.id]||0)-(f[a.id]||0));
 }
+// Модалка выбора подкатегории: тап вне окна = отмена (вернуться к категории), выбор = закрыть и продолжить
+function openSubPicker(categoryId, current, onPick){
+  const subs=subsOf(categoryId);
+  const ov=h(`<div class="subov"><div class="subplate">
+     <div style="font-weight:700;font-size:16px;margin-bottom:2px">Подкатегория</div>
+     <div class="dim" style="font-size:12px;margin-bottom:12px">${esc(catName(categoryId))}</div>
+     <div class="opts" style="flex-direction:column;gap:0">
+       ${subs.map(s=>`<button class="opt ${current===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}
+       <button class="opt" data-sub="__add" style="color:var(--ink3)">＋ новая подкатегория</button>
+     </div>
+     <div class="dim" style="text-align:center;font-size:11px;margin-top:6px">Тап вне окна — сменить категорию</div>
+  </div></div>`);
+  const close=()=>{ try{ov.remove();}catch(e){} };
+  ov.onclick=(e)=>{ if(e.target===ov){ close(); if(onPick) onPick(null,true); } };
+  ov.querySelectorAll("[data-sub]").forEach(b=>b.onclick=(e)=>{ e.stopPropagation();
+    if(b.dataset.sub==="__add"){ const nm=prompt("Название новой подкатегории:"); if(nm&&nm.trim()){ const s={id:uid(),categoryId,name:nm.trim()}; state.subcategories.push(s); save(); close(); if(onPick) onPick(s.id); } return; }
+    close(); if(onPick) onPick(b.dataset.sub);
+  });
+  document.body.appendChild(ov);
+}
 function openAddTxn(preset){
   let draft={type:"expense",date:todayISOdate(),amount:"",categoryId:null,subId:null,comment:"",memberId:curMember(),...(preset||{})};
   const render=()=>{
@@ -1064,7 +1102,7 @@ function openAddTxn(preset){
       <button class="btn ghost block" id="cancelTxn" style="margin-top:8px">Отмена</button>
     `, el=>{
       el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;}render();});
-      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;} if(b.dataset.cat==="__addsrc"){ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const s={id:uid(),name:nm.trim(),amount:0}; state.incomeSources.push(s); save(); draft.categoryId=s.id; } render(); return; } draft.categoryId=b.dataset.cat;const ss=subsOf(draft.categoryId);draft.subId=ss.length===1?ss[0].id:null;draft.__focusSub=(ss.length>1);render();});
+      el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;} if(b.dataset.cat==="__addsrc"){ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const s={id:uid(),name:nm.trim(),amount:0}; state.incomeSources.push(s); save(); draft.categoryId=s.id; } render(); return; } draft.categoryId=b.dataset.cat;const ss=subsOf(draft.categoryId); if(ss.length>1){ draft.subId=null; render(); openSubPicker(draft.categoryId, draft.subId, (sid)=>{ if(sid){ draft.subId=sid; render(); } }); } else { draft.subId=ss.length===1?ss[0].id:null; render(); } });
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{ if(b.dataset.sub==="__add"){ const nm=prompt("Название новой подкатегории:"); if(nm&&nm.trim()){ const s={id:uid(),categoryId:draft.categoryId,name:nm.trim()}; state.subcategories.push(s); save(); draft.subId=s.id; } } else { draft.subId=b.dataset.sub; } draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;} render(); });
       el.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{ draft.memberId=b.dataset.who; el.querySelectorAll("[data-who]").forEach(x=>x.classList.toggle("active",x.dataset.who===draft.memberId)); });
       const repChk=el.querySelector("#repChk"), repWrap=el.querySelector("#repDayWrap"), repDay=el.querySelector("#repDay");
@@ -1077,6 +1115,8 @@ function openAddTxn(preset){
         const amount=parseFloat(String(el.querySelector("#amt").value).replace(/\s/g,"").replace(",","."));
         if(!amount||amount<=0){ toast("Введите сумму"); el.querySelector("#amt").focus(); return; }
         if(!draft.categoryId){ toast("Выберите категорию"); return; }
+        const _subs=subsOf(draft.categoryId);
+        if(_subs.length && !draft.subId){ toast("Выберите подкатегорию"); openSubPicker(draft.categoryId, draft.subId, (sid)=>{ if(sid){ draft.subId=sid; render(); } }); return; }
         const date=el.querySelector("#dt").value||todayISOdate();
         const comment=el.querySelector("#cm").value.trim();
         const today=todayISOdate();
@@ -1194,8 +1234,8 @@ function pgToday(v){
   const twoUp=h(`<div class="two-up">
     <div class="card" style="margin:0">
       <h3 style="margin-bottom:2px">Расход <span class="dim" style="font-weight:500;font-size:13px">${monthNom}</span></h3>
-      <div class="linrow" style="margin-top:6px"><span class="dim">План</span><span class="num" style="font-weight:700">${fmt(planTotal)}</span></div>
-      <div class="linrow" style="margin-top:2px"><span class="dim">Потрачено</span><span class="num" style="font-weight:700;color:${(planTotal>0&&spentAll>planTotal)?'var(--red)':'var(--ink)'}">${fmt(spentAll)}</span></div>
+      <div class="linrow" style="margin-top:6px"><span class="dim">План</span><span class="num" style="font-weight:700;font-size:18px">${fmt(planTotal)}</span></div>
+      <div class="linrow" style="margin-top:3px"><span class="dim">Потрачено</span><span class="num" style="font-weight:800;font-size:22px;color:${(planTotal>0&&spentAll>planTotal)?'var(--red)':'var(--ink)'}">${fmt(spentAll)}</span></div>
       ${cap>0?`<div class="linrow" style="margin-top:1px"><span class="dim" style="font-size:11px">из них в капитал</span><span class="dim num" style="font-size:11px">${fmt(cap)}</span></div>`:''}
       <div class="meter ${(planTotal>0&&spentAll>planTotal)?'bad':''}" style="margin-top:8px"><span style="width:${expPct}%"></span></div>
       ${planTotal>0?`<div style="margin-top:10px;border-top:1px solid var(--line);padding-top:8px">
@@ -1206,8 +1246,8 @@ function pgToday(v){
     </div>
     <div class="card" style="margin:0">
       <h3 style="margin-bottom:2px">Приход <span class="dim" style="font-weight:500;font-size:13px">${monthNom}</span></h3>
-      <div class="linrow" style="margin-top:6px"><span class="dim">План</span><span class="num" style="font-weight:700">${fmt(plannedInc)}</span></div>
-      <div class="linrow" style="margin-top:2px"><span class="dim">Факт</span><span class="num" style="font-weight:700;color:var(--green)">${fmt(factInc)}</span></div>
+      <div class="linrow" style="margin-top:6px"><span class="dim">План</span><span class="num" style="font-weight:700;font-size:18px">${fmt(plannedInc)}</span></div>
+      <div class="linrow" style="margin-top:3px"><span class="dim">Факт</span><span class="num" style="font-weight:800;font-size:22px;color:var(--green)">${fmt(factInc)}</span></div>
       <div class="meter" style="margin-top:8px"><span style="width:${incPct}%;background:var(--green)"></span></div>
       <div class="dim" style="font-size:11.5px;margin-top:8px">${plannedInc>0?('Получено '+pct(incPct/100)+' от плана прихода'):'План прихода не задан — укажите на «Плане».'}</div>
     </div>
@@ -2751,6 +2791,7 @@ function pgSettings(v){
     <button class="btn ${simpleOn?'':'primary'} block" id="simpleToggle" style="padding:12px">${simpleOn?'Вернуть полный режим':'Включить простой режим'}</button></div>`);
   simpleCard.querySelector("#simpleToggle").onclick=()=>{ try{ if(isSimpleMode())localStorage.removeItem(LS_SIMPLE); else localStorage.setItem(LS_SIMPLE,"1"); }catch(e){} renderNav(); render_current(); };
   tabAppend("general", simpleCard);
+  tabAppend("general", fontSizeCard());
   tabAppend("general", appearanceCard());
 
   // participants
@@ -3178,7 +3219,7 @@ function showAuthGate(mode){
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show"); mode=mode||'welcome';
   const V='<div class="gver">'+APP_VERSION+'</div>';
-  const ghost='background:transparent;border:1px solid var(--line2)';
+  const ghost='background:transparent;border:1px solid var(--line2);color:var(--ink)';
   function focusFirst(){ const el=box.querySelector('#aEmail')||box.querySelector('#aPw'); if(el) setTimeout(()=>el.focus(),150); }
   function render(){
     if(mode==='welcome'){
@@ -3190,7 +3231,7 @@ function showAuthGate(mode){
       box.querySelector('#aLogin').onclick=()=>{mode='login';render();};
     } else if(mode==='register'){
       box.innerHTML='<div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:8px">Создать аккаунт</div>'+
-        '<input id="aEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="email" style="width:100%">'+
+        '<input id="aEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="username" spellcheck="false" placeholder="email" style="width:100%">'+
         '<input id="aPw" type="password" autocomplete="new-password" placeholder="пароль (8+ символов)" style="width:100%;margin-top:8px">'+
         '<input id="aPw2" type="password" autocomplete="new-password" placeholder="повторите пароль" style="width:100%;margin-top:8px">'+
         '<label style="display:flex;gap:8px;align-items:flex-start;margin:10px 2px;font-size:12px;color:var(--ink3);cursor:pointer"><input type="checkbox" id="aConsent" style="margin-top:2px"><span>Согласен на обработку персональных данных и <a href="#" id="aPolicy" style="color:#4a9">политику конфиденциальности</a></span></label>'+
@@ -3212,7 +3253,7 @@ function showAuthGate(mode){
       };
     } else if(mode==='login'){
       box.innerHTML='<div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:8px">Вход</div>'+
-        '<input id="aEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="email" style="width:100%">'+
+        '<input id="aEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="username" spellcheck="false" placeholder="email" style="width:100%">'+
         '<input id="aPw" type="password" autocomplete="current-password" placeholder="пароль" style="width:100%;margin-top:8px">'+
         '<div id="aMsg" class="gmsg"></div>'+
         '<button class="gbtn2" id="aGo" type="button">Войти</button>'+
@@ -3408,7 +3449,7 @@ function biometricCard(){
 let booted=false;
 function bootApp(){
   if(booted)return; booted=true;
-  applyTheme(); setupScrollShrink();
+  applyTheme(); applyFont(); setupScrollShrink();
   try{ rolloverSinkingFunds(); }catch(e){}
   try{ syncGoalSubcats(); }catch(e){}
   document.getElementById("gate").classList.remove("show");
@@ -3430,9 +3471,9 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
-applyTheme(); watchAutoTheme();
+applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
   if(__encEnv){ showEncGate(__encEnv); return; }  // устаревший путь: локальные данные под старым кодом
   startAuthFlow();
