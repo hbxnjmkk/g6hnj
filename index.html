@@ -13,8 +13,8 @@
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#EEF2F7">
-<meta name="apple-mobile-web-app-title" content="7Я ФИН">
-<title>7Я ФИН</title>
+<meta name="apple-mobile-web-app-title" content="ДомФин">
+<title>ДомФин</title>
 <script>try{var _t=localStorage.getItem("famfin.theme")||"auto",_a=localStorage.getItem("famfin.accent")||"gold";var _d=_t==="dark"||(_t==="auto"&&matchMedia("(prefers-color-scheme:dark)").matches);var _e=document.documentElement;_e.setAttribute("data-theme",_d?"dark":"light");_e.setAttribute("data-accent",_a);}catch(e){}</script>
 <style>
 :root{
@@ -331,7 +331,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 <body>
 <div id="app">
   <div class="topbar">
-    <div class="brand"><svg viewBox="0 0 40 40" width="22" height="22" style="border-radius:7px;display:block" aria-hidden="true"><rect width="40" height="40" rx="10" fill="var(--gold,#E0A93B)"/><text x="20" y="27.5" font-family="-apple-system,system-ui,sans-serif" font-size="17" font-weight="800" fill="#1a1200" text-anchor="middle">7Я</text></svg><span>7Я ФИН</span></div>
+    <div class="brand"><svg viewBox="0 0 40 40" width="22" height="22" style="border-radius:7px;display:block" aria-hidden="true"><rect width="40" height="40" rx="10" fill="var(--gold,#E0A93B)"/><text x="20" y="27.5" font-family="-apple-system,system-ui,sans-serif" font-size="17" font-weight="800" fill="#1a1200" text-anchor="middle">ДФ</text></svg><span>ДомФин</span></div>
     <div class="month" id="monthNav">
       <button id="mPrev" aria-label="Предыдущий месяц">‹</button>
       <div class="lbl num" id="mLbl">—</div>
@@ -2691,7 +2691,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v4.6";
+const APP_VERSION="v4.7";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3235,16 +3235,16 @@ function fallbackCopy(t){ try{ const ta=document.createElement('textarea'); ta.v
 let pendingInvite=null;   // {token,secret} — если приложение открыто по ссылке-приглашению
 
 // Мастер: создать ссылку-приглашение (со ссылкой + QR)
-function openInviteSheet(){
+function openInviteSheet(presetLabel){
   const labels=(state.members||[]).map(m=>m.name).filter(Boolean);
   openSheet(`<h3>Пригласить участника</h3>
     <p class="muted" style="font-size:12.5px;margin-top:-6px">Выберите, под каким именем участник будет отмечаться в общем бюджете (или введите новое). Затем отправьте ссылку или покажите QR-код.</p>
     <div class="field"><label>Имя участника</label>
-      <div class="opts" id="invLabels">${labels.map(n=>`<button class="opt" data-lbl="${esc(n)}">${esc(n)}</button>`).join('')}<button class="opt" data-lbl="__new">＋ Другое имя</button></div>
-      <input id="invName" placeholder="имя участника" autocomplete="off" style="margin-top:8px;${labels.length?'display:none':''}"></div>
+      <div class="opts" id="invLabels">${labels.map(n=>`<button class="opt ${presetLabel===n?'active':''}" data-lbl="${esc(n)}">${esc(n)}</button>`).join('')}<button class="opt" data-lbl="__new">＋ Другое имя</button></div>
+      <input id="invName" placeholder="имя участника" autocomplete="off" style="margin-top:8px;${(labels.length&&presetLabel==null)||presetLabel!=null?'display:none':''}"></div>
     <button class="btn primary block" id="invMake" style="padding:13px">Создать ссылку-приглашение</button>
     <div id="invOut" style="margin-top:12px"></div>`, el=>{
-    let chosen = labels.length ? null : '';                 // если меток нет — сразу ручной ввод
+    let chosen = presetLabel!=null ? presetLabel : (labels.length ? null : '');
     const nameInp=el.querySelector("#invName");
     el.querySelectorAll("[data-lbl]").forEach(b=>b.onclick=()=>{
       el.querySelectorAll("[data-lbl]").forEach(x=>x.classList.remove("active")); b.classList.add("active");
@@ -3274,28 +3274,39 @@ function openInviteSheet(){
   });
 }
 
-// Мастер: карточка «Семья» в настройках (список участников + приглашение)
-function familyCard(){
-  const card=h(`<div class="card"><h3>Семья <span class="pill" style="margin-left:auto">общий бюджет</span></h3>
-    <p class="muted" style="font-size:12.5px;margin-top:-6px">Пригласите близких вести общий бюджет. Участник видит только ввод операций и свою историю — без аналитики, планов и баланса.</p>
-    <button class="btn primary block" id="invBtn" style="padding:12px">＋ Пригласить участника</button>
-    <div id="memList" style="margin-top:8px"><div class="dim" style="font-size:12px;padding:6px 2px">Загрузка участников…</div></div></div>`);
-  card.querySelector("#invBtn").onclick=()=>openInviteSheet();
-  const ml=card.querySelector("#memList");
-  ACCT.listMembers().then(members=>{
-    ml.innerHTML='';
-    members.filter(m=>m.role!=='owner').forEach(m=>{
-      const row=h(`<div class="lrow" style="padding:8px 2px"><div class="ic">👤</div>
-        <div style="flex:1;min-width:0"><div class="t1">${esc(m.member_label||m.email)}</div><div class="t2">${esc(m.email)} · метка в бюджете: «${esc(m.member_label||'—')}»</div></div>
-        <button class="btn sm ghost" data-rev="${esc(m.user_id)}">Отвязать</button></div>`);
-      row.querySelector("[data-rev]").onclick=()=>{ if(confirm("Отвязать участника «"+(m.member_label||m.email)+"»? Он потеряет доступ к общему бюджету (прошлые операции и метка останутся).")){ ACCT.revokeMember(m.user_id).then(()=>{toast("Участник отвязан"); render_current();}).catch(()=>toast("Не удалось отвязать")); } };
-      ml.appendChild(row);
+// Единая карточка: участники (метки) + члены семьи (аккаунты) в одном месте
+function familyMembersCard(){
+  const card=h(`<div class="card"><h3>Семья и участники <span class="pill" style="margin-left:auto">общий бюджет</span></h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-6px">Каждый участник — имя-метка в бюджете, её значок = «фото». Пригласите под меткой члена семьи по ссылке — его операции пойдут в общий бюджет под этим именем. Аналитику видите только вы.</p>
+    <div id="fmList"><div class="dim" style="font-size:12px;padding:6px 2px">Загрузка…</div></div>
+    <button class="btn ghost block" id="fmAdd" style="margin-top:8px">＋ Добавить участника</button></div>`);
+  card.querySelector("#fmAdd").onclick=()=>editMember();
+  const list=card.querySelector("#fmList");
+  const draw=(accounts, offline)=>{
+    const byLabel={}; (accounts||[]).filter(a=>a.role!=='owner').forEach(a=>{ const k=String(a.member_label||'').trim().toLowerCase(); if(k) byLabel[k]=a; });
+    list.innerHTML='';
+    (state.members||[]).forEach(m=>{
+      const acc=byLabel[String(m.name).trim().toLowerCase()];
+      const me = curMember()===m.id;
+      const status = acc ? ('участник семьи · '+esc(acc.email)) : (me ? 'это вы (владелец)' : 'только метка — можно пригласить');
+      const row=h(`<div class="lrow" style="padding:9px 2px;gap:8px">
+        <button class="ic" data-edit style="background:${tint(m.color,16)};color:${esc(m.color)};border:none;cursor:pointer" title="изменить имя и значок">${esc(m.emoji||'👤')}</button>
+        <div style="flex:1;min-width:0"><div class="t1">${esc(m.name)}</div><div class="t2">${status}</div></div>
+        ${acc?`<button class="btn sm ghost" data-unlink="${esc(acc.user_id)}">Отвязать</button>`:(offline||me?'':`<button class="btn sm" data-invite="${esc(m.name)}">Пригласить</button>`)}
+        <button class="iconbtn" data-edit2 title="изменить">✎</button></div>`);
+      row.querySelectorAll("[data-edit],[data-edit2]").forEach(b=>b.onclick=()=>editMember(m.id));
+      const inv=row.querySelector("[data-invite]"); if(inv) inv.onclick=()=>openInviteSheet(m.name);
+      const unl=row.querySelector("[data-unlink]"); if(unl) unl.onclick=()=>{ if(confirm("Отвязать «"+m.name+"» от семьи? Аккаунт участника потеряет доступ к общему бюджету. Метка и прошлые операции останутся.")){ ACCT.revokeMember(unl.dataset.unlink).then(()=>{toast("Участник отвязан"); render_current();}).catch(()=>toast("Не удалось отвязать")); } };
+      list.appendChild(row);
     });
-    if(!members.filter(m=>m.role!=='owner').length) ml.innerHTML='<div class="dim" style="font-size:12px;padding:2px">Пока только вы. Пригласите участника кнопкой выше.</div>';
-    else ml.appendChild(h('<p class="muted" style="font-size:11.5px;margin:8px 2px 0">«Метка» — имя, под которым операции участника попадают в общий бюджет (раздел «Участники»). Доступ даёт/забирает эта карточка, авторство операций — метка.</p>'));
-  }).catch(()=>{ ml.innerHTML='<div class="dim" style="font-size:12px;padding:6px 2px">Не удалось загрузить участников (нет связи с сервером).</div>'; });
+    if(!(state.members||[]).length) list.innerHTML='<div class="dim" style="font-size:12px;padding:2px">Пока никого. Добавьте участника кнопкой ниже, затем пригласите под ним члена семьи.</div>';
+    if(offline) list.appendChild(h('<p class="muted" style="font-size:11.5px;margin-top:6px">Статус семьи недоступен (нет связи с сервером) — показаны метки; приглашения временно недоступны.</p>'));
+  };
+  if(ACCT.linked) ACCT.listMembers().then(a=>draw(a,false)).catch(()=>draw([],true));
+  else draw([],true);
   return card;
 }
+function familyCard(){ return familyMembersCard(); }   // совместимость
 function getFontSize(){ try{ return localStorage.getItem(LS_FONT)||"md"; }catch(e){ return "md"; } }
 function applyFont(){ try{ const z={sm:0.9,md:1,lg:1.12}[getFontSize()]||1; document.body.style.zoom=z; }catch(e){} }
 function fontSizeCard(){
@@ -4944,45 +4955,49 @@ function pgCapital(v){
    ============================================================ */
 let helpIdx=0;
 const HELP=[
- {icon:"👋",title:"Добро пожаловать",body:`<p>Это ваш семейный «финансовый директор». В нём два слоя.</p>
-   <p><b>Штурвал — каждый день.</b> Быстрый учёт: операции → план → факт → закрытие месяца. Держит бюджет под контролем.</p>
-   <p><b>Компас — стратегия.</b> «Путь к капиталу»: показывает, где вы на дороге к благосостоянию и какой сделать следующий шаг.</p>
-   <p>Листайте карточки кнопками «Далее»/«Назад» или свайпом. В любой момент можно перейти по ссылке, всё сделать и вернуться сюда — карточка запомнится.</p>`,links:[]},
+ {icon:"👋",title:"Добро пожаловать в ДомФин",body:`<p>ДомФин — ваш семейный финансовый штаб. В нём два слоя.</p>
+   <p><b>Каждый день.</b> Быстрый учёт: операции → план → факт → закрытие месяца. Держит бюджет под контролем.</p>
+   <p><b>Стратегия.</b> «Путь к капиталу» показывает, где вы на дороге к благосостоянию и какой сделать следующий шаг.</p>
+   <p>Листайте карточки кнопками «Далее»/«Назад» или свайпом. Можно перейти по ссылке из карточки, всё сделать и вернуться — место запомнится.</p>`,links:[]},
  {icon:"🧱",title:"Шаг 1. Заведите основу",body:`<p>Один раз настройте отправные данные:</p>
-   <p>• <b>Источники дохода</b> — в «Настройке». Для каждого укажите тип: 💪 труд (зарплата) или 📈 капитал (дивиденды, аренда, проценты).</p>
+   <p>• <b>Источники дохода</b> — на «Плане». Для каждого укажите тип: 💪 труд (зарплата) или 📈 капитал (дивиденды, аренда, проценты).</p>
    <p>• <b>Активы и долги</b> — в «Балансе». У активов задайте роль: 🛟 резерв, ⚙️ работающий, 🏠 личное. Отметьте, что ликвидно (кэш/вклад) — это ваша подушка.</p>
-   <p>• <b>Участники</b> семьи — по желанию, чтобы видеть, кто провёл операцию.</p>`,links:[{label:"Настройка",route:"settings"},{label:"Баланс",route:"balance"}]},
+   <p>• <b>Участники</b> — в Настройке → «Семья и участники». Это имена-метки (со значком-«фото»), чтобы отмечать автора операции.</p>`,links:[{label:"План",route:"plan"},{label:"Баланс",route:"balance"}]},
  {icon:"📝",title:"Шаг 2. Ежедневный учёт",body:`<p>Вносите операции сразу — это занимает 5 секунд. Нажмите ➕, выберите «Доход» или «Расход», сумму и категорию.</p>
-   <p>Если у категории есть <b>подкатегории</b> — выберите нужную (например, «Продукты → рынок»). Не выбрали — операция попадёт в категорию целиком.</p>
-   <p>Частые категории всплывают первыми. Повторяющиеся платежи можно подтверждать в один тап на «Сегодня».</p>`,links:[{label:"Операции",route:"ops"}]},
- {icon:"🎚️",title:"Шаг 3. План месяца",body:`<p>План — это лимиты, которые вы ставите деньгам заранее. Впишите суммы по категориям и подкатегориям, а доход — по каждому источнику.</p>
-   <p>Не с нуля: кнопка <b>«Из прошлого месяца»</b> копирует план и доход, а <b>«Собрать из целей»</b> раскладывает доход так, чтобы ваши цели выполнялись.</p>
+   <p>Если у категории есть <b>подкатегории</b> — выберите нужную (например, «Продукты → рынок»). Частые категории всплывают первыми.</p>
+   <p>Будущая дата создаёт <b>плановую</b> операцию, а галочка «повторять» — регулярный платёж; и то, и другое подтверждается в один тап на «Сегодня».</p>`,links:[{label:"Операции",route:"ops"}]},
+ {icon:"🎚️",title:"Шаг 3. План месяца",body:`<p>План — это лимиты, которые вы ставите деньгам заранее. Впишите суммы по категориям и подкатегориям, а доход — по каждому источнику. Итог пересчитывается сразу при вводе.</p>
+   <p>Не с нуля: <b>«Из прошлого месяца»</b> копирует план и доход, а <b>«Собрать из целей»</b> раскладывает доход так, чтобы цели выполнялись.</p>
    <p>Внизу видно: план дохода, план расходов и сколько свободно.</p>`,links:[{label:"План",route:"plan"}]},
- {icon:"✅",title:"Шаг 4. Факт vs план",body:`<p>Здесь видно, как реальные траты ложатся на план: по каждой группе и подкатегории — план, факт, остаток и полоска со светофором (жёлтый — близко к лимиту, красный — перерасход).</p>
-   <p>Сверху — сводка «Расходы · план/факт» и доход план/факт по источникам. Это ваш ежемесячный самоконтроль.</p>`,links:[{label:"Факт",route:"fact"}]},
- {icon:"🎯",title:"Экран «Сегодня»",body:`<p>Короткий взгляд утром. Светофор показывает, укладываетесь ли вы в бюджет. Крупная цифра — сколько осталось в бюджете месяца.</p>
-   <p><b>Дефицит средств</b> = плановый бюджет − (плановый доход + остаток на счетах). Показывает, сколько ещё нужно заработать или найти, чтобы закрыть план. Если хватает — покажет запас.</p>`,links:[{label:"Сегодня",route:"today"}]},
- {icon:"📊",title:"Дашборд и 50/30/20",body:`<p>Здоровье семьи как единицы: <b>норма сбережений</b> (цель 15–20%), <b>долговая нагрузка</b> (безопасно &lt;30%), <b>подушка</b> в месяцах, свободный поток.</p>
-   <p>Карточка <b>«Куда уходит доход»</b> раскладывает его на Нужное (≈50%), Приятное (≈30%), Пожертвования и Сбережения (≈20%) — это ориентир 50/30/20.</p>`,links:[{label:"Дашборд",route:"dash"}]},
+ {icon:"✅",title:"Шаг 4. Факт против плана",body:`<p>Видно, как реальные траты ложатся на план: по каждой группе и подкатегории — план, факт, остаток и полоска (жёлтая — близко к лимиту, красная — перерасход).</p>
+   <p>Незапланированные траты и новые категории тоже учитываются в факте. Сверху — сводка расходов и дохода план/факт.</p>`,links:[{label:"Факт",route:"fact"}]},
+ {icon:"🎯",title:"Экран «Сегодня»",body:`<p>Короткий взгляд: карточки <b>«Расход»</b> и <b>«Приход»</b> (план и факт за месяц), остаток кэша на сегодня и плановые платежи к подтверждению.</p>
+   <p><b>Дефицит средств плана</b> — двумя способами: «без учёта кэша» = плановый доход − плановый бюджет (чистый план); «с учётом кэша на сегодня» = кэш сегодня + остаток ожидаемого прихода − остаток плановых трат. Доход сверх плана улучшает картину, а не ухудшает.</p>`,links:[{label:"Сегодня",route:"today"}]},
+ {icon:"👨‍👩‍👧",title:"Семья: общий бюджет",body:`<p>ДомФин ведёт один <b>общий</b> семейный бюджет, к которому можно подключить близких.</p>
+   <p><b>Как пригласить.</b> Настройка → «Семья и участники» → у нужной метки нажмите «Пригласить» (или создайте новую). Появится ссылка — отправьте её или покажите <b>QR-код</b>. Ссылка действует 72 часа и рассчитана на одного человека.</p>
+   <p><b>Что видит участник.</b> Только ввод своих операций и свою историю — без аналитики, планов и баланса. Его операции идут в общий бюджет под его именем-меткой (значок метки — его «фото»).</p>
+   <p><b>Роли.</b> Владелец (вы) платит и видит всё; участник только вносит. Отвязать участника можно там же кнопкой «Отвязать».</p>`,links:[{label:"Семья и участники",route:"settings"}]},
+ {icon:"📊",title:"Финансовое здоровье семьи",body:`<p>Здоровье семьи как единицы: <b>норма сбережений</b> (цель 15–20%), <b>долговая нагрузка</b> (безопасно &lt;30%), <b>подушка</b> в месяцах, свободный поток. У каждого показателя — ⓘ с методикой.</p>
+   <p>Карточка <b>«Куда уходит доход»</b> раскладывает его на Нужное (≈50%), Приятное (≈30%), Пожертвования и Сбережения (≈20%) — ориентир 50/30/20.</p>`,links:[{label:"Здоровье",route:"dash"}]},
  {icon:"🔮",title:"Поток и прогноз",body:`<p><b>Денежный поток</b> — приход и расход помесячно за год. <b>Прогноз</b> — накопленный остаток на 12 месяцев вперёд с ранним предупреждением о кассовых разрывах.</p>
-   <p>Стартовая точка прогноза — остаток на счетах (из «Баланса»). Чем точнее план и остаток, тем точнее прогноз. Ожидаемые выплаты от работающих активов уже учтены.</p>`,links:[{label:"Прогноз",route:"forecast"}]},
+   <p>Стартовая точка — остаток на счетах (из «Баланса»). Чем точнее план и остаток, тем точнее прогноз. Выплаты от работающих активов уже учтены.</p>`,links:[{label:"Прогноз",route:"forecast"}]},
  {icon:"⚖️",title:"Баланс и чистый капитал",body:`<p>Чистый капитал = активы − долги. Ведите активы и обязательства актуальными.</p>
-   <p>Ключевое: у активов есть <b>роль</b>. 🛟 Резерв — подушка. ⚙️ Работающий — приносит доход (фонды, доля в бизнесе, доходная недвижимость). 🏠 Личное — дом, авто. Роль важна для «Пути к капиталу».</p>`,links:[{label:"Баланс",route:"balance"}]},
+   <p>У активов есть <b>роль</b>: 🛟 Резерв — подушка; ⚙️ Работающий — приносит доход (фонды, доля в бизнесе, доходная недвижимость); 🏠 Личное — дом, авто. Роль важна для «Пути к капиталу».</p>`,links:[{label:"Баланс",route:"balance"}]},
  {icon:"🔻",title:"Долги: стратегия выхода",body:`<p>Выберите метод: <b>лавина</b> (гасить самый дорогой по ставке — минимум переплаты) или <b>снежный ком</b> (самый маленький — быстрые победы).</p>
    <p>Приложение выстроит порядок «начните с…», а калькулятор перекредитования покажет, выгодно ли объединять кредиты. Есть и календарь платежей.</p>`,links:[{label:"Долги",route:"debts"}]},
  {icon:"🐷",title:"Цели и копилки",body:`<p>Задавайте цели (подушка, первый взнос) и <b>копилки</b> на редкие крупные траты (отпуск, страховки, налоги) — приложение посчитает, сколько откладывать в месяц. Годовые копилки повторяются сами.</p>
-   <p>Каждая цель становится <b>подкатегорией в «Накоплениях»</b>: взнос вы делаете кнопкой «＋ Взнос» или обычной операцией в «Накопления → ваша цель».</p>`,links:[{label:"Цели",route:"goals"}]},
- {icon:"🌟",title:"Путь к капиталу",body:`<p>Главный стратегический экран. Показывает <b>работающий капитал</b>, пассивный доход, «капитал работает на X%» и прогресс к независимости.</p>
-   <p><b>Правило 25×:</b> цель = годовые нужные траты × 25 (при ставке изъятия 4%). Ставку можно менять прямо там. Когда работающий капитал достигнет цели, доход от него покроет расходы без работы.</p>`,links:[{label:"Путь к капиталу",route:"capital"}]},
+   <p>Каждая цель становится <b>подкатегорией в «Накоплениях»</b>: взнос делаете кнопкой «＋ Взнос» или обычной операцией в «Накопления → ваша цель».</p>`,links:[{label:"Цели",route:"goals"}]},
+ {icon:"🌟",title:"Путь к капиталу",body:`<p>Главный стратегический экран: <b>работающий капитал</b>, пассивный доход, «капитал работает на X%» и прогресс к независимости.</p>
+   <p><b>Правило 25×:</b> цель = годовые нужные траты × 25 (при ставке изъятия 4%). Когда работающий капитал достигнет цели, доход от него покроет расходы без работы.</p>`,links:[{label:"Путь к капиталу",route:"capital"}]},
  {icon:"📈",title:"Доходность активов",body:`<p>У работающего актива в «Балансе» задайте <b>доходность % годовых</b> и как приходит доход:</p>
-   <p>• <b>В кэш</b> (дивиденды, аренда) — выплаты падают в «Прогноз», а факт вы заводите операцией-доходом от источника «Капитал».</p>
-   <p>• <b>Капитализируется</b> (рост фонда) — доход не на счёте, а растит стоимость актива; фиксируется <b>переоценкой при закрытии месяца</b>.</p>
+   <p>• <b>В кэш</b> (дивиденды, аренда) — выплаты падают в «Прогноз», факт заводите операцией-доходом от источника «Капитал».</p>
+   <p>• <b>Капитализируется</b> (рост фонда) — доход растит стоимость актива; фиксируется <b>переоценкой при закрытии месяца</b>.</p>
    <p>Не задавайте один доход дважды (и источником, и доходностью актива) — прогноз посчитает вдвойне.</p>`,links:[{label:"Баланс",route:"balance"}]},
- {icon:"🔒",title:"Закрытие месяца",body:`<p>Раз в месяц на «Сегодня» появится кнопка «Закрыть месяц». Там вы обновляете остатки по долгам, <b>остаток на счетах</b> и переоцениваете капитализирующие активы.</p>
-   <p>Показатели месяца сохранятся в историю (только чтение), и дашборд начнёт показывать динамику. Это важный ритуал точности.</p>`,links:[{label:"Сегодня",route:"today"}]},
- {icon:"🛡",title:"Защита и синхронизация",body:`<p>Вход в приложение — по <b>аккаунту</b> (email + пароль). Данные шифруются вашим паролем по принципу «нулевого знания»: на сервере хранится только зашифрованный вид, и прочитать его не можем даже мы. Пароль нигде не хранится.</p>
-   <p>Один пароль работает на всех устройствах: вошли тем же паролем — данные подтянулись. Синхронизация между телефоном, планшетом и компьютером идёт через ваш <b>облачный аккаунт</b> (правки сливаются по записям — ничего не затирается).</p>
-   <p>При регистрации сохраните <b>ключ восстановления</b> — это единственный способ вернуть данные, если забудете пароль. Резервная копия — <b>Экспорт JSON</b> (для восстановления) и выгрузка в <b>Excel</b> (для просмотра); выгрузки в открытом виде, храните надёжно.</p>`,links:[{label:"Аккаунт",route:"settings"}]},
+ {icon:"🔒",title:"Закрытие месяца",body:`<p>Раз в месяц на «Сегодня» появится «Закрыть месяц»: обновляете остатки по долгам, <b>остаток на счетах</b> и переоцениваете капитализирующие активы.</p>
+   <p>Показатели месяца сохранятся в историю, и дашборд начнёт показывать динамику. Это важный ритуал точности.</p>`,links:[{label:"Сегодня",route:"today"}]},
+ {icon:"🛡",title:"Защита и синхронизация",body:`<p>Вход — по <b>аккаунту</b> (email + пароль). Данные шифруются вашим паролем по принципу «нулевого знания»: на сервере лежит только зашифрованный вид, прочитать его не можем даже мы.</p>
+   <p>Один пароль работает на всех устройствах. Общий семейный бюджет синхронизируется между всеми участниками (правки сливаются по записям — ничего не затирается).</p>
+   <p>При регистрации сохраните <b>ключ восстановления</b> — единственный способ вернуть данные, если забудете пароль. Резервная копия — <b>Экспорт JSON</b>; выгрузки в открытом виде, храните надёжно.</p>`,links:[{label:"Аккаунт",route:"settings"}]},
  {icon:"💡",title:"Принципы благосостояния",body:`<p>Коротко о главном:</p>
    <p>• Платите сначала себе (15–20%), тратьте меньше, чем зарабатываете.</p>
    <p>• Подушка → гасить дорогие долги → регулярно откладывать → наращивать работающий капитал.</p>
@@ -5007,6 +5022,19 @@ function pgHelp(v){
   card.addEventListener("touchend",e=>{ if(x0==null)return; const dx=e.changedTouches[0].clientX-x0; if(dx<-45&&helpIdx<cards.length-1){helpIdx++;render_current();window.scrollTo(0,0);} else if(dx>45&&helpIdx>0){helpIdx--;render_current();window.scrollTo(0,0);} x0=null; },{passive:true});
 }
 /* ---------- Облако (аккаунт): карточка и экраны ---------- */
+function participantAccountCard(){
+  const mid=participantMemberId(); const nm=(mid&&memberById(mid))?memberById(mid).name:null;
+  const c=h(`<div class="card"><h3>Аккаунт участника</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-4px">Вы ведёте операции в общем семейном бюджете. Аналитика и бюджет видны только владельцу.</p>
+    <div class="okbox" style="margin-bottom:10px">Вход: <b>${esc(ACCT.email||'—')}</b>${nm?' · метка «'+esc(nm)+'»':''}</div>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button class="btn" id="pPass">🔑 Сменить пароль</button>
+      <button class="btn danger" id="pOut">Выйти</button>
+    </div></div>`);
+  c.querySelector("#pPass").onclick=openChangePassword;
+  c.querySelector("#pOut").onclick=()=>{ if(confirm("Выйти из аккаунта на этом устройстве?")) ACCT.logout(); };
+  return c;
+}
 function cloudCard(){
   if(ACCT.linked){
     const c=h(`<div class="card"><h3>Облако (аккаунт) <span class="pill g" style="margin-left:auto">вход выполнен</span></h3>
@@ -5087,7 +5115,7 @@ function openCloudLogin(){
   });
 }
 function recoverySheetText(rk){
-  return "АВАРИЙНЫЙ ЛИСТ — 7Я ФИН\n\n"+
+  return "АВАРИЙНЫЙ ЛИСТ — ДомФин\n\n"+
     "Ключ восстановления:\n\n    "+rk+"\n\n"+
     "Зачем он нужен: если вы забудете пароль, этот ключ — единственный способ\n"+
     "восстановить доступ к данным. Мы (сервер) его не храним и восстановить не можем.\n\n"+
@@ -5266,7 +5294,7 @@ function pgSettings(v){
   });
   pc.appendChild(h(`<button class="btn ghost block" style="margin-top:8px" id="addMember">＋ Добавить участника</button>`));
   pc.querySelector("#addMember").onclick=()=>editMember();
-  if(!part) tabAppend("account",pc);
+  // (карточка «Участники» объединена с «Семьёй» в familyMembersCard ниже)
 
 
   // data + sync
@@ -5283,11 +5311,13 @@ function pgSettings(v){
   if(!part) v.appendChild(dc);
 
   // Облако (аккаунт) — синхронизация через сервер, E2E «один пароль»
-  tabAppend("account",cloudCard());
-  if(ACCT.linked && !isParticipant()) tabAppend("account", familyCard());
-  tabAppend("account", biometricCard());
+  tabAppend("account", isParticipant()?participantAccountCard():cloudCard());
+  if(!isParticipant()) tabAppend("account", familyMembersCard());
+  if(!isParticipant()) tabAppend("account", biometricCard());
+  if(!isParticipant()){
   tabAppend("account", h(`<div class="card"><h3>Почта и уведомления <span class="pill" style="margin-left:auto">скоро</span></h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Подтверждение регистрации и письма для сброса пароля. Подключим на следующем шаге.</p></div>`));
   tabAppend("account", h(`<div class="card"><h3>Оплата и подписка <span class="pill" style="margin-left:auto">скоро</span></h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Тариф Pro, способы оплаты и история платежей появятся здесь (Фаза 2).</p></div>`));
+  }
 
   // reset
   const rc=h(`<div class="card"><h3>Сброс</h3><button class="btn danger block" id="reset">Очистить все данные и вернуть демо-структуру</button></div>`);
@@ -5305,7 +5335,7 @@ function pgSettings(v){
   };
   if(!part) v.appendChild(rc);
 
-  v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">7Я ФИН · данные остаются у вас</p>`));
+  v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">ДомФин · данные остаются у вас</p>`));
 }
 function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="7ya-fin-"+todayISOdate()+".json"; a.click(); toast("Экспортировано"); }
 
@@ -5550,7 +5580,7 @@ const ACCT = {
   async raw(path,opts){ return fetch((this.base||"").replace(/\/$/,"")+path, opts); },
   async api(path,opts){ opts=opts||{}; opts.headers=Object.assign({},opts.headers,this.access?{Authorization:"Bearer "+this.access}:{}); let r=await this.raw(path,opts); if(r.status===401&&this.refresh){ if(await this.doRefresh()){ opts.headers.Authorization="Bearer "+this.access; r=await this.raw(path,opts);} } return r; },
   async doRefresh(){ try{ const r=await this.raw("/auth/refresh",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh:this.refresh})}); if(!r.ok){ this.forget(); return false; } const d=await r.json(); this.access=d.access; this.refresh=d.refresh; this.email=d.user.email; this.persist(); return true; }catch(e){ return false; } },
-  forget(){ this.access=this.refresh=this.dek=this.keybag=null; this.linked=false; this.clearDEKCache(); try{localStorage.removeItem(LS_ACCT);}catch(e){} },
+  forget(){ this.access=this.refresh=this.dek=this.keybag=null; this.linked=false; this.role='owner'; this.memberId=null; this.clearDEKCache(); try{localStorage.removeItem(LS_ACCT);}catch(e){} },
   async register(base,email,password){
     this.base=base; const acc=await VaultCrypto.createAccount(password,email);
     const r=await this.raw("/auth/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:acc.authHash,keybag:acc.keybag})});
@@ -5566,6 +5596,18 @@ const ACCT = {
     if(!this.keybag) throw new Error("no_keybag");
     this.dek=await VaultCrypto.unlockWithPassword(password,email,this.keybag);  // бросит bad-pass
     await this.cacheDEK(); await SRV.syncNow(true);
+    // определить роль в семье (владелец/участник) — чтобы участник входил в урезанный режим
+    try{
+      const members=await this.listMembers();
+      const me=members.find(m=>String(m.email||'').toLowerCase()===String(email).toLowerCase());
+      if(me && me.role==='member'){
+        this.role='member';
+        const lbl=String(me.member_label||'').trim();
+        const mm = lbl ? (state.members||[]).find(x=>String(x.name).trim().toLowerCase()===lbl.toLowerCase()) : null;
+        this.memberId = mm ? mm.id : null;
+      } else { this.role='owner'; this.memberId=null; }
+      this.persist();
+    }catch(e){ /* нет связи — оставляем сохранённую роль */ }
   },
   // отправить письмо со ссылкой сброса
   async requestReset(base,email){
@@ -5601,7 +5643,7 @@ const ACCT = {
     if(!r.ok) throw new Error("keybag_update_failed");
     this.keybag=keybag; this.persist(); return recoveryKey;
   },
-  async logout(){ try{ if(this.refresh) await this.raw("/auth/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh:this.refresh})}); }catch(e){} this.forget(); setSync(null); render_current(); },
+  async logout(){ try{ if(this.refresh) await this.raw("/auth/logout",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh:this.refresh})}); }catch(e){} this.forget(); try{localStorage.removeItem(LS_KEY);}catch(e){} try{localStorage.removeItem(LS_PREVIEW);}catch(e){} state=seedState(); __lastSaved=_clone(state); SRV.baseUpdatedAt=null; setSync(null); try{closeSheet();}catch(e){} try{render_current();}catch(e){} showAuthGate('welcome'); },
   // ---- Семья: приглашения и участники ----
   async createInvite(memberLabel, ttlHours){
     if(!this.dek) throw new Error("locked");
@@ -5647,6 +5689,17 @@ const ACCT = {
   },
 };
 
+function handleRemovedFromFamily(){
+  // Участника отвязали от семьи: очищаем локальную копию общего бюджета,
+  // аккаунт становится собственным пустым (владелец).
+  try{ toast("Вас отвязали от семьи. Теперь это ваш личный бюджет."); }catch(e){}
+  ACCT.role='owner'; ACCT.memberId=null; ACCT.persist();
+  state=seedState(); __lastSaved=_clone(state);
+  try{ localStorage.removeItem(LS_KEY); }catch(e){}
+  ACCT.clearDEKCache();
+  SRV.baseUpdatedAt=null;
+  try{ renderNav(); render_current(); }catch(e){}
+}
 const SRV = {
   baseUpdatedAt:null,
   _env(s){ return {ciphertext:s.ciphertext,iv:s.iv,salt:s.salt,enc_v:s.enc_v,updatedAt:s.updatedAt}; },
@@ -5675,7 +5728,10 @@ const SRV = {
     if(!ACCT.dek){ if(manual)toast("Войдите в аккаунт, чтобы синхронизировать"); return; }
     try{ setSync("dirty");
       const r=await ACCT.api("/vault",{method:"GET"});
-      if(r.status===204){ SRV.baseUpdatedAt=null; await SRV.push(manual); return; }
+      if(r.status===204){
+        if(ACCT.role==='member'){ handleRemovedFromFamily(); return; }   // участника отвязали
+        SRV.baseUpdatedAt=null; await SRV.push(manual); return;
+      }
       if(!r.ok) throw new Error("vault get "+r.status);
       const s=await r.json(); const ahead=await SRV.applyServer(SRV._env(s)); SRV.baseUpdatedAt=s.updatedAt;
       if(ahead) await SRV.push(false);
@@ -5737,7 +5793,7 @@ function showAuthGate(mode){
   function focusFirst(){ const el=box.querySelector('#aEmail')||box.querySelector('#aPw'); if(el) setTimeout(()=>el.focus(),150); }
   function render(){
     if(mode==='welcome'){
-      box.innerHTML='<div style="display:flex;justify-content:center;margin-bottom:14px"><svg viewBox="0 0 40 40" width="56" height="56" style="border-radius:15px;display:block"><rect width="40" height="40" rx="10" fill="var(--gold,#E0A93B)"/><text x="20" y="27.5" font-family="-apple-system,system-ui,sans-serif" font-size="17" font-weight="800" fill="#1a1200" text-anchor="middle">7Я</text></svg></div>'+
+      box.innerHTML='<div style="display:flex;justify-content:center;margin-bottom:14px"><svg viewBox="0 0 40 40" width="56" height="56" style="border-radius:15px;display:block"><rect width="40" height="40" rx="10" fill="var(--gold,#E0A93B)"/><text x="20" y="27.5" font-family="-apple-system,system-ui,sans-serif" font-size="17" font-weight="800" fill="#1a1200" text-anchor="middle">ДФ</text></svg></div>'+
         '<div style="font-size:13px;color:var(--ink3);text-align:center;margin:0 0 16px">Вход в аккаунт — для синхронизации между устройствами и защиты данных</div>'+
         '<button class="gbtn2" id="aReg" type="button">Создать аккаунт</button>'+
         '<button class="gbtn2" id="aLogin" type="button" style="margin-top:8px;'+ghost+'">Войти</button>'+V;
@@ -5935,7 +5991,7 @@ async function faceIdAvailable(){ try{ return !!window.PublicKeyCredential && aw
 async function faceIdRegister(){
   const cred=await navigator.credentials.create({publicKey:{
     challenge:crypto.getRandomValues(new Uint8Array(32)),
-    rp:{name:"Семейные финансы",id:location.hostname},
+    rp:{name:"ДомФин",id:location.hostname},
     user:{id:crypto.getRandomValues(new Uint8Array(16)),name:"u",displayName:"u"},
     pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
     authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required",residentKey:"preferred"},
