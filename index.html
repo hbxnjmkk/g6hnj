@@ -21,9 +21,9 @@
   --bg:#EEF2F7; --bg2:#FFFFFF; --panel:#FFFFFF; --panel2:#F1F5F9;
   --line:#E4EAF1; --line2:#D2DBE6;
   --ink:#1E2B3A; --ink2:#566472; --ink3:#8A98A7;
-  --gold:#D69B26; --gold2:#BE8514; --on-accent:#1a1204;
-  --teal:#2A8CAE; --green:#2E9E6B; --amber:#D68A1E; --red:#D64541; --violet:#8A6FD0;
-  --grp1:#3D7BE0; --grp2:#2494B0; --grp3:#2E9E6B; --grp4:#9163C9; --grp5:#C68A12; --grpI:#33A972;
+  --gold:#D3A23F; --gold2:#BC8C2C; --on-accent:#241905;
+  --teal:#4E9BB8; --green:#3DAA7C; --amber:#D89E45; --red:#D77873; --violet:#9C82D4;
+  --grp1:#6690DE; --grp2:#4FA0BA; --grp3:#4FB78B; --grp4:#A183D2; --grp5:#CF9F44; --grpI:#54B78D;
   --shadow:0 10px 30px rgba(30,45,66,.14);
   --r:16px; --r2:12px; --r3:10px;
   --nav-h:64px; --top-h:56px; --sidebar-w:236px;
@@ -39,10 +39,10 @@ html[data-theme="dark"]{
   --ink:#E9EFF6; --ink2:#AAB9C8; --ink3:#7C8C9E;
   --shadow:0 12px 34px rgba(0,0,0,.5);
 }
-html[data-accent="blue"]{ --gold:#3D7BE0; --gold2:#2E63C0; --on-accent:#fff }
-html[data-accent="green"]{ --gold:#2E9E6B; --gold2:#247F55; --on-accent:#fff }
-html[data-accent="violet"]{ --gold:#8A6FD0; --gold2:#6E54B6; --on-accent:#fff }
-html[data-accent="teal"]{ --gold:#2A8CAE; --gold2:#1F7090; --on-accent:#fff }
+html[data-accent="blue"]{ --gold:#5486DC; --gold2:#4272CE; --on-accent:#fff }
+html[data-accent="green"]{ --gold:#3DAA7C; --gold2:#2F9068; --on-accent:#fff }
+html[data-accent="violet"]{ --gold:#9C82D4; --gold2:#8266C2; --on-accent:#fff }
+html[data-accent="teal"]{ --gold:#4E9BB8; --gold2:#3E86A4; --on-accent:#fff }
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);overflow-x:hidden;max-width:100%;width:100%;touch-action:manipulation;-webkit-text-size-adjust:100%;
   font-family:-apple-system,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,Inter,sans-serif;
   font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
@@ -106,12 +106,14 @@ input[type=checkbox],input[type=radio]{width:auto;flex:none;accent-color:var(--g
 
 /* ---------- Cards / typography ---------- */
 .page-title{font-size:21px;font-weight:750;letter-spacing:-.2px;margin:2px 0 3px}
+#view>div:has(>.page-title){margin-bottom:14px}
 .page-sub{color:var(--ink2);font-size:13px;margin-bottom:16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:16px;margin-bottom:14px}
 .card h3{margin:0 0 12px;font-size:14px;font-weight:700;letter-spacing:.2px;color:var(--ink);display:flex;align-items:center;gap:8px}
 .card h3 .tag{margin-left:auto;font-size:11px;color:var(--ink3);font-weight:600}
 .eyebrow{font-size:11px;letter-spacing:1.4px;text-transform:uppercase;color:var(--ink3);font-weight:700;margin-bottom:9px}
 .grid{display:grid;gap:12px}
+#view>.grid{margin-bottom:14px}
 .g2{grid-template-columns:repeat(2,minmax(0,1fr))} .g3{grid-template-columns:repeat(2,minmax(0,1fr))} .g4{grid-template-columns:repeat(2,minmax(0,1fr))}
 .muted{color:var(--ink2)} .dim{color:var(--ink3)}
 .right{text-align:right} .center{text-align:center}
@@ -2691,7 +2693,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v5.1";
+const APP_VERSION="v5.3";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -4153,7 +4155,7 @@ function fullDate(d){ const x=new Date(d); const wd=["вс","пн","вт","ср"
 /* ============================================================
    PAGE: ПЛАН (лимиты по категориям, пустой; заполняется от целей)
    ============================================================ */
-function planTotalView(k){ const p=state.plans[k]||{}; let t=0; expenseGroups().forEach(g=>catsOfView(g.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>t+=(+p[su.id]||0)); else t+=(+p[c.id]||0); })); return t; }
+function planTotalView(k){ if(famView()) return planMonthTotal(k); const p=state.plans[k]||{}; let t=0; expenseGroups().forEach(g=>catsOfView(g.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>t+=(+p[su.id]||0)); else t+=(+p[c.id]||0); })); return t; }
 function plannedIncomeView(k){ return incForView().reduce((a,s)=>a+incomeSrcPlanned(k,s.id),0); }
 function factIncomeView(k){ if(famView()) return monthIncome(k); return memberMonthIncome(activeMember(),k); }
 function factExpenseView(k){ if(famView()) return monthExpense(k)+monthCapital(k); return memberMonthExpense(activeMember(),k); }
@@ -4219,7 +4221,7 @@ function pgPlan(v){
     card.querySelector("[data-addcat]").onclick=()=>{ const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const c={id:uid(),groupId:g.id,name:nm.trim(),icon:"•",scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); save(); render_current(); } };
     cats.forEach(c=>{
       const subs=subsOf(c.id);
-      const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:6px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}</span>
+      const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:6px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}${(famView()&&(c.scope||'shared')==='shared')?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}</span>
         ${subs.length?`<span class="num dim" data-ctag="${c.id}" style="font-size:12px">${fmt(subs.reduce((a,su)=>a+(+plan[su.id]||0),0))}</span>`:''}
         <button class="iconbtn" data-cplan title="плановый платёж">📅</button>
         <button class="iconbtn" data-caddsub title="подкатегория">＋</button>
@@ -4251,6 +4253,23 @@ function pgPlan(v){
     });
     v.appendChild(card);
   });
+  // Семейный вид: личные планы участников — итоги + сворачиваемая детализация (гибрид-приватность)
+  if(famView() && state.members.length>=2){
+    const personalOf=(mid)=>state.categories.filter(c=>c.scope==='personal'&&c.ownerId===mid&&!c.deleted);
+    const rows=(state.members||[]).map(mm=>{ let t=0; personalOf(mm.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length)subs.forEach(su=>t+=(+plan[su.id]||0)); else t+=(+plan[c.id]||0); }); return {mm,t}; }).filter(r=>r.t>0);
+    if(rows.length){
+      const pc=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grp3);display:inline-block"></span>Личные планы участников</h3>
+        <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Личные бюджеты каждого — итогом. Нажмите на участника, чтобы раскрыть детализацию.</p></div>`);
+      rows.forEach(r=>{
+        const head=h(`<div class="lrow" style="cursor:pointer;padding:8px 2px"><span style="flex:1;font-weight:600">${esc(r.mm.emoji||'🙂')} ${esc(r.mm.name)}</span><span class="num" style="font-weight:700">${fmt(r.t)}</span><span class="dim" style="margin-left:6px" data-caret>▸</span></div>`);
+        const body=h(`<div style="display:none;padding:0 2px 8px 12px"></div>`);
+        personalOf(r.mm.id).forEach(c=>{ const subs=subsOf(c.id); let ct=0; if(subs.length)subs.forEach(su=>ct+=(+plan[su.id]||0)); else ct=+plan[c.id]||0; if(ct>0) body.appendChild(h(`<div class="linrow" style="font-size:12.5px;padding:4px 0"><span>${esc(c.icon||'•')} ${esc(c.name)}</span><span class="num dim">${fmt(ct,{bare:true})}</span></div>`)); });
+        head.onclick=()=>{ const open=body.style.display!=='none'; body.style.display=open?'none':'block'; head.querySelector('[data-caret]').textContent=open?'▸':'▾'; };
+        pc.appendChild(head); pc.appendChild(body);
+      });
+      v.appendChild(pc);
+    }
+  }
   refreshPlanTotals();
 }
 function refreshPlanTotals(){
@@ -4315,12 +4334,18 @@ function pgFact(v){
   if(anyEG) v.appendChild(egCard);
   // Семейный вид: личные траты участников — ТОЛЬКО итоги (детализация приватна)
   if(famView()){
-    const pmap={}; txnsOfMonth(k).forEach(t=>{ if(t.type!=='expense')return; const c=byId(state.categories,t.categoryId); if(c&&c.scope==='personal'&&c.ownerId){ pmap[c.ownerId]=(pmap[c.ownerId]||0)+(+t.amount||0); } });
-    const ids=Object.keys(pmap).filter(id=>pmap[id]>0);
-    if(ids.length){
+    const pcatsOf=(mid)=>state.categories.filter(c=>c.scope==='personal'&&c.ownerId===mid&&!c.deleted);
+    const rows=(state.members||[]).map(mm=>{ let t=0; pcatsOf(mm.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length)subs.forEach(su=>t+=subSpend(k,su.id)); else t+=catDirectSpend(k,c.id); }); return {mm,t}; }).filter(r=>r.t>0);
+    if(rows.length){
       const pc=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grp3);display:inline-block"></span>Личные траты участников <span class="dim" style="font-weight:500;font-size:12px">итог</span></h3>
-        <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Личные расходы каждого — общей суммой, без детализации (это приватно).</p></div>`);
-      ids.forEach(id=>{ const mm=memberById(id); pc.appendChild(h(`<div class="linrow" style="padding:8px 2px"><span>${esc((mm&&mm.emoji)||'🙂')} ${esc(mm?mm.name:'участник')}</span><span class="num" style="font-weight:600">${fmt(pmap[id],{bare:true})}</span></div>`)); });
+        <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Личные расходы каждого — суммой; нажмите, чтобы раскрыть детализацию.</p></div>`);
+      rows.forEach(r=>{
+        const head=h(`<div class="lrow" style="cursor:pointer;padding:8px 2px"><span style="flex:1;font-weight:600">${esc(r.mm.emoji||'🙂')} ${esc(r.mm.name)}</span><span class="num" style="font-weight:700">${fmt(r.t,{bare:true})}</span><span class="dim" style="margin-left:6px" data-caret>▸</span></div>`);
+        const body=h(`<div style="display:none;padding:0 2px 8px 12px"></div>`);
+        pcatsOf(r.mm.id).forEach(c=>{ const subs=subsOf(c.id); let ct=0; if(subs.length)subs.forEach(su=>ct+=subSpend(k,su.id)); else ct=catDirectSpend(k,c.id); if(ct>0) body.appendChild(h(`<div class="linrow" style="font-size:12.5px;padding:4px 0"><span>${esc(c.icon||'•')} ${esc(c.name)}</span><span class="num dim">${fmt(ct,{bare:true})}</span></div>`)); });
+        head.onclick=()=>{ const open=body.style.display!=='none'; body.style.display=open?'none':'block'; head.querySelector('[data-caret]').textContent=open?'▸':'▾'; };
+        pc.appendChild(head); pc.appendChild(body);
+      });
       v.appendChild(pc);
     }
   }
@@ -4446,6 +4471,20 @@ function pgDash(v){
     ${kpiInfo("Подушка",m.cushionMonths>=99?"—":m.cushionMonths.toFixed(1)+" мес","кэш ÷ нужные траты",m.cushionMonths>=3?"pos":(m.cushionMonths>=1?"":"neg"),"cushion")}
   </div>`));
   v.querySelectorAll("[data-info]").forEach(el=>el.onclick=()=>showDashInfo(el.dataset.info));
+
+  // Вклад участников (кто сколько принёс/потратил/отложил)
+  if(state.members.length>=2){
+    const rows=(state.members||[]).map(mm=>{ const inc=memberMonthIncome(mm,k), exp=memberMonthExpense(mm,k); return {mm,inc,exp,net:inc-exp}; }).filter(r=>r.inc||r.exp);
+    if(rows.length){
+      const vc=h(`<div class="card"><h3>Вклад участников <span class="dim" style="font-weight:500;font-size:12px">${ymShort(k)}</span></h3>
+        <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Сколько каждый принёс дохода, потратил и отложил (доход − расход).</p></div>`);
+      rows.forEach(r=>{ vc.appendChild(h(`<div style="padding:9px 2px;border-bottom:1px solid var(--line)">
+        <div class="linrow"><span style="font-weight:600">${esc((r.mm.emoji||'🙂'))} ${esc(r.mm.name)}</span><span class="num" style="font-weight:700;color:${r.net>=0?'var(--green)':'var(--red)'}">${r.net>=0?'+':'−'}${fmt(Math.abs(r.net),{bare:true})}</span></div>
+        <div class="linrow" style="margin-top:4px;font-size:11.5px"><span class="dim num">приход ${fmt(r.inc,{bare:true})}</span><span class="dim num">расход ${fmt(r.exp,{bare:true})}</span></div>
+      </div>`)); });
+      v.appendChild(vc);
+    }
+  }
 
   // Куда уходит доход (50/30/20)
   (function(){
@@ -4789,7 +4828,7 @@ function pgGoals(v){
   goals.forEach(g=>{
     const gc=goalCurrent(g); const need=goalMonthlyNeeded(g); const prog=g.target>0?clamp(gc/g.target,0,1):0;
     const mLeft=g.targetDate?Math.max(0,monthsDiff(curMonth,ym(g.targetDate))):null;
-    const card=h(`<div class="card"><h3>${g.recurring?'🐷 ':''}${esc(g.name)}<span class="tag">${g.targetDate?'до '+ymShort(ym(g.targetDate)):'без срока'}${g.recurring?' · ежегодно':''}</span></h3>
+    const card=h(`<div class="card"><h3>${g.recurring?'🐷 ':''}${esc(g.name)}${(famView()&&g.ownerId)?' <span class="pill" style="padding:1px 7px;font-size:10px">'+esc((memberById(g.ownerId)||{}).name||'личная')+'</span>':''}${(famView()&&!g.ownerId)?' <span class="pill g" style="padding:1px 7px;font-size:10px">Общее</span>':''}<span class="tag">${g.targetDate?'до '+ymShort(ym(g.targetDate)):'без срока'}${g.recurring?' · ежегодно':''}</span></h3>
       <div class="linrow"><span class="num" style="font-weight:700;font-size:16px">${fmt(gc)}</span><span class="dim num">цель ${fmt(g.target)}</span></div>
       <div class="meter ${prog>=1?'':''}"><span style="width:${prog*100}%;background:${prog>=1?'var(--green)':'var(--gold)'}"></span></div>
       <div class="grid g2" style="margin-top:12px">
@@ -4818,7 +4857,7 @@ function syncGoalSubcats(){
   state.subcategories.forEach(s=>{ if(s.goalId && !s.deleted && !(state.goals||[]).some(g=>g.id===s.goalId)){ s.deleted=true; changed=true; } });
   if(changed) save(false);
 }
-function goalsForView(){ const all=state.goals||[]; if(famView()) return all.filter(g=>!g.ownerId); const me=activeMember(); return all.filter(g=>me&&g.ownerId===me.id); }
+function goalsForView(){ const all=state.goals||[]; if(famView()) return all; const me=activeMember(); return all.filter(g=>me&&g.ownerId===me.id); }
 function goalContrib(g){ const su=goalSub(g); if(!su)return 0; const cs=g.cycleStart||"1970-01-01"; return state.txns.filter(t=>t.type==="expense"&&t.subId===su.id&&t.date>=cs).reduce((a,t)=>a+(+t.amount||0),0); }
 function goalCurrent(g){ return (+g.current||0) + goalContrib(g); }
 function goalMonthlyNeeded(g){ if(g.monthlyNeededManual)return +g.monthlyNeeded||0; const left=Math.max(0,(+g.target||0)-goalCurrent(g)); const mLeft=g.targetDate?Math.max(1,monthsDiff(curMonth,ym(g.targetDate))):60; g.monthlyNeeded=Math.ceil(left/mLeft); return g.monthlyNeeded; }
@@ -6214,7 +6253,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
