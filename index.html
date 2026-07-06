@@ -2693,7 +2693,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v5.6";
+const APP_VERSION="v5.7";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -2993,13 +2993,18 @@ function startCashOfMonth(k){ const sn=(state.snapshots||{})[addMonths(k,-1)]; r
 // плюс приходы с начала месяца по сегодня, минус РАСХОДЫ-ПОТРЕБЛЕНИЕ по сегодня.
 // Взносы в капитал (накопления/долг) НЕ вычитаем — это отложенные деньги, а не трата.
 function isCapCat(cid){ return ((groupOf(cid)||{}).kind==="capital"); }
+// Уменьшает ли расход РЕАЛЬНЫЙ кэш на счетах.
+// Не уменьшают: взносы в накопления/подушку/инвестиции и в копилки-цели — деньги остаются вашим капиталом (иначе падал бы чистый капитал).
+// Уменьшают: потребление, тело долга (ушло кредитору), проценты, десятина/благотворительность и т.п.
+const SAVINGS_CATS=new Set(["c_save","c_cush","c_inv"]);
+function reducesCash(catId, subId){ const su=subId?byId(state.subcategories,subId):null; if(su&&su.goalId) return false; if(SAVINGS_CATS.has(catId)) return false; return true; }
 function cashLeftToday(k){
   const start=startCashOfMonth(k);
   const isCur = ym(new Date())===k;
   const cutoff = isCur ? todayISOdate() : (k+"-32"); // прошлые/будущие месяцы — берём весь месяц
   const tx=txnsOfMonth(k).filter(t=> String(t.date) <= cutoff);
   const inc=tx.filter(t=>t.type==="income").reduce((a,t)=>a+(+t.amount||0),0);
-  const out=tx.filter(t=>t.type==="expense" && !isCapCat(t.categoryId)).reduce((a,t)=>a+(+t.amount||0),0); // только потребление
+  const out=tx.filter(t=>t.type==="expense" && reducesCash(t.categoryId,t.subId)).reduce((a,t)=>a+(+t.amount||0),0); // деньги, которые ушли (потребление + тело долга + десятина), без взносов в накопления
   return { cash:start+inc-out, start, inc, out, isCur };
 }
 // ---- Гибрид «личное+общее»: переключатель вида и личный баланс ----
@@ -3010,7 +3015,7 @@ function canFamilyView(){ if(isParticipant()){ const m=activeMember(); return !!
 function famView(){ if(!canFamilyView()) return false; if((state.members||[]).length<2) return true; return viewScope!=='me'; }
 function setViewScope(v){ viewScope=v; try{ localStorage.setItem(LS_VIEW,v); }catch(e){} }
 // Личный баланс участника — производная величина (стартовый кэш + мой доход − мои расходы). Безопасно для слияния устройств.
-function memberBalance(m){ if(!m) return 0; const from=m.startCashDate||'1970-01-01'; let bal=+m.startCash||0; state.txns.forEach(t=>{ if((t.memberId||null)!==m.id) return; if(String(t.date)<from) return; if(t.type==='income') bal+=(+t.amount||0); else if(t.type==='expense') bal-=(+t.amount||0); }); return bal; }
+function memberBalance(m){ if(!m) return 0; const from=m.startCashDate||'1970-01-01'; let bal=+m.startCash||0; state.txns.forEach(t=>{ if((t.memberId||null)!==m.id) return; if(String(t.date)<from) return; if(t.type==='income') bal+=(+t.amount||0); else if(t.type==='expense' && reducesCash(t.categoryId,t.subId)) bal-=(+t.amount||0); }); return bal; }
 function memberMonthIncome(m,k){ if(!m) return 0; return txnsOfMonth(k).filter(t=>t.type==='income'&&(t.memberId||null)===m.id).reduce((a,t)=>a+(+t.amount||0),0); }
 function memberMonthExpense(m,k){ if(!m) return 0; return txnsOfMonth(k).filter(t=>t.type==='expense'&&(t.memberId||null)===m.id).reduce((a,t)=>a+(+t.amount||0),0); }
 function setLiquidCash(v){
@@ -3889,7 +3894,7 @@ function dayPlan(k){
     txM.filter(t=>+String(t.date).slice(8,10)===d).forEach(t=>{
       const amt=+t.amount||0;
       if(t.type==="income"){ ins+=amt; items.push({kind:"fact",type:"income",label:catName(t.categoryId),amount:amt}); }
-      else if(isCapCat(t.categoryId)){ items.push({kind:"fact",type:"expense",capital:true,label:(t.comment||catName(t.categoryId)),amount:amt}); } // в капитал — не уменьшает кэш
+      else if(!reducesCash(t.categoryId,t.subId)){ items.push({kind:"fact",type:"expense",capital:true,label:(t.comment||catName(t.categoryId)),amount:amt}); } // в накопления/копилку — не уменьшает кэш
       else { outs+=amt; items.push({kind:"fact",type:"expense",label:(t.comment||catName(t.categoryId)),amount:amt}); }
     });
     if(isFuture || (isCur && d>=todayDay)){
@@ -3897,7 +3902,7 @@ function dayPlan(k){
         const amt=+p.amount||0;
         if(p.type==="income"){ ins+=amt; items.push({kind:"plan",type:"income",label:p.label,amount:amt}); }
         else { plannedRecurExp+=amt;
-          if(isCapCat(p.categoryId)){ items.push({kind:"plan",type:"expense",capital:true,label:p.label,amount:amt}); }
+          if(!reducesCash(p.categoryId,p.subId)){ items.push({kind:"plan",type:"expense",capital:true,label:p.label,amount:amt}); }
           else { outs+=amt; items.push({kind:"plan",type:"expense",label:p.label,amount:amt}); }
         }
       });
@@ -5214,7 +5219,7 @@ const HELP=[
  {icon:"✅",title:"Шаг 4. Факт против плана",body:`<p>Видно, как реальные траты ложатся на план: по каждой группе и подкатегории — план, факт, остаток и полоска (жёлтая — близко к лимиту, красная — перерасход).</p>
    <p>Незапланированные траты и новые категории тоже учитываются в факте. Сверху — сводка расходов и дохода план/факт.</p>`,links:[{label:"Факт",route:"fact"}]},
  {icon:"🎯",title:"Экран «Сегодня»",body:`<p>Короткий взгляд: карточки <b>«Расход»</b> и <b>«Приход»</b> (план и факт за месяц), остаток кэша на сегодня и плановые платежи к подтверждению.</p>
-   <p><b>Дефицит средств плана</b> — двумя способами: «без учёта кэша» = плановый доход − плановый бюджет (чистый план); «с учётом кэша на сегодня» = кэш сегодня + остаток ожидаемого прихода − остаток плановых трат. Доход сверх плана улучшает картину, а не ухудшает.</p>`,links:[{label:"Сегодня",route:"today"}]},
+   <p><b>Дефицит средств плана</b> — хватит ли денег на плановые траты семьи. Считается двумя способами. <b>Без учёта кэша</b> = плановый приход всей семьи − плановый расход всех членов и общих трат (чистый план, без переходящего с прошлого месяца или добавленного кэша). <b>С учётом кэша на сегодня</b> = то же, но плюс имеющийся кэш (переходящий + добавленный). Доход сверх плана (приход, которого не было в плане) улучшает результат, а не ухудшает. Приход и расход берутся суммарно по всем членам семьи и общим тратам.</p>`,links:[{label:"Сегодня",route:"today"}]},
  {icon:"👨‍👩‍👧",title:"Семья: общий бюджет",body:`<p>ДомФин ведёт один <b>общий</b> семейный бюджет, к которому можно подключить близких.</p>
    <p><b>Как пригласить.</b> Настройка → «Семья и участники» → у нужной метки нажмите «Пригласить» (или создайте новую). Появится ссылка — отправьте её или покажите <b>QR-код</b>. Ссылка действует 72 часа и рассчитана на одного человека.</p>
    <p><b>Что видит участник.</b> Только ввод своих операций и свою историю — без аналитики, планов и баланса. Его операции идут в общий бюджет под его именем-меткой (значок метки — его «фото»).</p>
@@ -6318,7 +6323,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
