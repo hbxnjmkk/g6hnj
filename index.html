@@ -2693,7 +2693,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v5.3";
+const APP_VERSION="v5.4";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -2812,7 +2812,7 @@ function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||
   if(Array.isArray(s.assets)) s.assets.forEach(a=>{ if(!a.class) a.class=a.liquid?'reserve':'personal'; });
   if(Array.isArray(s.incomeSources)) s.incomeSources.forEach(x=>{ if(!x.kind) x.kind='labor'; });
   // Гибрид «личное+общее»: поля по умолчанию сохраняют прежнее поведение (всё общее)
-  if(Array.isArray(s.members)) s.members.forEach((m,i)=>{ if(!m.accountType) m.accountType=(i===0?'owner':'full'); if(m.startCash==null) m.startCash=0; if(!m.startCashDate) m.startCashDate='1970-01-01'; });
+  if(Array.isArray(s.members)) s.members.forEach((m,i)=>{ if(!m.accountType) m.accountType=(m.role==='owner'||i===0?'owner':'simple'); if(m.startCash==null) m.startCash=0; if(!m.startCashDate) m.startCashDate='1970-01-01'; });
   if(Array.isArray(s.categories)) s.categories.forEach(c=>{ if(!c.scope) c.scope='shared'; });
   if(Array.isArray(s.subcategories)) s.subcategories.forEach(su=>{ if(!su.scope) su.scope='shared'; });
   if(s.settings && s.settings.withdrawRatePct==null) s.settings.withdrawRatePct=4;
@@ -2939,6 +2939,24 @@ function catsOfView(gid){ return catsOf(gid).filter(catScopeVisible); }
 function catsForEntry(){ const me=activeMember(); return expenseCats().filter(c=>(c.scope||'shared')==='shared' || (c.scope==='personal' && me && c.ownerId===me.id)); }
 function incForView(){ if(famView()) return state.incomeSources; const me=activeMember(); return state.incomeSources.filter(s=>me && s.ownerId===me.id); }
 function ensureOwnerLabel(){ if(ACCT.role==='member') return null; let ow=state.members.find(m=>m.accountType==='owner'); if(!ow){ ow={id:uid(),name:(ACCT.email?String(ACCT.email).split('@')[0]:'Я'),emoji:'🙂',color:MEMBER_COLORS[0],accountType:'owner',startCash:0,startCashDate:todayISOdate()}; state.members.push(ow); if(!curMember()||!memberById(curMember())) setCurMember(ow.id); save(false); } return ow; }
+// Миграция (вариант «а»): единый ручной «Кэш на счетах» → в личный стартовый остаток владельца; семейный кэш теперь = сумма личных остатков.
+function migrateCashToPersonal(){
+  if(state.cashMigrated) return;
+  if(ACCT && ACCT.role==='member') return;        // переносит владелец (источник — общий сейф)
+  ensureOwnerLabel();
+  const owner=state.members.find(m=>m.accountType==='owner')||state.members[0];
+  if(!owner){ return; }                            // нет участников — отложим до появления владельца
+  const cashAssets=state.assets.filter(a=>a.liquid && /кэш|нали|счет|cash/i.test((a.name||'')+' '+(a.kind||'')));
+  const sum=cashAssets.reduce((a,x)=>a+(+x.value||0),0);
+  if(sum>0){
+    let anchor; const snapKeys=Object.keys(state.snapshots||{}).sort();
+    anchor=(snapKeys.length? addMonths(snapKeys[snapKeys.length-1],1) : realMonth())+'-01';
+    owner.startCash=(+owner.startCash||0)+sum; owner.startCashDate=anchor;
+    const ids=new Set(cashAssets.map(a=>a.id));
+    state.assets=state.assets.filter(a=>!ids.has(a.id));
+  }
+  state.cashMigrated=true; save(false);
+}
 const catsOfAll=gid=>state.categories.filter(c=>c.groupId===gid);
 const expenseGroups=()=>state.groups.filter(g=>g.kind!=="income");
 const expenseCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind!=="income"&&!c.deleted;});
@@ -2966,8 +2984,10 @@ function catDirectSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===c
 function fixedSpend(k){ return groupSpend(k,"g1"); }
 function essentialSpend(k){ return groupSpend(k,"g1")+groupSpend(k,"g2")+groupSpend(k,"g3"); } // «нужное» для подушки: обязательные+переменные+семья
 
-const totalAssets=()=>state.assets.reduce((a,x)=>a+(+x.value||0),0);
-const liquidAssets=()=>state.assets.filter(a=>a.liquid).reduce((a,x)=>a+(+x.value||0),0);
+const totalAssets=()=>state.assets.reduce((a,x)=>a+(+x.value||0),0)+familyCash();
+const liquidAssets=()=>familyCash()+state.assets.filter(a=>a.liquid).reduce((a,x)=>a+(+x.value||0),0);
+// Семейный кэш = сумма личных остатков всех участников (вариант «снизу вверх»)
+function familyCash(){ return (state.members||[]).reduce((a,m)=>a+memberBalance(m),0); }
 function startCashOfMonth(k){ const sn=(state.snapshots||{})[addMonths(k,-1)]; return (sn&&sn.liquid!=null)?sn.liquid:liquidAssets(); }
 // Реальный остаток кэша «на сегодня»: кэш, перетёкший с прошлого месяца,
 // плюс приходы с начала месяца по сегодня, минус РАСХОДЫ-ПОТРЕБЛЕНИЕ по сегодня.
@@ -3452,9 +3472,10 @@ function openMonthClose(k){
       <div id="clDebts">${liabs.map(x=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">было ${fmt(liabBalance(x),{bare:true})}${x.minPayment?' · платёж '+fmt(x.minPayment,{bare:true}):''}</div></div>
         <input class="num" data-lb="${x.id}" inputmode="numeric" value="${suggestBalance(x)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join("")}</div>
       <small class="hint">Показан текущий остаток — он уже уменьшен вашими платежами по телу долга. Поправьте вручную, только если по этому долгу проценты капитализируются (прибавляются к телу) или остаток по выписке отличается.</small></div>`:`<div class="infobox">Долгов нет — просто зафиксируем капитал за месяц.</div>`}
-    <div class="field"><label>💵 Остаток на счетах на конец месяца</label>
-      <input class="num" id="clCash" inputmode="numeric" value="${Math.round(liquidAssets())}" style="width:100%;text-align:right;padding:12px;font-size:17px;font-weight:600">
-      <small class="hint">Сколько реально денег на счетах и наличными. Это стартовая точка «Прогноза денег» — важно держать актуальной.</small></div>
+    <div class="field"><label>💵 Остаток кэша на конец месяца — по участникам</label>
+      <div id="clCashM">${(state.members||[]).map(m=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(m.emoji||'🙂')} ${esc(m.name)}</div><div class="t2">сейчас ${fmt(memberBalance(m),{bare:true})}</div></div>
+        <input class="num" data-mc="${m.id}" inputmode="numeric" value="${Math.round(memberBalance(m))}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join("")}</div>
+      <small class="hint">Сколько реально денег у каждого на конец месяца. С нового месяца остаток каждого стартует от подтверждённой суммы. Семейный кэш = сумма этих остатков (идёт в капитал и «Прогноз»).</small></div>
     ${(()=>{ const caps=assetRows.filter(a=>(a.class||'')==='working'&&a.yieldType==='capitalize'&&(+a.yield||0)>0); if(!caps.length)return ''; return `<div class="field"><label>📈 Переоценка работающих активов (капитализация)</label>
       <div id="clReval">${caps.map(a=>{const g=assetCapitalizeForMonth(a); const nv=Math.round((+a.value||0)+g); return `<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">было ${fmt(a.value,{bare:true})} · +${fmt(g,{bare:true})} за месяц (${a.yield}%)</div></div>
         <input class="num" data-rv="${a.id}" inputmode="numeric" value="${nv}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`;}).join("")}</div>
@@ -3468,10 +3489,12 @@ function openMonthClose(k){
     at.onclick=()=>{ const open=ab.style.display!=="none"; ab.style.display=open?"none":"block"; at.textContent=(open?"▸":"▾")+" Обновить стоимость активов (по желанию)"; };
     el.querySelector("#clDo").onclick=()=>{
       el.querySelectorAll("[data-lb]").forEach(inp=>{ const x=byId(state.liabilities,inp.dataset.lb); if(x){ const v=parseFloat(String(inp.value).replace(/\s/g,""))||0; x.balance=Math.max(0,v); x.anchorDate=todayISOdate(); } });
-      const cashV=parseFloat(String(el.querySelector("#clCash").value).replace(/\s/g,"")); if(!isNaN(cashV)) setLiquidCash(cashV);
+      let cashSum=0, anyCash=false;
+      el.querySelectorAll("[data-mc]").forEach(inp=>{ const m=memberById(inp.dataset.mc); if(m){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)){ m.startCash=Math.max(0,v); m.startCashDate=addMonths(k,1)+"-01"; cashSum+=Math.max(0,v); anyCash=true; } } });
       el.querySelectorAll("[data-rv]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.rv); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
       if(ab.style.display!=="none") el.querySelectorAll("[data-av]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.av); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
       performClose(k);
+      if(anyCash && state.snapshots[k]){ const ess=essentialSpend(k); state.snapshots[k].liquid=cashSum; state.snapshots[k].cushionMonths= ess>0? cashSum/ess : (cashSum>0?99:0); save(); }
       closeSheet(); render_current(); toast("Месяц "+ymShort(k)+" закрыт");
     };
   });
@@ -4644,6 +4667,14 @@ function pgBalance(v){
 
   if(closed && !hasList){ v.appendChild(h(`<div class="infobox">Детали по активам и пассивам за этот месяц не сохранялись (месяц закрыт в старой версии). Показан итог. Начиная с закрытий в新 версии, история по каждому активу и долгу будет видна здесь.</div>`)); return; }
 
+  // Кэш = сумма личных остатков участников (вариант «снизу вверх»)
+  if(editable){
+    const cc=h(`<div class="card"><h3>💵 Кэш на счетах<span class="tag num">${fmt(familyCash())}</span></h3>
+      <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Сумма личных остатков участников. Меняется автоматически от доходов и расходов; фиксируется при закрытии месяца.</p></div>`);
+    (state.members||[]).forEach(m=>{ cc.appendChild(h(`<div class="lrow" style="padding:7px 2px"><div class="ic" style="background:${tint(m.color||'var(--grpI)',13)};color:${esc(m.color||'var(--grpI)')}">${esc(m.emoji||'🙂')}</div><div style="flex:1;min-width:0"><div class="t1">${esc(m.name)}</div></div><div class="amt num">${fmt(memberBalance(m),{bare:true})}</div></div>`)); });
+    if(!(state.members||[]).length) cc.appendChild(h(`<div class="dim" style="font-size:12px;padding:4px 2px">Добавьте участника, чтобы вести кэш.</div>`));
+    v.appendChild(cc);
+  }
   const ac=h(`<div class="card"><h3>Активы<span class="tag num">${fmt(A)}</span></h3></div>`);
   assetsArr.forEach(a=>{
     const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--green) 13%,transparent);color:var(--green)">${a.liquid?'💵':'🏛'}</div>
@@ -6234,6 +6265,7 @@ function bootApp(){
   try{ rolloverSinkingFunds(); }catch(e){}
   try{ syncGoalSubcats(); }catch(e){}
   try{ syncLiabSubcats(); }catch(e){}
+  try{ migrateCashToPersonal(); }catch(e){}
   document.getElementById("gate").classList.remove("show");
   document.getElementById("app").style.visibility="visible";
   renderNav(); renderMe(); render_current();
@@ -6253,7 +6285,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
