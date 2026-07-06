@@ -2691,7 +2691,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v4.7";
+const APP_VERSION="v5.1";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -2748,7 +2748,7 @@ function seedState(){
   cat("c_home","g1","Жильё",["Аренда / содержание","Ипотека / платёж"],"🏠");
   cat("c_util","g1","Коммунальные",["Газ","Электричество","Вода","Прочее"],"💡");
   cat("c_comm","g1","Связь",["Интернет","Мобильная связь","Подписки и сервисы"],"📶");
-  cat("c_int","g1","Проценты по кредитам",["Проценты банков"],"％");
+  cat("c_int","g1","Проценты по кредитам",[],"％");
   cat("c_edu","g1","Образование детей",["Школа","Репетиторы / английский"],"🎓");
   // g2 переменные
   cat("c_food","g2","Продукты",["Продукты домой","Маркетплейсы"],"🛒");
@@ -2769,7 +2769,7 @@ function seedState(){
   cat("c_cush","g5","Подушка безопасности",["Пополнение резерва"],"🛟");
   cat("c_save","g5","Накопления",["Накопления"],"🏦");
   cat("c_inv","g5","Инвестиции",["Инвестиции"],"📈");
-  cat("c_debt","g5","Погашение долга (тело)",["Плановое (тело долга)","Досрочное гашение"],"⚡");
+  cat("c_debt","g5","Погашение долга (тело)",[],"⚡");
   cat("c_char","g6","Десятина и благотворительность",["Десятина / храм","Благотворительность","Помощь родным"],"🤲");
 
   const assets=[];
@@ -2809,6 +2809,10 @@ function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||
   if(Array.isArray(s.categories)){ const cf=s.categories.find(c=>c.id==="c_cafe"); if(cf && cf.groupId==="g2") cf.groupId="g4"; }
   if(Array.isArray(s.assets)) s.assets.forEach(a=>{ if(!a.class) a.class=a.liquid?'reserve':'personal'; });
   if(Array.isArray(s.incomeSources)) s.incomeSources.forEach(x=>{ if(!x.kind) x.kind='labor'; });
+  // Гибрид «личное+общее»: поля по умолчанию сохраняют прежнее поведение (всё общее)
+  if(Array.isArray(s.members)) s.members.forEach((m,i)=>{ if(!m.accountType) m.accountType=(i===0?'owner':'full'); if(m.startCash==null) m.startCash=0; if(!m.startCashDate) m.startCashDate='1970-01-01'; });
+  if(Array.isArray(s.categories)) s.categories.forEach(c=>{ if(!c.scope) c.scope='shared'; });
+  if(Array.isArray(s.subcategories)) s.subcategories.forEach(su=>{ if(!su.scope) su.scope='shared'; });
   if(s.settings && s.settings.withdrawRatePct==null) s.settings.withdrawRatePct=4;
   sanitizeState(s); return s; }
 let __lastSaved=null;
@@ -2927,6 +2931,12 @@ const subName=sid=>{const s=byId(state.subcategories,sid);return s?s.name:"";};
 const subsOf=cid=>state.subcategories.filter(s=>s.categoryId===cid && !s.deleted);
 const subsOfAll=cid=>state.subcategories.filter(s=>s.categoryId===cid);
 const catsOf=gid=>state.categories.filter(c=>c.groupId===gid && !c.deleted);
+// Гибрид: видимость категорий/дохода по виду «Я / Семья»
+function catScopeVisible(c){ if((c.scope||'shared')==='shared') return famView(); const me=activeMember(); return !famView() && !!(me && c.ownerId===me.id); }
+function catsOfView(gid){ return catsOf(gid).filter(catScopeVisible); }
+function catsForEntry(){ const me=activeMember(); return expenseCats().filter(c=>(c.scope||'shared')==='shared' || (c.scope==='personal' && me && c.ownerId===me.id)); }
+function incForView(){ if(famView()) return state.incomeSources; const me=activeMember(); return state.incomeSources.filter(s=>me && s.ownerId===me.id); }
+function ensureOwnerLabel(){ if(ACCT.role==='member') return null; let ow=state.members.find(m=>m.accountType==='owner'); if(!ow){ ow={id:uid(),name:(ACCT.email?String(ACCT.email).split('@')[0]:'Я'),emoji:'🙂',color:MEMBER_COLORS[0],accountType:'owner',startCash:0,startCashDate:todayISOdate()}; state.members.push(ow); if(!curMember()||!memberById(curMember())) setCurMember(ow.id); save(false); } return ow; }
 const catsOfAll=gid=>state.categories.filter(c=>c.groupId===gid);
 const expenseGroups=()=>state.groups.filter(g=>g.kind!=="income");
 const expenseCats=()=>state.categories.filter(c=>{const g=byId(state.groups,c.groupId);return g&&g.kind!=="income"&&!c.deleted;});
@@ -2970,6 +2980,17 @@ function cashLeftToday(k){
   const out=tx.filter(t=>t.type==="expense" && !isCapCat(t.categoryId)).reduce((a,t)=>a+(+t.amount||0),0); // только потребление
   return { cash:start+inc-out, start, inc, out, isCur };
 }
+// ---- Гибрид «личное+общее»: переключатель вида и личный баланс ----
+const LS_VIEW="famfin.view";
+let viewScope=(function(){ try{ return localStorage.getItem(LS_VIEW)||'family'; }catch(e){ return 'family'; } })();
+function activeMember(){ return memberById(isParticipant()?participantMemberId():curMember()); }
+function canFamilyView(){ if(isParticipant()){ const m=activeMember(); return !!(m && m.accountType==='full'); } return true; }
+function famView(){ if(!canFamilyView()) return false; if((state.members||[]).length<2) return true; return viewScope!=='me'; }
+function setViewScope(v){ viewScope=v; try{ localStorage.setItem(LS_VIEW,v); }catch(e){} }
+// Личный баланс участника — производная величина (стартовый кэш + мой доход − мои расходы). Безопасно для слияния устройств.
+function memberBalance(m){ if(!m) return 0; const from=m.startCashDate||'1970-01-01'; let bal=+m.startCash||0; state.txns.forEach(t=>{ if((t.memberId||null)!==m.id) return; if(String(t.date)<from) return; if(t.type==='income') bal+=(+t.amount||0); else if(t.type==='expense') bal-=(+t.amount||0); }); return bal; }
+function memberMonthIncome(m,k){ if(!m) return 0; return txnsOfMonth(k).filter(t=>t.type==='income'&&(t.memberId||null)===m.id).reduce((a,t)=>a+(+t.amount||0),0); }
+function memberMonthExpense(m,k){ if(!m) return 0; return txnsOfMonth(k).filter(t=>t.type==='expense'&&(t.memberId||null)===m.id).reduce((a,t)=>a+(+t.amount||0),0); }
 function setLiquidCash(v){
   v=Math.max(0,Math.round(+v||0));
   const liq=state.assets.filter(a=>a.liquid);
@@ -2977,7 +2998,28 @@ function setLiquidCash(v){
   else if(liq.length===0){ if(v>0) state.assets.push({id:uid(),name:"Счета и наличные",kind:"кэш",value:v,liquid:true}); }
   else { const others=liq.slice(1).reduce((a,x)=>a+(+x.value||0),0); liq[0].value=Math.max(0,v-others); }
 }
-const totalLiab=()=>state.liabilities.reduce((a,x)=>a+(+x.balance||0),0);
+// --- Пассивы: тело и проценты привязаны к конкретному долгу через авто-подкатегории ---
+const DEBT_CAT="c_debt", INT_CAT="c_int";
+function liabPrincipalSub(L){ return state.subcategories.find(s=>s.liabId===L.id && s.debtRole==='principal' && !s.deleted); }
+function liabInterestSub(L){ return state.subcategories.find(s=>s.liabId===L.id && s.debtRole==='interest' && !s.deleted); }
+function liabPrincipalPaid(L){ const su=liabPrincipalSub(L); if(!su) return 0; const from=L.anchorDate||"1970-01-01"; return state.txns.filter(t=>t.type==="expense" && t.subId===su.id && String(t.date)>=from).reduce((a,t)=>a+(+t.amount||0),0); }
+// Текущий остаток долга = якорь − погашения тела с момента якоря (производная величина — безопасно для слияния устройств)
+function liabBalance(L){ return Math.max(0, (+L.balance||0) - liabPrincipalPaid(L)); }
+// Автосоздание/переименование/удаление подкатегорий «тело» и «проценты» под каждый пассив
+function syncLiabSubcats(){
+  let changed=false;
+  (state.liabilities||[]).forEach(L=>{
+    if(!L.anchorDate){ L.anchorDate=todayISOdate(); changed=true; }
+    [['principal',DEBT_CAT],['interest',INT_CAT]].forEach(([role,catId])=>{
+      let su=state.subcategories.find(s=>s.liabId===L.id && s.debtRole===role);
+      if(!su){ su={id:uid(),categoryId:catId,name:L.name,liabId:L.id,debtRole:role}; state.subcategories.push(su); changed=true; }
+      else { if(su.deleted){su.deleted=false;changed=true;} if(su.name!==L.name){su.name=L.name;changed=true;} if(su.categoryId!==catId){su.categoryId=catId;changed=true;} }
+    });
+  });
+  state.subcategories.forEach(s=>{ if(s.liabId && !s.deleted && !(state.liabilities||[]).some(L=>L.id===s.liabId)){ s.deleted=true; changed=true; } });
+  if(changed) save(false);
+}
+const totalLiab=()=>state.liabilities.reduce((a,x)=>a+liabBalance(x),0);
 const netWorth=()=>totalAssets()-totalLiab();
 const totalMinPayment=()=>state.liabilities.reduce((a,x)=>a+(+x.minPayment||0),0);
 const expectedIncome=()=>state.incomeSources.reduce((a,x)=>a+(+x.amount||0),0);
@@ -3005,7 +3047,7 @@ function unclosedMonths(){
 }
 function monthToClose(){ const u=unclosedMonths(); return u.length?u[0]:null; }
 function isClosed(k){ return !!(state.snapshots||{})[k]; }
-function suggestBalance(x){ const b=+x.balance||0,r=+x.rate||0,p=+x.minPayment||0; return Math.max(0,Math.round(b + b*r/12 - p)); }
+function suggestBalance(x){ return Math.max(0, Math.round(liabBalance(x))); }
 
 function metrics(k){
   const snap=(state.snapshots||{})[k];
@@ -3032,7 +3074,7 @@ function metrics(k){
     netWorth: netWorth(), closed:false
   };
 }
-function liabInterestMonthly(){ return state.liabilities.reduce((a,x)=>a+((+x.balance||0)*(+x.rate||0)/12),0); }
+function liabInterestMonthly(){ return state.liabilities.reduce((a,x)=>a+(liabBalance(x)*(+x.rate||0)/12),0); }
 
 /* ---------- UI atoms ---------- */
 let toastTimer=null;
@@ -3221,10 +3263,10 @@ let route="today";
 let curMonth = ym(new Date());
 function horizonStart(){ return ym(new Date()); }
 
-const SIMPLE_NAV=["today","settings"];
+const SIMPLE_NAV=["today","plan","fact","goals","settings"];
 function isSimpleMode(){ try{ return localStorage.getItem(LS_SIMPLE)==="1"; }catch(e){ return false; } }
 // Роль «Участник»: только ввод + своя история. Owner может включить предпросмотр.
-function isParticipant(){ try{ if(localStorage.getItem(LS_PREVIEW)==="1") return true; }catch(e){} return (ACCT&&ACCT.role)==="member"; }
+function isParticipant(){ try{ if(localStorage.getItem(LS_PREVIEW)==="1") return true; }catch(e){} if((ACCT&&ACCT.role)!=="member") return false; const m=memberById(ACCT&&ACCT.memberId); return !m || m.accountType!=='full'; }
 function participantMemberId(){ if(ACCT&&ACCT.memberId&&memberById(ACCT.memberId)) return ACCT.memberId; return curMember(); }
 // QR как SVG-строка (офлайн, без внешних запросов) — для ссылки-приглашения
 function qrSVG(text, cell, margin){ try{ const q=window.qrcode(0,'M'); q.addData(String(text)); q.make(); return q.createSvgTag({cellSize:cell||4, margin:(margin==null?4:margin), scalable:true}); }catch(e){ return ''; } }
@@ -3242,9 +3284,14 @@ function openInviteSheet(presetLabel){
     <div class="field"><label>Имя участника</label>
       <div class="opts" id="invLabels">${labels.map(n=>`<button class="opt ${presetLabel===n?'active':''}" data-lbl="${esc(n)}">${esc(n)}</button>`).join('')}<button class="opt" data-lbl="__new">＋ Другое имя</button></div>
       <input id="invName" placeholder="имя участника" autocomplete="off" style="margin-top:8px;${(labels.length&&presetLabel==null)||presetLabel!=null?'display:none':''}"></div>
+    <div class="field"><label>Тип аккаунта</label>
+      <div class="opts" id="invType"><button class="opt active" data-type="simple">Упрощённый</button><button class="opt" data-type="full">Полный</button></div>
+      <small class="hint" id="invTypeHint">Упрощённый: свой кэш, траты и личное планирование, без семейной аналитики и баланса.</small></div>
     <button class="btn primary block" id="invMake" style="padding:13px">Создать ссылку-приглашение</button>
     <div id="invOut" style="margin-top:12px"></div>`, el=>{
     let chosen = presetLabel!=null ? presetLabel : (labels.length ? null : '');
+    let acctType='simple';
+    el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{ el.querySelectorAll("[data-type]").forEach(x=>x.classList.remove("active")); b.classList.add("active"); acctType=b.dataset.type; el.querySelector("#invTypeHint").textContent = acctType==='simple' ? "Упрощённый: свой кэш, траты и личное планирование, без семейной аналитики и баланса." : "Полный: личные финансы плюс семейный вид (общий бюджет, капитал, долги, цели). Чужое личное — только итогом."; });
     const nameInp=el.querySelector("#invName");
     el.querySelectorAll("[data-lbl]").forEach(b=>b.onclick=()=>{
       el.querySelectorAll("[data-lbl]").forEach(x=>x.classList.remove("active")); b.classList.add("active");
@@ -3254,6 +3301,11 @@ function openInviteSheet(presetLabel){
     el.querySelector("#invMake").onclick=async()=>{
       const name = (chosen!=null ? chosen : nameInp.value.trim());
       if(!name){ toast("Выберите или введите имя участника"); return; }
+      ensureOwnerLabel();   // у владельца появляется своя метка → включается вид «Я/Семья»
+      // метка участника + тип аккаунта (тип прочитает клиент участника после присоединения)
+      let mem=(state.members||[]).find(x=>String(x.name).trim().toLowerCase()===name.toLowerCase());
+      if(!mem){ mem={id:uid(),name,emoji:'🙂',color:MEMBER_COLORS[(state.members||[]).length%MEMBER_COLORS.length],accountType:acctType,startCash:0,startCashDate:todayISOdate()}; state.members=state.members||[]; state.members.push(mem); }
+      mem.accountType=acctType; save();
       const btn=el.querySelector("#invMake"); btn.disabled=true; btn.textContent="Создаём…";
       try{
         const {token,secret}=await ACCT.createInvite(name,72);
@@ -3395,9 +3447,9 @@ function openMonthClose(k){
   openSheet(`<div class="sheet-sticky"><h3>Закрытие месяца · ${ymLabel(k)}</h3></div>
     <p class="muted" style="font-size:12.5px;margin-top:-4px">Обновите остатки по долгам на конец месяца и зафиксируйте капитал. Показатели за этот месяц сохранятся в историю, и дашборд начнёт показывать динамику.</p>
     ${liabs.length?`<div class="field"><label>Остатки по долгам на конец месяца</label>
-      <div id="clDebts">${liabs.map(x=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">было ${fmt(x.balance,{bare:true})}${x.minPayment?' · платёж '+fmt(x.minPayment,{bare:true}):''}</div></div>
+      <div id="clDebts">${liabs.map(x=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">было ${fmt(liabBalance(x),{bare:true})}${x.minPayment?' · платёж '+fmt(x.minPayment,{bare:true}):''}</div></div>
         <input class="num" data-lb="${x.id}" inputmode="numeric" value="${suggestBalance(x)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join("")}</div>
-      <small class="hint">Предложены расчётные остатки (проценты минус платёж). Поправьте, если платёж был другим или долг не уменьшился.</small></div>`:`<div class="infobox">Долгов нет — просто зафиксируем капитал за месяц.</div>`}
+      <small class="hint">Показан текущий остаток — он уже уменьшен вашими платежами по телу долга. Поправьте вручную, только если по этому долгу проценты капитализируются (прибавляются к телу) или остаток по выписке отличается.</small></div>`:`<div class="infobox">Долгов нет — просто зафиксируем капитал за месяц.</div>`}
     <div class="field"><label>💵 Остаток на счетах на конец месяца</label>
       <input class="num" id="clCash" inputmode="numeric" value="${Math.round(liquidAssets())}" style="width:100%;text-align:right;padding:12px;font-size:17px;font-weight:600">
       <small class="hint">Сколько реально денег на счетах и наличными. Это стартовая точка «Прогноза денег» — важно держать актуальной.</small></div>
@@ -3413,7 +3465,7 @@ function openMonthClose(k){
     const at=el.querySelector("#clAssetsToggle"), ab=el.querySelector("#clAssets");
     at.onclick=()=>{ const open=ab.style.display!=="none"; ab.style.display=open?"none":"block"; at.textContent=(open?"▸":"▾")+" Обновить стоимость активов (по желанию)"; };
     el.querySelector("#clDo").onclick=()=>{
-      el.querySelectorAll("[data-lb]").forEach(inp=>{ const x=byId(state.liabilities,inp.dataset.lb); if(x){ const v=parseFloat(String(inp.value).replace(/\s/g,""))||0; x.balance=Math.max(0,v); } });
+      el.querySelectorAll("[data-lb]").forEach(inp=>{ const x=byId(state.liabilities,inp.dataset.lb); if(x){ const v=parseFloat(String(inp.value).replace(/\s/g,""))||0; x.balance=Math.max(0,v); x.anchorDate=todayISOdate(); } });
       const cashV=parseFloat(String(el.querySelector("#clCash").value).replace(/\s/g,"")); if(!isNaN(cashV)) setLiquidCash(cashV);
       el.querySelectorAll("[data-rv]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.rv); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
       if(ab.style.display!=="none") el.querySelectorAll("[data-av]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.av); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
@@ -3453,7 +3505,7 @@ function editMember(id){
    ============================================================ */
 function frequentCats(){
   const f=state.freq||{};
-  return expenseCats().slice().sort((a,b)=>(f[b.id]||0)-(f[a.id]||0));
+  return catsForEntry().slice().sort((a,b)=>(f[b.id]||0)-(f[a.id]||0));
 }
 // Модалка выбора подкатегории: тап вне окна = отмена (вернуться к категории), выбор = закрыть и продолжить
 function openSubPicker(categoryId, current, onPick){
@@ -3615,29 +3667,51 @@ function render_current(){
    PAGE: СЕГОДНЯ (светофор)
    ============================================================ */
 function pgParticipantToday(v){
-  const k=curMonth, mid=participantMemberId();
-  const meName=(mid&&memberById(mid))?memberById(mid).name:(ACCT.email||'участник');
-  v.appendChild(h(`<div><div class="page-title">Ввод операций</div><div class="page-sub hide-mobile">${esc(meName)} · ваши доходы и расходы идут в общий семейный бюджет</div></div>`));
-  const add=h(`<button class="btn primary block" style="padding:16px;font-size:17px">＋ Добавить операцию</button>`);
-  add.onclick=()=>openAddTxn();
-  v.appendChild(add);
-  // своя история за месяц
+  return pgPersonalToday(v, activeMember());
+}
+function viewToggle(){
+  const fam=famView();
+  const seg=h(`<div class="seg" style="margin:0 0 12px"><button data-vs="me" class="${fam?'':'active'}">🙂 Я</button><button data-vs="family" class="${fam?'active':''}">👨‍👩‍👧 Семья</button></div>`);
+  seg.querySelectorAll("[data-vs]").forEach(b=>b.onclick=()=>{ setViewScope(b.dataset.vs); render_current(); });
+  return seg;
+}
+function pgPersonalToday(v, m){
+  const k=curMonth;
+  const nm=m?m.name:(ACCT.email||'Я');
+  v.appendChild(h(`<div><div class="page-title">Мой бюджет</div><div class="page-sub hide-mobile">${esc(nm)} · личные финансы</div></div>`));
+  const bal=memberBalance(m), inc=memberMonthIncome(m,k), exp=memberMonthExpense(m,k);
+  const cashCard=h(`<div class="card" style="text-align:center"><div class="dim" style="font-size:12.5px">Мой остаток на сегодня</div>
+    <div class="num" style="font-size:30px;font-weight:800;margin:4px 0;color:${bal<0?'var(--red)':'var(--ink)'}">${fmt(bal,{bare:true})} ${CUR}</div>
+    <button class="btn ghost sm" id="setStart">Указать стартовый остаток</button></div>`);
+  cashCard.querySelector("#setStart").onclick=()=>editMemberCash(m?m.id:null);
+  v.appendChild(cashCard);
+  v.appendChild(h(`<div class="two-up" style="margin-top:10px">
+    <div class="card" style="border-color:color-mix(in srgb,var(--red) 25%,var(--line))"><div class="dim" style="font-size:12px">Мой расход · ${ymShort(k)}</div><div class="num" style="font-size:22px;font-weight:700;color:var(--red)">−${fmt(exp,{bare:true})}</div></div>
+    <div class="card" style="border-color:color-mix(in srgb,var(--green) 25%,var(--line))"><div class="dim" style="font-size:12px">Мой приход · ${ymShort(k)}</div><div class="num" style="font-size:22px;font-weight:700;color:var(--green)">+${fmt(inc,{bare:true})}</div></div>
+  </div>`));
+  const add=h(`<button class="btn primary block" style="padding:15px;font-size:16px;margin-top:12px">＋ Добавить операцию</button>`);
+  add.onclick=()=>openAddTxn(); v.appendChild(add);
+  const mid=m?m.id:null;
   const mine=state.txns.filter(t=>(t.memberId||null)===mid && ym(t.date)===k).sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
   const card=h(`<div class="card" style="margin-top:12px"><h3>Мои операции <span class="dim" style="font-weight:500;font-size:13px">${ymShort(k)}</span></h3></div>`);
-  if(!mine.length){ card.appendChild(h(`<div class="empty" style="padding:16px;text-align:left">За ${ymShort(k)} операций нет. Нажмите «＋ Добавить операцию».</div>`)); }
-  else mine.forEach(t=>{
-    const inc=t.type==="income";
-    const row=h(`<div class="lrow" style="cursor:pointer"><div class="ic">${inc?'💰':'🧾'}</div>
-      <div style="flex:1;min-width:0"><div class="t1">${esc(t.comment||catName(t.categoryId))}</div>
-        <div class="t2">${esc(catName(t.categoryId))}${t.subId?' · '+esc(subName(t.subId)):''} · ${t.date.slice(8,10)}.${t.date.slice(5,7)}</div></div>
-      <div class="amt" style="color:${inc?'var(--green)':'var(--ink)'}">${inc?'+':'−'}${fmt(t.amount,{bare:true})}</div></div>`);
-    row.onclick=()=>editTxn(t.id);
-    card.appendChild(row);
-  });
+  if(!mine.length) card.appendChild(h(`<div class="empty" style="padding:16px;text-align:left">Операций пока нет.</div>`));
+  else mine.forEach(t=>{ const inc2=t.type==="income"; const row=h(`<div class="lrow" style="cursor:pointer"><div class="ic">${inc2?'💰':'🧾'}</div><div style="flex:1;min-width:0"><div class="t1">${esc(t.comment||catName(t.categoryId))}</div><div class="t2">${esc(catName(t.categoryId))}${t.subId?' · '+esc(subName(t.subId)):''} · ${t.date.slice(8,10)}.${t.date.slice(5,7)}</div></div><div class="amt" style="color:${inc2?'var(--green)':'var(--ink)'}">${inc2?'+':'−'}${fmt(t.amount,{bare:true})}</div></div>`); row.onclick=()=>editTxn(t.id); card.appendChild(row); });
   v.appendChild(card);
+}
+function editMemberCash(mid){
+  const m=mid?memberById(mid):activeMember(); if(!m){ toast("Сначала добавьте участника"); return; }
+  openSheet(`<h3>Стартовый остаток · ${esc(m.name)}</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-6px">Сколько денег у вас сейчас (наличные + счета). От этой точки приложение считает ваш личный остаток: стартовый остаток + ваши доходы − ваши расходы.</p>
+    <div class="field"><label>Стартовый остаток, ${CUR}</label><input id="sc" class="num" inputmode="numeric" value="${m.startCash?Math.round(m.startCash):''}" placeholder="0"></div>
+    <div class="field"><label>С какой даты считать</label><input id="sd" type="date" value="${(m.startCashDate&&m.startCashDate!=='1970-01-01')?m.startCashDate:todayISOdate()}"></div>
+    <button class="btn primary block" id="save" style="padding:13px">Сохранить</button>`, el=>{
+    el.querySelector("#save").onclick=()=>{ m.startCash=parseFloat(String(el.querySelector("#sc").value).replace(/\s/g,""))||0; m.startCashDate=el.querySelector("#sd").value||todayISOdate(); save(); closeSheet(); render_current(); };
+  });
 }
 function pgToday(v){
   if(isParticipant()){ return pgParticipantToday(v); }
+  const family = state.members.length>=2;
+  if(family){ v.appendChild(viewToggle()); if(!famView()) return pgPersonalToday(v, activeMember()); }
   const k=curMonth, m=metrics(k);
   const planTotal=planMonthTotal(k);
   const spent=monthExpense(k);
@@ -4079,10 +4153,17 @@ function fullDate(d){ const x=new Date(d); const wd=["вс","пн","вт","ср"
 /* ============================================================
    PAGE: ПЛАН (лимиты по категориям, пустой; заполняется от целей)
    ============================================================ */
+function planTotalView(k){ const p=state.plans[k]||{}; let t=0; expenseGroups().forEach(g=>catsOfView(g.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>t+=(+p[su.id]||0)); else t+=(+p[c.id]||0); })); return t; }
+function plannedIncomeView(k){ return incForView().reduce((a,s)=>a+incomeSrcPlanned(k,s.id),0); }
+function factIncomeView(k){ if(famView()) return monthIncome(k); return memberMonthIncome(activeMember(),k); }
+function factExpenseView(k){ if(famView()) return monthExpense(k)+monthCapital(k); return memberMonthExpense(activeMember(),k); }
 function pgPlan(v){
   const k=curMonth; const plan=state.plans[k]||{};
-  const total=planMonthTotal(k);
-  v.appendChild(h(`<div class="page-title">План месяца</div><div class="page-sub">${ymLabel(k)} · лимиты, статьи, источники и плановые платежи</div>`));
+  const family = state.members.length>=2;
+  if(family) v.appendChild(viewToggle());
+  const total=planTotalView(k);
+  const scopeWord = family ? (famView()?' · общий бюджет семьи':' · мой личный бюджет') : '';
+  v.appendChild(h(`<div class="page-title">План месяца</div><div class="page-sub">${ymLabel(k)}${scopeWord}</div>`));
   v.appendChild(h(`<div class="card"><div class="row"><div><div class="eyebrow" style="margin:0">Плановый бюджет</div><div class="num" id="planBudgetBig" style="font-size:26px;font-weight:800;margin-top:4px">${fmt(total)}</div></div>
      <div class="row" style="margin-left:auto;gap:8px">
        <button class="btn sm" id="copyPrev">⇦ Из прошлого месяца</button>
@@ -4102,11 +4183,12 @@ function pgPlan(v){
   v.querySelector("#fromGoals").onclick=()=>suggestPlanFromGoals();
 
   // ---- планирование дохода по источникам + управление источниками ----
-  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход (план)<span class="tag num" id="planIncTag">${fmt(plannedIncome(k))}</span><button class="btn sm ghost" id="addSrc" style="margin-left:auto">＋ источник</button></h3>
+  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход (план)<span class="tag num" id="planIncTag">${fmt(plannedIncomeView(k))}</span><button class="btn sm ghost" id="addSrc" style="margin-left:auto">＋ источник</button></h3>
     <p class="muted" style="font-size:12px;margin:-2px 0 4px">Сколько ждёте с каждого источника в этом месяце. Здесь же управляйте списком источников. «＋» у строки — разовый плановый доход с датой.</p></div>`);
-  incCard.querySelector("#addSrc").onclick=()=>{ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ state.incomeSources.push({id:uid(),name:nm.trim(),amount:0,kind:'labor'}); save(); render_current(); } };
-  if(!state.incomeSources.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет — добавьте кнопкой «＋ источник».</div>`)); }
-  state.incomeSources.forEach(s=>{
+  incCard.querySelector("#addSrc").onclick=()=>{ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const src={id:uid(),name:nm.trim(),amount:0,kind:'labor'}; if(!famView()){ const me=activeMember(); if(me) src.ownerId=me.id; } state.incomeSources.push(src); save(); render_current(); } };
+  const _incList=incForView();
+  if(!_incList.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">${famView()?'Источников дохода нет — добавьте кнопкой «＋ источник».':'Ваших источников дохода нет — добавьте свой кнопкой «＋ источник».'}</div>`)); }
+  _incList.forEach(s=>{
     const sk=s.kind||'labor';
     const row=h(`<div style="padding:9px 2px;border-bottom:1px solid var(--line)">
       <div class="lrow" style="gap:8px"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">💰</div>
@@ -4131,10 +4213,10 @@ function pgPlan(v){
 
   const wirePlan=(row)=>{ const inp=row.querySelector("input[data-plan]"); attachNum(inp); const commitP=(persist)=>{ const val=parseNum(inp.value)||0; const id=inp.dataset.plan; state.plans[k]=state.plans[k]||{}; if(val)state.plans[k][id]=val; else delete state.plans[k][id]; refreshPlanTotals(); if(persist)save(); }; inp.addEventListener("input",()=>commitP(false)); inp.onchange=()=>commitP(true); };
   expenseGroups().forEach(g=>{
-    const cats=catsOf(g.id);
+    const cats=catsOfView(g.id);
     let gTot=0; cats.forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>gTot+=(+plan[su.id]||0)); else gTot+=(+plan[c.id]||0); });
     const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}<span class="tag num" data-gtag="${g.id}">${fmt(gTot)}</span><button class="btn sm ghost" data-addcat style="margin-left:auto">＋ категория</button></h3></div>`);
-    card.querySelector("[data-addcat]").onclick=()=>{ const nm=prompt("Название новой категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ state.categories.push({id:uid(),groupId:g.id,name:nm.trim(),icon:"•"}); save(); render_current(); } };
+    card.querySelector("[data-addcat]").onclick=()=>{ const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const c={id:uid(),groupId:g.id,name:nm.trim(),icon:"•",scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); save(); render_current(); } };
     cats.forEach(c=>{
       const subs=subsOf(c.id);
       const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:6px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}</span>
@@ -4144,20 +4226,22 @@ function pgPlan(v){
         <button class="iconbtn" data-cedit title="переименовать">✎</button>
         <button class="iconbtn" data-cdel title="удалить">🗑</button></div>`);
       chead.querySelector("[data-cplan]").onclick=()=>editPlanned(null,{type:'expense',categoryId:c.id,repeat:false});
-      chead.querySelector("[data-caddsub]").onclick=()=>{ const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ state.subcategories.push({id:uid(),categoryId:c.id,name:nm.trim()}); save(); render_current(); } };
+      chead.querySelector("[data-caddsub]").onclick=()=>{ const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ const su={id:uid(),categoryId:c.id,name:nm.trim(),scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); save(); render_current(); } };
       chead.querySelector("[data-cedit]").onclick=()=>{ const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){ c.name=nm.trim(); save(); render_current(); } };
       chead.querySelector("[data-cdel]").onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); render_current(); } };
       card.appendChild(chead);
       if(subs.length){
         subs.forEach(su=>{
+          const locked=!!(su.liabId||su.goalId);
+          const badge = su.liabId?' <span class="pill" style="padding:1px 6px;font-size:9px">пассив</span>':(su.goalId?' <span class="pill" style="padding:1px 6px;font-size:9px">цель</span>':'');
           const row=h(`<div class="lrow" style="padding-left:8px;gap:6px"><div class="ic" style="width:24px;height:24px;font-size:11px;background:${tint(g.color,10)};color:${g.color}">•</div>
-            <div class="t1" style="flex:1;min-width:0">${esc(su.name)}</div>
+            <div class="t1" style="flex:1;min-width:0">${esc(su.name)}${badge}</div>
             <input class="num right" style="width:110px;padding:8px 10px" inputmode="numeric" placeholder="0" value="${plan[su.id]?plan[su.id]:''}" data-plan="${su.id}">
             <button class="iconbtn" data-splan title="плановый платёж">📅</button>
-            <button class="iconbtn" data-sdel title="удалить">✕</button></div>`);
+            ${locked?'':'<button class="iconbtn" data-sdel title="удалить">✕</button>'}</div>`);
           wirePlan(row);
           row.querySelector("[data-splan]").onclick=()=>editPlanned(null,{type:'expense',categoryId:c.id,subId:su.id,repeat:false});
-          row.querySelector("[data-sdel]").onclick=()=>{ if(confirm("Удалить подкатегорию «"+su.name+"»? История сохранится.")){ su.deleted=true; save(); render_current(); } };
+          const sd=row.querySelector("[data-sdel]"); if(sd) sd.onclick=()=>{ if(confirm("Удалить подкатегорию «"+su.name+"»? История сохранится.")){ su.deleted=true; save(); render_current(); } };
           card.appendChild(row);
         });
       } else {
@@ -4170,14 +4254,14 @@ function pgPlan(v){
   refreshPlanTotals();
 }
 function refreshPlanTotals(){
-  const k=curMonth, plan=state.plans[k]||{}, tot=planMonthTotal(k), inc=plannedIncome(k);
+  const k=curMonth, plan=state.plans[k]||{}, tot=planTotalView(k), inc=plannedIncomeView(k);
   const bb=document.getElementById("planBudgetBig"); if(bb)bb.textContent=fmt(tot);
   const it=document.getElementById("planIncTag"); if(it)it.textContent=fmt(inc);
   const sl=document.getElementById("planSummaryLine");
   if(sl){ sl.innerHTML = tot===0
     ? `<div class="infobox" style="margin:0">Бюджет пуст — впишите лимиты ниже, скопируйте прошлый месяц или нажмите «Собрать из целей». Плановый доход ${fmt(inc)}.</div>`
     : `<div class="linrow"><span class="dim">Плановый доход ${fmt(inc)}</span><span style="color:${tot>inc?'var(--red)':'var(--green)'}">${tot>inc?'Расходы > дохода на '+fmt(tot-inc):'Свободно '+fmt(inc-tot)}</span></div>`; }
-  document.querySelectorAll("[data-gtag]").forEach(el=>{ const gid=el.dataset.gtag; let gt=0; catsOf(gid).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>gt+=(+plan[su.id]||0)); else gt+=(+plan[c.id]||0); }); el.textContent=fmt(gt); });
+  document.querySelectorAll("[data-gtag]").forEach(el=>{ const gid=el.dataset.gtag; let gt=0; catsOfView(gid).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>gt+=(+plan[su.id]||0)); else gt+=(+plan[c.id]||0); }); el.textContent=fmt(gt); });
   document.querySelectorAll("[data-ctag]").forEach(el=>{ let ct=0; subsOf(el.dataset.ctag).forEach(su=>ct+=(+plan[su.id]||0)); el.textContent=fmt(ct); });
 }
 
@@ -4186,13 +4270,17 @@ function refreshPlanTotals(){
    ============================================================ */
 function pgFact(v){
   const k=curMonth; const plan=state.plans[k]||{};
-  v.appendChild(h(`<div class="page-title">План / Факт</div><div class="page-sub">${ymLabel(k)} · выполнение бюджета по категориям</div>`));
+  const family = state.members.length>=2;
+  if(family) v.appendChild(viewToggle());
+  const scopeWord = family ? (famView()?' · семья':' · я') : '';
+  v.appendChild(h(`<div class="page-title">План / Факт</div><div class="page-sub">${ymLabel(k)}${scopeWord} · выполнение бюджета по категориям</div>`));
 
   // ---- доход: план / факт по источникам ----
-  const incPlan=plannedIncome(k), incFact=monthIncome(k);
+  const incPlan=plannedIncomeView(k), incFact=factIncomeView(k);
   const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход · план/факт<span class="tag num" style="color:${incFact>=incPlan&&incPlan>0?'var(--green)':'var(--ink2)'}">${fmt(incFact)} / ${fmt(incPlan)}</span></h3></div>`);
-  if(!state.incomeSources.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет — добавьте в «Настройке».</div>`)); }
-  state.incomeSources.forEach(s=>{
+  const _incList=incForView();
+  if(!_incList.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет — добавьте на «Плане».</div>`)); }
+  _incList.forEach(s=>{
     const pl=incomeSrcPlanned(k,s.id), fc=monthIncomeBySource(k,s.id), rest=Math.max(0,pl-fc), ratio=pl?fc/pl:(fc>0?1:0);
     incCard.appendChild(h(`<div style="padding:10px 2px;border-bottom:1px solid var(--line)">
       <div class="linrow"><span>💰 ${esc(s.name)}</span><span class="num" style="color:${fc>=pl&&pl>0?'var(--green)':'var(--ink2)'};font-weight:600">${(fc>=pl&&pl>0)?'получено':'ждём ещё '+fmt(rest,{bare:true})}</span></div>
@@ -4201,7 +4289,7 @@ function pgFact(v){
     </div>`));
   });
   v.appendChild(incCard);
-  const planT=planMonthTotal(k), factT=monthExpense(k)+monthCapital(k);
+  const planT=planTotalView(k), factT=factExpenseView(k);
   v.appendChild(h(`<div class="eyebrow" style="margin:10px 2px 4px">Расходы · план / факт за месяц</div>`));
   v.appendChild(h(`<div class="grid g3" style="margin-bottom:6px">
     ${kpiCard("План расходов",fmt(planT),"","")}
@@ -4214,8 +4302,9 @@ function pgFact(v){
   const egCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grp1);display:inline-block"></span>Расходы · план/факт</h3></div>`);
   let anyEG=false;
   expenseGroups().forEach(g=>{
-    let pl=0; catsOf(g.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>pl+=(+plan[su.id]||0)); else pl+=(+plan[c.id]||0); });
-    const fc=groupSpend(k,g.id); if(pl===0&&fc===0) return; anyEG=true;
+    const gcats=catsOfView(g.id);
+    let pl=0,fc=0; gcats.forEach(c=>{ const subs=subsOf(c.id); if(subs.length){ subs.forEach(su=>{pl+=(+plan[su.id]||0);fc+=subSpend(k,su.id);}); } else { pl+=(+plan[c.id]||0); fc+=catDirectSpend(k,c.id); } });
+    if(pl===0&&fc===0) return; anyEG=true;
     const ratio=pl?fc/pl:(fc>0?1.5:0), cls=ratio>1?"bad":(ratio>0.9?"warn":""), rest=pl-fc;
     egCard.appendChild(h(`<div style="padding:9px 2px;border-bottom:1px solid var(--line)">
       <div class="linrow"><span>${esc(g.name)}</span><span class="num" style="color:${rest<0?'var(--red)':'var(--ink2)'};font-weight:600">${rest<0?'−'+fmt(-rest,{bare:true})+' сверх':'осталось '+fmt(rest,{bare:true})}</span></div>
@@ -4224,9 +4313,20 @@ function pgFact(v){
     </div>`));
   });
   if(anyEG) v.appendChild(egCard);
+  // Семейный вид: личные траты участников — ТОЛЬКО итоги (детализация приватна)
+  if(famView()){
+    const pmap={}; txnsOfMonth(k).forEach(t=>{ if(t.type!=='expense')return; const c=byId(state.categories,t.categoryId); if(c&&c.scope==='personal'&&c.ownerId){ pmap[c.ownerId]=(pmap[c.ownerId]||0)+(+t.amount||0); } });
+    const ids=Object.keys(pmap).filter(id=>pmap[id]>0);
+    if(ids.length){
+      const pc=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grp3);display:inline-block"></span>Личные траты участников <span class="dim" style="font-weight:500;font-size:12px">итог</span></h3>
+        <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Личные расходы каждого — общей суммой, без детализации (это приватно).</p></div>`);
+      ids.forEach(id=>{ const mm=memberById(id); pc.appendChild(h(`<div class="linrow" style="padding:8px 2px"><span>${esc((mm&&mm.emoji)||'🙂')} ${esc(mm?mm.name:'участник')}</span><span class="num" style="font-weight:600">${fmt(pmap[id],{bare:true})}</span></div>`)); });
+      v.appendChild(pc);
+    }
+  }
 
   expenseGroups().forEach(g=>{
-    const cats=catsOfAll(g.id);
+    const cats=catsOfView(g.id);
     const lines=[];
     cats.forEach(c=>{
       const subs=subsOfAll(c.id);
@@ -4298,7 +4398,38 @@ function lineChart(points,opt){ // points:[{label,v}]
 /* ============================================================
    PAGE: ДАШБОРД ДИРЕКТОРА
    ============================================================ */
+function pgPersonalDash(v, m){
+  const k=curMonth;
+  const inc=memberMonthIncome(m,k), exp=memberMonthExpense(m,k), bal=memberBalance(m);
+  const free=inc-exp, rate=inc>0?Math.max(0,(inc-exp)/inc):0;
+  // средний личный расход за месяц (для запаса в месяцах)
+  const monthsSeen={}; state.txns.forEach(t=>{ if((t.memberId||null)===(m?m.id:null) && t.type==='expense'){ monthsSeen[ym(t.date)]=(monthsSeen[ym(t.date)]||0)+(+t.amount||0); } });
+  const arr=Object.values(monthsSeen); const avgExp=arr.length?arr.reduce((a,x)=>a+x,0)/arr.length:exp;
+  const cushion=avgExp>0?bal/avgExp:0;
+  v.appendChild(h(`<div><div class="page-title">Мои финансы</div><div class="page-sub hide-mobile">${esc(m?m.name:'я')} · ${ymLabel(k)}</div></div>`));
+  v.appendChild(h(`<div class="grid dg4 g2">
+    ${kpiCard("Мой остаток",fmtK(bal),"наличные + счета",bal>=0?"gold":"neg")}
+    ${kpiCard("Моя норма сбережений",pct(rate),"цель > 15–20%",rate>=0.15?"pos":(rate>0?"":"neg"))}
+    ${kpiCard("Мой свободный поток",fmt(free),"мой доход − мои расходы",free>=0?"pos":"neg")}
+    ${kpiCard("Мой запас",cushion>0?cushion.toFixed(1)+" мес":"—","мой остаток ÷ мои траты",cushion>=3?"pos":(cushion>=1?"":"neg"))}
+  </div>`));
+  v.appendChild(h(`<div class="grid g2">
+    ${kpiCard("Мой доход",fmt(inc),ymShort(k),"")}
+    ${kpiCard("Мой расход",fmt(exp),ymShort(k),"")}
+  </div>`));
+  // личные советы
+  const tips=[];
+  if(rate<0.15) tips.push("Постарайтесь откладывать <b>15–20% своего дохода</b>: как только пришли деньги — сразу переведите часть в накопления, живите на остальное.");
+  if(cushion<3 && avgExp>0) tips.push("Соберите <b>личную подушку</b> на 3–6 месяцев ваших трат — это спокойствие на случай непредвиденного.");
+  if(free<0) tips.push("В этом месяце ваши расходы больше дохода. Посмотрите «Факт» → где перерасход, и подрежьте необязательное.");
+  tips.push("Заведите личную <b>цель</b> (отпуск, техника, свой портфель) — приложение посчитает, сколько откладывать в месяц.");
+  v.appendChild(h(`<div class="card"><h3>💡 Советы лично вам</h3><ol style="margin:6px 0 0;padding-left:20px;font-size:13px;line-height:1.7">${tips.map(t=>`<li style="margin-bottom:6px">${t}</li>`).join("")}</ol>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn sm" data-nav="goals">Мои цели →</button><button class="btn sm" data-nav="plan">Мой план →</button></div></div>`));
+}
 function pgDash(v){
+  const family = state.members.length>=2;
+  if(family) v.appendChild(viewToggle());
+  if(family && !famView()) return pgPersonalDash(v, activeMember());
   const k=curMonth, m=metrics(k);
   v.appendChild(h(`<div><div class="page-title">Финансовое здоровье семьи</div><div class="page-sub hide-mobile">${ymLabel(k)}${isClosed(k)?' · <span style="color:var(--gold);font-weight:600">месяц закрыт (зафиксировано)</span>':' · ключевые показатели · нажмите ⓘ у любого'}</div></div>`));
   // top KPIs
@@ -4487,10 +4618,11 @@ function pgBalance(v){
   v.appendChild(ac);
 
   const lc=h(`<div class="card"><h3>Пассивы<span class="tag num">${fmt(L)}</span></h3></div>`);
-  liabArr.slice().sort((a,b)=>b.balance-a.balance).forEach(x=>{
+  const lbal=(x)=>editable?liabBalance(x):(+x.balance||0);
+  liabArr.slice().sort((a,b)=>lbal(b)-lbal(a)).forEach(x=>{
     const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--red) 13%,transparent);color:var(--red)">🔻</div>
       <div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">${esc(x.kind||'')}${x.rate?' · '+pct(x.rate)+' годовых':''}${x.minPayment?' · '+fmt(x.minPayment,{bare:true})+'/мес':''}</div></div>
-      <div class="amt num">${fmt(x.balance,{bare:true})}</div></div>`);
+      <div class="amt num">${fmt(lbal(x),{bare:true})}</div></div>`);
     if(editable){ row.style.cursor="pointer"; row.onclick=()=>editLiab(x.id); }
     lc.appendChild(row);
   });
@@ -4554,13 +4686,13 @@ function editLiab(id){
   openSheet(`<h3>${id?'Пассив':'Новый пассив'}</h3>
     <div class="field"><label>Название</label><input id="ln" value="${esc(x.name)}"></div>
     <div class="field"><label>Тип</label><input id="lk" value="${esc(x.kind||'')}" placeholder="Кредит / Кредитка / Автокредит / Частный долг"></div>
-    <div class="field"><label>Остаток долга, ${CUR}</label><input id="lb" class="num" inputmode="numeric" value="${x.balance||''}"></div>
+    <div class="field"><label>Остаток долга, ${CUR}</label><input id="lb" class="num" inputmode="numeric" value="${id?Math.round(liabBalance(x)):''}"><small class="hint">Текущий остаток. Платежи по телу долга (операции в «Погашение долга») уменьшают его автоматически.</small></div>
     <div class="field"><label>Ставка, % годовых</label><input id="lr" class="num" inputmode="decimal" value="${x.rate?(x.rate*100):''}" placeholder="напр. 33.5"></div>
     <div class="field"><label>Мин. платёж, ${CUR}/мес</label><input id="lp" class="num" inputmode="numeric" value="${x.minPayment||''}"></div>
     <button class="btn primary block" id="save" style="padding:13px">Сохранить</button>
     ${id?'<button class="btn danger block" id="del" style="margin-top:8px">Удалить</button>':''}`,el=>{
-    el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#ln").value.trim(),kind:el.querySelector("#lk").value.trim(),balance:parseFloat(String(el.querySelector("#lb").value).replace(/\s/g,""))||0,rate:(parseFloat(String(el.querySelector("#lr").value).replace(",","."))||0)/100,minPayment:parseFloat(String(el.querySelector("#lp").value).replace(/\s/g,""))||0}; if(!o.name){toast("Введите название");return;} if(id)Object.assign(x,o); else state.liabilities.push({id:uid(),...o}); save(); closeSheet(); render_current(); };
-    if(id)el.querySelector("#del").onclick=()=>{ if(confirm("Удалить пассив?")){state.liabilities=state.liabilities.filter(y=>y.id!==id);save();closeSheet();render_current();} };
+    el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#ln").value.trim(),kind:el.querySelector("#lk").value.trim(),balance:parseFloat(String(el.querySelector("#lb").value).replace(/\s/g,""))||0,rate:(parseFloat(String(el.querySelector("#lr").value).replace(",","."))||0)/100,minPayment:parseFloat(String(el.querySelector("#lp").value).replace(/\s/g,""))||0}; if(!o.name){toast("Введите название");return;} o.anchorDate=todayISOdate(); if(id)Object.assign(x,o); else state.liabilities.push({id:uid(),...o}); syncLiabSubcats(); save(); closeSheet(); toast(id?"Пассив обновлён":"Пассив добавлен — подкатегории «тело» и «проценты» созданы"); render_current(); };
+    if(id)el.querySelector("#del").onclick=()=>{ if(confirm("Удалить пассив? Его подкатегории «тело» и «проценты» тоже удалятся. Прошлые операции останутся в истории.")){state.liabilities=state.liabilities.filter(y=>y.id!==id);syncLiabSubcats();save();closeSheet();render_current();} };
   });
 }
 
@@ -4572,7 +4704,8 @@ function pgDebts(v){
   const k=curMonth; const snap=(state.snapshots||{})[k]; const closed=!!(snap&&snap.liabList);
   const liabArr=closed?snap.liabList:state.liabilities;
   v.appendChild(h(`<div><div class="page-title">Управление долгами</div><div class="page-sub">${ymLabel(k)}${closed?' · <span style="color:var(--gold);font-weight:600">на конец месяца</span>':' · стратегия выхода и календарь'}</div></div>`));
-  const L=liabArr.reduce((a,x)=>a+(+x.balance||0),0), pay=liabArr.reduce((a,x)=>a+(+x.minPayment||0),0), interest=liabArr.reduce((a,x)=>a+((+x.balance||0)*(+x.rate||0)/12),0);
+  const dbal=(x)=>closed?(+x.balance||0):liabBalance(x);
+  const L=liabArr.reduce((a,x)=>a+dbal(x),0), pay=liabArr.reduce((a,x)=>a+(+x.minPayment||0),0), interest=liabArr.reduce((a,x)=>a+(dbal(x)*(+x.rate||0)/12),0);
   v.appendChild(h(`<div class="grid g3">
     ${kpiCard("Всего долгов",fmtK(L),liabArr.length+" обязательств","neg")}
     ${kpiCard("Платежи/мес",fmt(pay),"минимальные","")}
@@ -4580,8 +4713,8 @@ function pgDebts(v){
   </div>`));
 
   // method toggle
-  const withRate=liabArr.filter(x=>x.balance>0);
-  const ordered = withRate.slice().sort((a,b)=> debtMethod==="avalanche" ? (b.rate-a.rate)||(a.balance-b.balance) : (a.balance-b.balance));
+  const withRate=liabArr.filter(x=>dbal(x)>0);
+  const ordered = withRate.slice().sort((a,b)=> debtMethod==="avalanche" ? (b.rate-a.rate)||(dbal(a)-dbal(b)) : (dbal(a)-dbal(b)));
   const card=h(`<div class="card"><h3>Порядок гашения</h3>
     <div class="seg" style="margin-bottom:12px"><button data-m="avalanche" class="${debtMethod==='avalanche'?'active':''}">Лавина (по ставке)</button><button data-m="snowball" class="${debtMethod==='snowball'?'active':''}">Снежный ком (по сумме)</button></div>
     <div class="${debtMethod==='avalanche'?'okbox':'infobox'}" style="margin-bottom:12px">${debtMethod==='avalanche'?'<b>Лавина</b> — гасим сначала самый дорогой по ставке долг. Математически выгоднее всего: минимум переплаты.':'<b>Снежный ком</b> — гасим сначала самый маленький долг. Психологически проще: быстрые победы поддерживают мотивацию.'}</div>
@@ -4592,7 +4725,7 @@ function pgDebts(v){
     card.appendChild(h(`<div class="lrow"><div class="ic" style="background:${hot?'color-mix(in srgb,var(--red) 14%,transparent)':'var(--panel2)'};color:${hot?'var(--red)':'var(--ink2)'};font-weight:800">${i+1}</div>
       <div style="flex:1;min-width:0"><div class="t1">${esc(x.name)} ${hot?'<span class="pill r" style="padding:2px 7px;font-size:10px">дорогой</span>':''}</div>
       <div class="t2">${x.rate?pct(x.rate)+' годовых':'без процентов'}${x.minPayment?' · '+fmt(x.minPayment,{bare:true})+'/мес':''}</div></div>
-      <div class="amt num">${fmt(x.balance,{bare:true})}</div></div>`));
+      <div class="amt num">${fmt(dbal(x),{bare:true})}</div></div>`));
   });
   const first=ordered[0];
   if(first) card.appendChild(h(`<div class="okbox" style="margin-top:12px;margin-bottom:0">▶ Начните с <b>${esc(first.name)}</b>. Любые свободные деньги и досрочные платежи направляйте сюда, по остальным платите минимум. Закрыли — переносите высвободившийся платёж на следующий в списке.</div>`));
@@ -4634,22 +4767,26 @@ function pgDebts(v){
    PAGE: ЦЕЛИ 5 ЛЕТ (обратный бюджет) + движок предложения плана
    ============================================================ */
 function pgGoals(v){
-  v.appendChild(h(`<div class="page-title">Цели на 5 лет</div><div class="page-sub">Финансовый помощник: из цели считает нужный взнос и ведёт к результату</div>`));
-  const totalMonthly=(state.goals||[]).reduce((a,g)=>a+goalMonthlyNeeded(g),0);
-  const free=Math.max(0,expectedIncome()-estimatedMonthlyExpense());
+  const family = state.members.length>=2;
+  if(family) v.appendChild(viewToggle());
+  const scopeWord = family ? (famView()?' · общие цели семьи':' · мои личные цели') : '';
+  v.appendChild(h(`<div class="page-title">Цели на 5 лет</div><div class="page-sub">${famView()?'Финансовый помощник: из цели считает нужный взнос и ведёт к результату':'Ваши личные цели и копилки'}${scopeWord}</div>`));
+  const goals=goalsForView();
+  const totalMonthly=goals.reduce((a,g)=>a+goalMonthlyNeeded(g),0);
+  const free = famView() ? Math.max(0,expectedIncome()-estimatedMonthlyExpense()) : Math.max(0, memberMonthIncome(activeMember(),curMonth)-memberMonthExpense(activeMember(),curMonth));
   v.appendChild(h(`<div class="card"><div class="grid g2">
     ${kpiCard("Нужно откладывать",fmt(totalMonthly),"суммарно по целям в месяц","gold")}
-    ${kpiCard("Свободный поток",fmt(free),"доход − оценка расходов",free>=totalMonthly?"pos":"neg")}
+    ${kpiCard("Свободный поток",fmt(free),famView()?"доход − оценка расходов":"мой доход − мои расходы",free>=totalMonthly?"pos":"neg")}
     </div>
-    ${totalMonthly>free && totalMonthly>0?`<div class="warnbox" style="margin-top:12px;margin-bottom:0">Целям нужно ${fmt(totalMonthly)}/мес, а свободно ${fmt(free)}. Не хватает <b>${fmt(totalMonthly-free)}/мес</b>. Варианты: сдвинуть сроки целей, урезать «Качество жизни», или сначала закрыть дорогие долги (это высвободит поток). Нажмите «Собрать план из целей» — покажу, что ужать.</div>`:(totalMonthly>0?`<div class="okbox" style="margin-top:12px;margin-bottom:0">Свободного потока хватает на все цели. Зафиксируйте план кнопкой ниже.</div>`:'')}
-    <button class="btn primary block" id="mkPlan" style="margin-top:12px" ${state.goals.length?'':'disabled'}>Собрать план из целей →</button>
+    ${totalMonthly>free && totalMonthly>0?`<div class="warnbox" style="margin-top:12px;margin-bottom:0">Целям нужно ${fmt(totalMonthly)}/мес, а свободно ${fmt(free)}. Не хватает <b>${fmt(totalMonthly-free)}/мес</b>. Варианты: сдвинуть сроки целей или урезать необязательные траты.</div>`:(totalMonthly>0?`<div class="okbox" style="margin-top:12px;margin-bottom:0">Свободного потока хватает на все цели.${famView()?' Зафиксируйте план кнопкой ниже.':''}</div>`:'')}
+    ${famView()?`<button class="btn primary block" id="mkPlan" style="margin-top:12px" ${goals.length?'':'disabled'}>Собрать план из целей →</button>`:''}
   </div>`));
-  v.querySelector("#mkPlan").onclick=()=>suggestPlanFromGoals();
+  const mkp=v.querySelector("#mkPlan"); if(mkp) mkp.onclick=()=>suggestPlanFromGoals();
 
-  if(!state.goals.length){
-    v.appendChild(h(`<div class="card"><div class="empty"><div class="big">🧭</div>Целей пока нет.<br>Добавьте первую — например «Закрыть все кредиты», «Подушка 3 млн», «Первый взнос на объект», «Инвестпортфель к 2030».</div></div>`));
+  if(!goals.length){
+    v.appendChild(h(`<div class="card"><div class="empty"><div class="big">🧭</div>${famView()?'Общих целей пока нет.<br>Например «Закрыть все кредиты», «Подушка 3 млн», «Первый взнос».':'Ваших личных целей пока нет.<br>Например «Новый ноутбук», «Отпуск», «Свой инвестпортфель».'}</div></div>`));
   }
-  state.goals.forEach(g=>{
+  goals.forEach(g=>{
     const gc=goalCurrent(g); const need=goalMonthlyNeeded(g); const prog=g.target>0?clamp(gc/g.target,0,1):0;
     const mLeft=g.targetDate?Math.max(0,monthsDiff(curMonth,ym(g.targetDate))):null;
     const card=h(`<div class="card"><h3>${g.recurring?'🐷 ':''}${esc(g.name)}<span class="tag">${g.targetDate?'до '+ymShort(ym(g.targetDate)):'без срока'}${g.recurring?' · ежегодно':''}</span></h3>
@@ -4673,13 +4810,15 @@ function goalSub(g){ return state.subcategories.find(s=>s.goalId===g.id && !s.de
 function syncGoalSubcats(){
   let changed=false;
   (state.goals||[]).forEach(g=>{
+    const wantScope=g.ownerId?'personal':'shared';
     let su=state.subcategories.find(s=>s.goalId===g.id);
-    if(!su){ su={id:uid(),categoryId:SAVE_CAT,name:g.name,goalId:g.id}; state.subcategories.push(su); changed=true; }
-    else { if(su.deleted){su.deleted=false;changed=true;} if(su.name!==g.name){su.name=g.name;changed=true;} if(su.categoryId!==SAVE_CAT){su.categoryId=SAVE_CAT;changed=true;} }
+    if(!su){ su={id:uid(),categoryId:SAVE_CAT,name:g.name,goalId:g.id,scope:wantScope}; if(g.ownerId)su.ownerId=g.ownerId; state.subcategories.push(su); changed=true; }
+    else { if(su.deleted){su.deleted=false;changed=true;} if(su.name!==g.name){su.name=g.name;changed=true;} if(su.categoryId!==SAVE_CAT){su.categoryId=SAVE_CAT;changed=true;} if((su.scope||'shared')!==wantScope){su.scope=wantScope;changed=true;} if(su.ownerId!==(g.ownerId||undefined)){ if(g.ownerId)su.ownerId=g.ownerId; else delete su.ownerId; changed=true; } }
   });
   state.subcategories.forEach(s=>{ if(s.goalId && !s.deleted && !(state.goals||[]).some(g=>g.id===s.goalId)){ s.deleted=true; changed=true; } });
   if(changed) save(false);
 }
+function goalsForView(){ const all=state.goals||[]; if(famView()) return all.filter(g=>!g.ownerId); const me=activeMember(); return all.filter(g=>me&&g.ownerId===me.id); }
 function goalContrib(g){ const su=goalSub(g); if(!su)return 0; const cs=g.cycleStart||"1970-01-01"; return state.txns.filter(t=>t.type==="expense"&&t.subId===su.id&&t.date>=cs).reduce((a,t)=>a+(+t.amount||0),0); }
 function goalCurrent(g){ return (+g.current||0) + goalContrib(g); }
 function goalMonthlyNeeded(g){ if(g.monthlyNeededManual)return +g.monthlyNeeded||0; const left=Math.max(0,(+g.target||0)-goalCurrent(g)); const mLeft=g.targetDate?Math.max(1,monthsDiff(curMonth,ym(g.targetDate))):60; g.monthlyNeeded=Math.ceil(left/mLeft); return g.monthlyNeeded; }
@@ -4693,7 +4832,7 @@ function editGoal(id, preset){
     <div class="field"><label class="row" style="gap:8px"><input type="checkbox" id="grec" style="width:auto" ${g.recurring?'checked':''}> 🐷 Копилка — повторять каждый год (для отпуска, страховки, налогов и т.п.)</label></div>
     <button class="btn primary block" id="save" style="padding:13px">Сохранить</button>
     ${id?'<button class="btn danger block" id="del" style="margin-top:8px">Удалить цель</button>':''}`,el=>{
-    el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#gn").value.trim(),target:parseFloat(String(el.querySelector("#gt").value).replace(/\s/g,""))||0,current:parseFloat(String(el.querySelector("#gc").value).replace(/\s/g,""))||0,targetDate:el.querySelector("#gd").value,recurring:el.querySelector("#grec").checked}; if(!o.name||!o.target){toast("Название и сумма обязательны");return;} if(id)Object.assign(g,o); else state.goals.push({id:uid(),priority:2,cycleStart:todayISOdate(),...o}); save(); syncGoalSubcats(); closeSheet(); toast("Цель сохранена"); render_current(); };
+    el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#gn").value.trim(),target:parseFloat(String(el.querySelector("#gt").value).replace(/\s/g,""))||0,current:parseFloat(String(el.querySelector("#gc").value).replace(/\s/g,""))||0,targetDate:el.querySelector("#gd").value,recurring:el.querySelector("#grec").checked}; if(!o.name||!o.target){toast("Название и сумма обязательны");return;} if(id)Object.assign(g,o); else { const ng={id:uid(),priority:2,cycleStart:todayISOdate(),...o}; if(!famView()){ const me=activeMember(); if(me)ng.ownerId=me.id; } state.goals.push(ng); } save(); syncGoalSubcats(); closeSheet(); toast("Цель сохранена"); render_current(); };
     if(id)el.querySelector("#del").onclick=()=>{ if(confirm("Удалить цель? История взносов сохранится в операциях.")){state.goals=state.goals.filter(x=>x.id!==id);syncGoalSubcats();save();closeSheet();render_current();} };
   });
 }
@@ -4832,7 +4971,7 @@ const CAPITAL_STAGES=[
 ];
 function capitalStage(){
   const ess=avgEssentialMonthly(), reserve=reserveCapital();
-  const highRateDebt=state.liabilities.some(l=>(+l.rate||0)>=0.15 && (+l.balance||0)>0);
+  const highRateDebt=state.liabilities.some(l=>(+l.rate||0)>=0.15 && liabBalance(l)>0);
   const cushion= ess>0? liquidAssets()/ess : (liquidAssets()>0?99:0);
   const sr=metrics(curMonth).savingsRate, fi=fiProgress();
   if(fi>=1)return 6;
@@ -4998,12 +5137,13 @@ const HELP=[
  {icon:"🛡",title:"Защита и синхронизация",body:`<p>Вход — по <b>аккаунту</b> (email + пароль). Данные шифруются вашим паролем по принципу «нулевого знания»: на сервере лежит только зашифрованный вид, прочитать его не можем даже мы.</p>
    <p>Один пароль работает на всех устройствах. Общий семейный бюджет синхронизируется между всеми участниками (правки сливаются по записям — ничего не затирается).</p>
    <p>При регистрации сохраните <b>ключ восстановления</b> — единственный способ вернуть данные, если забудете пароль. Резервная копия — <b>Экспорт JSON</b>; выгрузки в открытом виде, храните надёжно.</p>`,links:[{label:"Аккаунт",route:"settings"}]},
- {icon:"💡",title:"Принципы благосостояния",body:`<p>Коротко о главном:</p>
-   <p>• Платите сначала себе (15–20%), тратьте меньше, чем зарабатываете.</p>
-   <p>• Подушка → гасить дорогие долги → регулярно откладывать → наращивать работающий капитал.</p>
-   <p>• Инвестируйте просто, дёшево и надолго; дайте сложному проценту работать.</p>
-   <p>• Растите доход, но не раздувайте траты. Учите детей на личном примере.</p>
-   <p><b>Поведение важнее математики, а достаточность — тоже богатство.</b></p>`,links:[{label:"Путь к капиталу",route:"capital"}]}
+ {icon:"💡",title:"Принципы благосостояния",body:`<p>Коротко о главном — простыми словами:</p>
+   <p>• <b>Сначала отложите, потом тратьте.</b> Как только пришёл доход, сразу отправьте 15–20% в накопления, а живите на остальное. Не «что останется — отложу», а наоборот.</p>
+   <p>• <b>Тратьте меньше, чем зарабатываете.</b> Это база: расходы за месяц ниже доходов — тогда появляется свободное.</p>
+   <p>• <b>Порядок шагов:</b> сначала подушка на 3–6 месяцев → потом гасите дорогие долги → затем регулярно откладываете → и наращиваете работающий капитал (то, что приносит доход).</p>
+   <p>• <b>Инвестируйте просто и надолго.</b> Регулярность и время важнее «удачного момента» — сложный процент делает основную работу за годы.</p>
+   <p>• <b>Растёт доход — не спешите раздувать траты.</b> Разницу направляйте в капитал. Учите детей на своём примере.</p>
+   <p><b>Спокойное поведение важнее сложных расчётов, а «достаточно» — это тоже богатство.</b></p>`,links:[{label:"Путь к капиталу",route:"capital"}]}
 ];
 function pgHelp(v){
   const cards=HELP; helpIdx=Math.max(0,Math.min(helpIdx,cards.length-1)); const i=helpIdx, c=cards[i];
@@ -5415,7 +5555,7 @@ function buildWorkbookSheets(){
     aRows.push(["ИТОГО","",Math.round(totalAssets()),""]); sheets.push({name:"Активы",rows:aRows}); }
   // Пассивы
   if(state.liabilities.length){ const lRows=[["Название","Тип","Остаток","Ставка, % годовых","Платёж/мес"]];
-    state.liabilities.slice().sort((a,b)=>b.balance-a.balance).forEach(x=>lRows.push([x.name,x.kind||"",Math.round(+x.balance||0),Math.round((+x.rate||0)*1000)/10,Math.round(+x.minPayment||0)]));
+    state.liabilities.slice().sort((a,b)=>liabBalance(b)-liabBalance(a)).forEach(x=>lRows.push([x.name,x.kind||"",Math.round(liabBalance(x)),Math.round((+x.rate||0)*1000)/10,Math.round(+x.minPayment||0)]));
     lRows.push(["ИТОГО","",Math.round(totalLiab()),"",Math.round(totalMinPayment())]); sheets.push({name:"Пассивы",rows:lRows}); }
   // Цели
   if((state.goals||[]).length){ const gRows=[["Цель","Целевая сумма","Накоплено","Срок","Прогресс, %"]];
@@ -6054,6 +6194,7 @@ function bootApp(){
   applyTheme(); applyFont(); setupScrollShrink();
   try{ rolloverSinkingFunds(); }catch(e){}
   try{ syncGoalSubcats(); }catch(e){}
+  try{ syncLiabSubcats(); }catch(e){}
   document.getElementById("gate").classList.remove("show");
   document.getElementById("app").style.visibility="visible";
   renderNav(); renderMe(); render_current();
@@ -6073,7 +6214,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
