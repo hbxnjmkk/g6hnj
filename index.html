@@ -2693,7 +2693,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v5.4";
+const APP_VERSION="v5.5";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3716,6 +3716,29 @@ function pgPersonalToday(v, m){
   </div>`));
   const add=h(`<button class="btn primary block" style="padding:15px;font-size:16px;margin-top:12px">＋ Добавить операцию</button>`);
   add.onclick=()=>openAddTxn(); v.appendChild(add);
+  // Подтвердить плановые на сегодня — только мои
+  const mDue=duePlanned().filter(x=>(x.p.memberId||null)===mid);
+  const mTotal=plannedActive().filter(p=>(p.memberId||null)===mid).length;
+  if(mDue.length||mTotal){
+    const pcard=h(`<div class="card" style="margin-top:12px"><h3>✅ Подтвердить плановые на сегодня ${mDue.length?`<span class="tag">${mDue.length}</span>`:''}</h3></div>`);
+    if(mDue.length){
+      mDue.forEach(({p,date,overdue})=>{
+        const dstr=date.slice(8,10)+"."+date.slice(5,7);
+        const row=h(`<div class="lrow"><div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
+          <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
+          <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">просрочено</span>':''} · ${p.type==='income'?'доход':'расход'}${p.subId?' · '+esc(subName(p.subId)):''}${p.repeat?' · ежемесячно':''}</div></div>
+          <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt(p.amount)}</div>
+          <button class="btn sm primary" data-yes style="margin-left:8px">Да</button>
+          <button class="btn sm" data-no style="margin-left:6px">Нет</button></div>`);
+        row.querySelector("[data-yes]").onclick=()=>{ confirmPlanned(p,date); toast("Подтверждено"); render_current(); };
+        row.querySelector("[data-no]").onclick=()=>{ skipPlanned(p); toast(p.repeat?"Пропущено в этом месяце":"Плановая удалена"); render_current(); };
+        pcard.appendChild(row);
+      });
+    } else {
+      pcard.appendChild(h(`<div class="okbox" style="margin:0;text-align:left">На сегодня всё подтверждено. 👍</div>`));
+    }
+    v.appendChild(pcard);
+  }
   const mid=m?m.id:null;
   const mine=state.txns.filter(t=>(t.memberId||null)===mid && ym(t.date)===k).sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
   const card=h(`<div class="card" style="margin-top:12px"><h3>Мои операции <span class="dim" style="font-weight:500;font-size:13px">${ymShort(k)}</span></h3></div>`);
@@ -4059,6 +4082,7 @@ function editPlanned(id, preset){
         if(!amount||amount<=0){ toast("Введите сумму"); return; }
         if(!draft.categoryId){ toast("Выберите категорию"); return; }
         const label=el.querySelector("#rLabel").value.trim();
+        if(draft.type==="expense" && subsOf(draft.categoryId).length && !draft.subId){ toast("Выберите подкатегорию — плановая должна уходить в конкретную подкатегорию"); return; }
         const subId = draft.type==="expense" ? (draft.subId||null) : null;
         let rec;
         if(draft.repeat){ let day=parseInt(el.querySelector("#rDay").value,10)||1; if(day<1)day=1; if(day>31)day=31; rec={type:draft.type,amount,categoryId:draft.categoryId,subId,repeat:true,day,date:null,label}; }
