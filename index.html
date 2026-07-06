@@ -2693,7 +2693,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v5.5";
+const APP_VERSION="v5.6";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -2813,7 +2813,7 @@ function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||
   if(Array.isArray(s.incomeSources)) s.incomeSources.forEach(x=>{ if(!x.kind) x.kind='labor'; });
   // Гибрид «личное+общее»: поля по умолчанию сохраняют прежнее поведение (всё общее)
   if(Array.isArray(s.members)) s.members.forEach((m,i)=>{ if(!m.accountType) m.accountType=(m.role==='owner'||i===0?'owner':'simple'); if(m.startCash==null) m.startCash=0; if(!m.startCashDate) m.startCashDate='1970-01-01'; });
-  if(Array.isArray(s.categories)) s.categories.forEach(c=>{ if(!c.scope) c.scope='shared'; });
+  if(Array.isArray(s.categories)) s.categories.forEach(c=>{ if(!c.scope) c.scope='shared'; if(c.scope==='personal' && (!c.icon || c.icon==='•')) c.icon='🏷️'; });
   if(Array.isArray(s.subcategories)) s.subcategories.forEach(su=>{ if(!su.scope) su.scope='shared'; });
   if(s.settings && s.settings.withdrawRatePct==null) s.settings.withdrawRatePct=4;
   sanitizeState(s); return s; }
@@ -3556,7 +3556,14 @@ function openAddTxn(preset){
   const part=isParticipant();
   let draft={type:"expense",date:todayISOdate(),amount:"",categoryId:null,subId:null,comment:"",memberId:(part?participantMemberId():curMember()),...(preset||{})};
   const render=()=>{
-    const cats = draft.type==="income" ? state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'})) : frequentCats();
+    const isExp = draft.type!=="income";
+    const _me = activeMember();
+    const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'}));
+    const myC  = isExp ? allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id) : [];
+    const famC = isExp ? allCats.filter(c=>(c.scope||'shared')==='shared') : [];
+    const showCatTabs = isExp && myC.length>0 && famC.length>0;
+    if(showCatTabs && draft.catTab==null) draft.catTab = (draft.categoryId && myC.some(c=>c.id===draft.categoryId)) ? 'mine' : 'family';
+    const cats = !isExp ? allCats : (showCatTabs ? (draft.catTab==='mine'?myC:famC) : allCats);
     const subs = draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
       <div class="sheet-sticky">
@@ -3569,6 +3576,7 @@ function openAddTxn(preset){
       </div>
       <div class="field">
         <label>${draft.type==='income'?'Источник дохода':'Категория'}</label>
+        ${showCatTabs?`<div class="seg" style="margin-bottom:8px"><button data-ctab="mine" class="${draft.catTab==='mine'?'active':''}">🙂 Мои</button><button data-ctab="family" class="${draft.catTab==='family'?'active':''}">👨‍👩‍👧 Семейные</button></div>`:''}
         <div class="opts" id="catOpts">
           ${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}
           ${(!part && draft.type==='income')?`<button class="opt" data-cat="__addsrc">＋ источник</button>`:''}
@@ -3589,7 +3597,8 @@ function openAddTxn(preset){
       <button class="btn primary block" id="saveTxn" style="padding:14px;font-size:16px;margin-top:4px">Сохранить</button>
       <button class="btn ghost block" id="cancelTxn" style="margin-top:8px">Отмена</button>
     `, el=>{
-      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;}render();});
+      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;draft.catTab=null;draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;}render();});
+      el.querySelectorAll("[data-ctab]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;}draft.catTab=b.dataset.ctab;render();});
       el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;} if(b.dataset.cat==="__addsrc"){ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const s={id:uid(),name:nm.trim(),amount:0}; state.incomeSources.push(s); save(); draft.categoryId=s.id; } render(); return; } draft.categoryId=b.dataset.cat;const ss=subsOf(draft.categoryId); if(ss.length>1){ draft.subId=null; render(); openSubPicker(draft.categoryId, draft.subId, (sid)=>{ if(sid){ draft.subId=sid; draft.__focusDate=true; render(); } }); } else { draft.subId=ss.length===1?ss[0].id:null; draft.__focusDate=true; render(); } });
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{ if(b.dataset.sub==="__add"){ const nm=prompt("Название новой подкатегории:"); if(nm&&nm.trim()){ const s={id:uid(),categoryId:draft.categoryId,name:nm.trim()}; state.subcategories.push(s); save(); draft.subId=s.id; } } else { draft.subId=b.dataset.sub; } draft.amount=el.querySelector("#amt").value;draft.comment=el.querySelector("#cm").value;if(el.querySelector("#repChk")){draft.repeat=el.querySelector("#repChk").checked;draft.repDay=el.querySelector("#repDay").value;} render(); });
       el.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{ draft.memberId=b.dataset.who; el.querySelectorAll("[data-who]").forEach(x=>x.classList.toggle("active",x.dataset.who===draft.memberId)); });
@@ -3702,6 +3711,7 @@ function viewToggle(){
 }
 function pgPersonalToday(v, m){
   const k=curMonth;
+  const mid=m?m.id:null;
   const nm=m?m.name:(ACCT.email||'Я');
   v.appendChild(h(`<div><div class="page-title">Мой бюджет</div><div class="page-sub hide-mobile">${esc(nm)} · личные финансы</div></div>`));
   const bal=memberBalance(m), inc=memberMonthIncome(m,k), exp=memberMonthExpense(m,k);
@@ -3739,7 +3749,6 @@ function pgPersonalToday(v, m){
     }
     v.appendChild(pcard);
   }
-  const mid=m?m.id:null;
   const mine=state.txns.filter(t=>(t.memberId||null)===mid && ym(t.date)===k).sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
   const card=h(`<div class="card" style="margin-top:12px"><h3>Мои операции <span class="dim" style="font-weight:500;font-size:13px">${ymShort(k)}</span></h3></div>`);
   if(!mine.length) card.appendChild(h(`<div class="empty" style="padding:16px;text-align:left">Операций пока нет.</div>`));
@@ -4265,7 +4274,7 @@ function pgPlan(v){
     const cats=catsOfView(g.id);
     let gTot=0; cats.forEach(c=>{ const subs=subsOf(c.id); if(subs.length) subs.forEach(su=>gTot+=(+plan[su.id]||0)); else gTot+=(+plan[c.id]||0); });
     const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}<span class="tag num" data-gtag="${g.id}">${fmt(gTot)}</span><button class="btn sm ghost" data-addcat style="margin-left:auto">＋ категория</button></h3></div>`);
-    card.querySelector("[data-addcat]").onclick=()=>{ const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const c={id:uid(),groupId:g.id,name:nm.trim(),icon:"•",scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); save(); render_current(); } };
+    card.querySelector("[data-addcat]").onclick=()=>{ const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const em=(prompt("Эмодзи для категории (по желанию):","🏷️")||"").trim()||"🏷️"; const c={id:uid(),groupId:g.id,name:nm.trim(),icon:em,scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); save(); render_current(); } };
     cats.forEach(c=>{
       const subs=subsOf(c.id);
       const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:6px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}${(famView()&&(c.scope||'shared')==='shared')?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}</span>
