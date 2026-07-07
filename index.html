@@ -2693,7 +2693,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v6.9";
+const APP_VERSION="v7.0";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3099,6 +3099,26 @@ function projCashOut(mm){ const rm=realMonth();
 function freeFlow(k){ return Math.max(0, projIncome(k)-projCashOut(k)); }
 function projConsumption(mm){ const rm=realMonth(); const act=monthExpense(mm); if(mm<rm)return act; const rem=plannedForMonth(mm).filter(p=>p.type==='expense'&&!isCapCat(p.categoryId)).reduce((a,p)=>a+p.amount,0); if(mm===rm)return act+rem; return planItemsForMonth(mm).filter(p=>p.type==='expense'&&!isCapCat(p.categoryId)).reduce((a,p)=>a+p.amount,0); }
 function projCapital(mm){ const rm=realMonth(); const act=monthCapital(mm); if(mm<rm)return act; const rem=plannedForMonth(mm).filter(p=>p.type==='expense'&&isCapCat(p.categoryId)).reduce((a,p)=>a+p.amount,0); if(mm===rm)return act+rem; return planItemsForMonth(mm).filter(p=>p.type==='expense'&&isCapCat(p.categoryId)).reduce((a,p)=>a+p.amount,0); }
+// факт-отток из кэша за месяц (потребление+тело долга+десятина)
+function actualCashOut(mm){ return txnsOfMonth(mm).filter(t=>t.type==='expense'&&reducesCash(t.categoryId,t.subId)).reduce((a,t)=>a+(+t.amount||0),0); }
+// единая линия кэша: прошлое (факт) → текущий (факт+остаток плана) → будущее (план/оценка)
+function forecastSeries(back){
+  const rm=realMonth(); back=(back==null?6:back);
+  let start=addMonths(rm,-back); const fdm=firstDataMonth(); if(fdm>start) start=fdm;
+  const end=addMonths(rm,state.settings.horizon-1);
+  const months=[]; for(let mm=start; mm<=end; mm=addMonths(mm,1)) months.push(mm);
+  let bal=familyCashAsOf(months[0]+"-01");
+  return months.map(mm=>{
+    const past=mm<rm;
+    const yld=(mm>rm && typeof assetCashYieldForMonth==='function')?assetCashYieldForMonth(mm):0;
+    const inc = past ? monthIncome(mm) : projIncome(mm)+yld;
+    const cashOut = past ? actualCashOut(mm) : projCashOut(mm);
+    const allExp = past ? (monthExpense(mm)+monthCapital(mm)) : projExpense(mm);
+    const toCapital = Math.max(0, allExp-cashOut);
+    const delta = inc-cashOut; bal+=delta;
+    return {mm,inc,cashOut,toCapital,delta,balance:bal,past,isCur:mm===rm};
+  });
+}
 
 /* ---------- закрытие месяца ---------- */
 function realMonth(){ return ym(new Date()); }
@@ -3315,8 +3335,8 @@ const NAV=[
   {id:"calendar",name:"Календарь",icon:"📅",grp:"Каждый день"},
   {id:"fact",name:"Факт",icon:"✅",grp:"Каждый день"},
   {id:"dash",name:"Дашборд",icon:"📊",grp:"Управление"},
-  {id:"cashflow",name:"Денежный поток",icon:"🌊",grp:"Управление"},
   {id:"forecast",name:"Прогноз",icon:"🔮",grp:"Управление"},
+  {id:"history",name:"История",icon:"📈",grp:"Управление"},
   {id:"balance",name:"Баланс / Капитал",icon:"⚖️",grp:"Капитал"},
   {id:"debts",name:"Долги",icon:"🔻",grp:"Капитал"},
   {id:"goals",name:"Цели 5 лет",icon:"🧭",grp:"Капитал"},
@@ -3735,10 +3755,10 @@ function editTxn(id){
 function render(){ render_current(); }
 function render_current(){
   document.getElementById("mLbl").textContent=ymShort(curMonth);
-  const mn=document.getElementById("monthNav"); if(mn) mn.style.visibility=(route==="cashflow"||route==="forecast")?"hidden":"visible";
+  const mn=document.getElementById("monthNav"); if(mn) mn.style.visibility=(route==="forecast")?"hidden":"visible";
   if(typeof renderMe==="function") renderMe();
   const v=document.getElementById("view"); v.innerHTML="";
-  ({today:pgToday,ops:pgOps,plan:pgPlan,calendar:pgCalendar,fact:pgFact,dash:pgDash,cashflow:pgCashflow,forecast:pgForecast,balance:pgBalance,debts:pgDebts,goals:pgGoals,capital:pgCapital,help:pgHelp,settings:pgSettings}[route]||pgToday)(v);
+  ({today:pgToday,ops:pgOps,plan:pgPlan,calendar:pgCalendar,fact:pgFact,dash:pgDash,cashflow:pgForecast,forecast:pgForecast,history:pgHistory,balance:pgBalance,debts:pgDebts,goals:pgGoals,capital:pgCapital,help:pgHelp,settings:pgSettings}[route]||pgToday)(v);
 }
 
 /* ============================================================
@@ -4720,7 +4740,7 @@ function pgDash(v){
   v.appendChild(nwCard);
 
   // 12-month cashflow mini
-  const cfCard=h(`<div class="card"><h3>Денежный поток, 12 мес <span class="tag" style="cursor:pointer" data-nav="cashflow">детально →</span></h3></div>`);
+  const cfCard=h(`<div class="card"><h3>Прогноз денег, 12 мес <span class="tag" style="cursor:pointer" data-nav="forecast">детально →</span></h3></div>`);
   const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
   const rows=months.map(mm=>({label:ymShort(mm),values:[{v:projIncome(mm),color:"var(--grpI)"},{v:projConsumption(mm)+projCapital(mm),color:"var(--grp2)"}]}));
   cfCard.appendChild(h(barsChart(rows,{stacked:false})));
@@ -4751,34 +4771,79 @@ function pgCashflow(v){
 /* ============================================================
    PAGE: ПРОГНОЗ и кассовые разрывы
    ============================================================ */
+function planLinesForMonth(mm){
+  const items=planItemsForMonth(mm).filter(p=>p.type==='expense').sort((a,b)=>b.amount-a.amount).slice(0,4);
+  if(!items.length) return '';
+  return '<div class="dim" style="font-size:11px;margin-top:4px">Плановые: '+items.map(p=>esc(p.label)+' '+fmt(p.amount,{bare:true})).join(' · ')+'</div>';
+}
 function pgForecast(v){
-  v.appendChild(h(`<div class="page-title">Прогноз денег</div><div class="page-sub">12 месяцев вперёд · раннее предупреждение о кассовых разрывах</div>`));
-  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
-  const startCash=liquidAssets();
-  let cum=startCash; const proj=[]; let firstGap=null;
-  const goalsMonthly=(state.goals||[]).reduce((a,g)=>a+(+g.monthlyNeeded||0),0);
-  months.forEach(mm=>{ 
-    const rm=realMonth();
-    const inc = projIncome(mm) + (mm>rm?assetCashYieldForMonth(mm):0);
-    const out = projCashOut(mm);
-    const delta = inc - out;
-    cum += delta;
-    if(cum<0 && firstGap===null) firstGap=mm;
-    proj.push({mm,inc,exp:out,delta,cum});
+  v.appendChild(h(`<div class="page-title">Прогноз денег</div><div class="page-sub">Динамика кэша: прошлое (факт) → сегодня → будущее (план)</div>`));
+  const series=forecastSeries(6);
+  const gap=series.find(r=>!r.past && r.balance<0);
+  if(gap) v.appendChild(h(`<div class="warnbox"><b>Возможен кассовый разрыв: ${ymLabel(gap.mm)}.</b> По прогнозу остаток уходит в минус. Заранее подготовьте резерв, перенесите крупные траты или увеличьте доход.</div>`));
+  else v.appendChild(h(`<div class="okbox">Кассовых разрывов в горизонте не видно. Остаток остаётся положительным при текущих допущениях.</div>`));
+  const pts=series.map(r=>({label:ymShort(r.mm),v:r.balance}));
+  v.appendChild(h(`<div class="card"><h3>Остаток кэша по месяцам</h3>${lineChart(pts,{h:180})}<div class="dim" style="font-size:11px;text-align:center;margin-top:2px">слева — факт, справа — прогноз</div></div>`));
+  const card=h(`<div class="card" style="overflow-x:auto"><h3>Помесячно <span class="dim" style="font-weight:500;font-size:12px">нажмите месяц — детали</span></h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Приход</th><th class="right">Остаток</th></tr></thead><tbody id="fcBody"></tbody></table></div>`);
+  const tb=card.querySelector("#fcBody");
+  series.forEach(r=>{
+    const badge = r.past? ' <span class="dim" style="font-size:10px">факт</span>' : (r.isCur? ' <span style="color:var(--gold);font-size:10px">сейчас</span>':'');
+    const row=h(`<tr style="cursor:pointer"><td>${ymShort(r.mm)}${badge}</td><td class="right num">${r.inc?fmt(r.inc,{bare:true}):'—'}</td><td class="right num" style="color:${r.balance<0?'var(--red)':'var(--ink)'};font-weight:600">${fmt(r.balance,{bare:true})}</td></tr>`);
+    const det=h(`<tr style="display:none"><td colspan="3" style="padding:6px 10px;background:var(--panel2)">
+      <div class="linrow" style="font-size:12px"><span class="dim">Приход</span><span class="num" style="color:var(--green)">${fmt(r.inc,{bare:true})}</span></div>
+      <div class="linrow" style="font-size:12px"><span class="dim">Ушло из кэша</span><span class="num">${fmt(r.cashOut,{bare:true})}</span></div>
+      ${r.toCapital>0?`<div class="linrow" style="font-size:12px"><span class="dim">В накопления (остаётся кэсом)</span><span class="num" style="color:var(--gold)">${fmt(r.toCapital,{bare:true})}</span></div>`:''}
+      <div class="linrow" style="font-size:12px"><span class="dim">Δ кэша</span><span class="num" style="color:${r.delta<0?'var(--red)':'var(--green)'}">${fmt(r.delta,{bare:true,plus:true})}</span></div>
+      ${r.past?'':planLinesForMonth(r.mm)}</td></tr>`);
+    row.onclick=()=>{ det.style.display = det.style.display==='none'?'':'none'; };
+    tb.appendChild(row); tb.appendChild(det);
   });
-  if(firstGap) v.appendChild(h(`<div class="warnbox"><b>Возможен кассовый разрыв: ${ymLabel(firstGap)}.</b> По текущему прогнозу накопленный остаток уходит в минус. Заранее подготовьте резерв, перенесите крупные траты (поездки/крупные покупки) или увеличьте доход в этом месяце.</div>`));
-  else v.appendChild(h(`<div class="okbox">Кассовых разрывов в горизонте 12 месяцев не видно. Накопленный остаток остаётся положительным при текущих допущениях.</div>`));
-  const card=h(`<div class="card" style="overflow-x:auto"><h3>Прогноз остатка</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Приход</th><th class="right">Отток</th><th class="right">Δ</th><th class="right">Остаток</th></tr></thead><tbody></tbody></table></div>`);
-  const tb=card.querySelector("tbody");
-  proj.forEach(p=>tb.appendChild(h(`<tr><td>${ymShort(p.mm)}</td><td class="right num">${fmt(p.inc,{bare:true})}</td><td class="right num">${fmt(p.exp,{bare:true})}</td><td class="right num" style="color:${p.delta<0?'var(--red)':'var(--green)'}">${fmt(p.delta,{bare:true,plus:true})}</td><td class="right num" style="color:${p.cum<0?'var(--red)':'var(--ink)'};font-weight:600">${fmt(p.cum,{bare:true})}</td></tr>`)));
   v.appendChild(card);
-  v.appendChild(h(`<div class="infobox">Прогноз ведёт <b>кэш</b>: приход − то, что уходит из кэша (потребление, тело долга, десятина). Взносы в накопления/подушку/инвестиции кэс не покидают — они остаются вашим капиталом. Текущий месяц — факт по сегодня + остаток плана; будущие — план (или оценка). Стартовый остаток = кэш на счетах ${fmt(startCash)}.</div>`));
+  v.appendChild(h(`<div class="infobox">Единая линия: слева — факт по прошедшим месяцам, текущий — факт по сегодня + остаток плана, справа — план (или оценка, если плана нет). Ведётся <b>кэш</b>: приход − то, что уходит (потребление, тело долга, десятина). Взносы в накопления остаются кэсом. Полная ретроспектива по всем показателям — во вкладке «История».</div>`));
 }
 function estimatedMonthlyExpense(){
   const months=[...new Set(state.txns.map(t=>ym(t.date)))];
   if(!months.length) return Math.round(expectedIncome()*0.85);
   const tot=months.reduce((a,k)=>a+monthExpense(k)+monthCapital(k),0);
   return Math.round(tot/months.length);
+}
+let histYear=new Date().getFullYear();
+function pgHistory(v){
+  const year=histYear, rm=realMonth();
+  v.appendChild(h(`<div><div class="page-title">История</div><div class="page-sub">Ключевые показатели семьи помесячно · ${year}</div></div>`));
+  const nav=h(`<div class="row" style="gap:10px;margin-bottom:12px"><button class="btn sm" id="hyPrev" style="flex:1">‹ ${year-1}</button><div style="font-weight:700;align-self:center">${year}</div><button class="btn sm" id="hyNext" style="flex:1">${year+1} ›</button></div>`);
+  nav.querySelector("#hyPrev").onclick=()=>{ histYear=year-1; render_current(); };
+  nav.querySelector("#hyNext").onclick=()=>{ histYear=year+1; render_current(); };
+  v.appendChild(nav);
+  const months=[]; for(let m=1;m<=12;m++) months.push(year+"-"+String(m).padStart(2,"0"));
+  let tInc=0,tExp=0,tCap=0,tChar=0;
+  const rows=months.map(k=>{
+    const inc=monthIncome(k), exp=monthExpense(k), cap=monthCapital(k), giv=groupSpend(k,"g6");
+    const snap=(state.snapshots||{})[k];
+    const net = snap? (snap.net!=null?snap.net:snap.netWorth) : (k===rm? netWorth() : null);
+    const cush = snap? snap.cushionMonths : null;
+    if(inc||exp||cap){ tInc+=inc; tExp+=exp; tCap+=cap; tChar+=giv; }
+    return {k,inc,exp,cap,giv,net,cush,snap,fut:k>rm};
+  });
+  const netPts=rows.filter(r=>r.net!=null).map(r=>({label:MONTHS_RU[+r.k.slice(5,7)-1].slice(0,3),v:r.net}));
+  if(netPts.length>=2) v.appendChild(h(`<div class="card"><h3>Чистый капитал по месяцам</h3>${lineChart(netPts,{h:170})}</div>`));
+  const incExpRows=rows.filter(r=>r.inc||r.exp||r.cap).map(r=>({label:MONTHS_RU[+r.k.slice(5,7)-1].slice(0,3),values:[{v:r.inc,color:"var(--grpI)"},{v:r.exp+r.cap,color:"var(--grp2)"}]}));
+  if(incExpRows.length>=2){ const ic=h(`<div class="card"><h3>Доход и расход по месяцам</h3></div>`); ic.appendChild(h(barsChart(incExpRows,{stacked:false}))); ic.appendChild(h(`<div class="row" style="gap:14px;justify-content:center;margin-top:8px;font-size:12px"><span><span style="background:var(--grpI);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Доход</span><span><span style="background:var(--grp2);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Расход</span></div>`)); v.appendChild(ic); }
+  const card=h(`<div class="card" style="overflow-x:auto"><h3>Помесячно</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Доход</th><th class="right">Расход</th><th class="right">В капитал</th><th class="right">Чистый капитал</th></tr></thead><tbody id="hBody"></tbody></table></div>`);
+  const tb=card.querySelector("#hBody");
+  rows.forEach(r=>{
+    if(r.fut && !(r.inc||r.exp||r.cap||r.net!=null)) return; // будущие пустые — не показываем
+    const tag = r.snap? '<span class="dim" style="font-size:9px"> закрыт</span>' : (r.k===rm?'<span style="color:var(--gold);font-size:9px"> текущий</span>':'');
+    tb.appendChild(h(`<tr><td>${MONTHS_RU[+r.k.slice(5,7)-1]}${tag}</td>
+      <td class="right num" style="color:${r.inc?'var(--green)':'var(--ink3)'}">${r.inc?fmt(r.inc,{bare:true}):'—'}</td>
+      <td class="right num">${r.exp?fmt(r.exp,{bare:true}):'—'}</td>
+      <td class="right num" style="color:${r.cap?'var(--gold)':'var(--ink3)'}">${r.cap?fmt(r.cap,{bare:true}):'—'}</td>
+      <td class="right num" style="font-weight:600">${r.net!=null?fmt(r.net,{bare:true}):'—'}</td></tr>`));
+  });
+  const lastNet=rows.filter(r=>r.net!=null).pop();
+  tb.appendChild(h(`<tr style="border-top:2px solid var(--line2);font-weight:700"><td>Итого ${year}</td><td class="right num" style="color:var(--green)">${fmt(tInc,{bare:true})}</td><td class="right num">${fmt(tExp,{bare:true})}</td><td class="right num" style="color:var(--gold)">${fmt(tCap,{bare:true})}</td><td class="right num">${lastNet?fmt(lastNet.net,{bare:true}):'—'}</td></tr>`));
+  v.appendChild(card);
+  v.appendChild(h(`<div class="infobox">Доход, расход и «в капитал» — по фактическим операциям месяца. «Чистый капитал» фиксируется при <b>закрытии месяца</b> (снимок); для текущего — по сегодняшнему состоянию. Закрывайте месяц кнопкой на «Сегодня»/«Балансе», чтобы история капитала и подушки накапливалась точками.</div>`));
 }
 
 /* ============================================================
@@ -6418,7 +6483,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
