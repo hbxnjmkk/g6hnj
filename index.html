@@ -204,6 +204,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .seg button{flex:1;padding:9px;border-radius:8px;font-weight:600;font-size:13px;color:var(--ink2)}
 .seg button.active{background:var(--gold);color:var(--on-accent)}
 .opts{display:flex;flex-wrap:wrap;gap:8px}
+.tilegrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.tile{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:14px;border-radius:16px;background:var(--panel2);border:1px solid var(--line);cursor:pointer;text-align:left;transition:transform .08s}
+.tile:active{transform:scale(.97)}
+.tileic{width:44px;height:44px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:21px}
+.tilename{font-weight:600;font-size:13.5px;color:var(--ink);line-height:1.25}
 .opt{padding:9px 12px;border-radius:10px;background:var(--panel2);border:1px solid var(--line2);font-size:13px;font-weight:600;color:var(--ink2)}
 .opt.active{border-color:var(--gold);color:var(--gold);background:color-mix(in srgb,var(--gold) 13%,transparent)}
 .amount-big{font-size:34px;font-weight:750;text-align:center;letter-spacing:-1px;padding:6px;background:transparent;border:none;border-bottom:2px solid var(--line2);border-radius:0}
@@ -2693,7 +2698,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.0";
+const APP_VERSION="v7.1";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3482,9 +3487,16 @@ function renderNav(){
 }
 function openMore(){
   const items=NAV.filter(n=>BOTTOM.indexOf(n.id)<0);
-  openSheet('<h3>Разделы</h3><div class="opts" style="flex-direction:column">'+
-    items.map(n=>'<button class="btn block" style="justify-content:flex-start;gap:12px" data-go="'+n.id+'"><span style="font-size:18px">'+n.icon+'</span>'+esc(n.name)+'</button>').join("")+
-    '</div>', el=>{ el.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{closeSheet();go(b.dataset.go);}); });
+  const colorOf=(id)=>({plan:'var(--grp2)',calendar:'#3B82F6',fact:'var(--green)',forecast:'#8B5CF6',history:'#0EA5E9',balance:'var(--gold)',debts:'var(--red)',capital:'var(--gold)',help:'var(--ink3)',settings:'var(--ink3)'}[id]||'var(--gold)');
+  const groups={}; items.forEach(n=>{ const g=n.grp||'Разделы'; (groups[g]=groups[g]||[]).push(n); });
+  let html='<h3 style="margin:0 0 2px">Разделы</h3>';
+  Object.keys(groups).forEach(g=>{
+    html+=`<div class="eyebrow" style="margin:14px 0 9px">${esc(g)}</div><div class="tilegrid">`;
+    groups[g].forEach(n=>{ const c=colorOf(n.id);
+      html+=`<button class="tile" data-go="${n.id}"><span class="tileic" style="background:${tint(c,13)};color:${c}">${n.icon}</span><span class="tilename">${esc(n.name)}</span></button>`; });
+    html+='</div>';
+  });
+  openSheet(html, el=>{ el.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>{closeSheet();go(b.dataset.go);}); });
 }
 
 /* ---------- участник: индикатор в шапке + выбор «кто я» на этом устройстве ---------- */
@@ -3779,17 +3791,16 @@ function pgPersonalToday(v, m){
   const nm=m?m.name:(ACCT.email||'Я');
   v.appendChild(h(`<div><div class="page-title">Мой бюджет</div><div class="page-sub hide-mobile">${esc(nm)} · личные финансы</div></div>`));
   const bal=memberBalance(m), inc=memberMonthIncome(m,k), exp=memberMonthExpense(m,k);
-  const cashCard=h(`<div class="card" style="text-align:center"><div class="dim" style="font-size:12.5px">Мой остаток на сегодня</div>
-    <div class="num" style="font-size:30px;font-weight:800;margin:4px 0;color:${bal<0?'var(--red)':'var(--ink)'}">${fmt(bal,{bare:true})} ${CUR}</div>
-    <button class="btn ghost sm" id="setStart">Указать стартовый остаток</button></div>`);
+  const cashCard=h(`<div class="card" style="text-align:center;position:relative">
+    <button class="iconbtn" id="setStart" title="Изменить стартовый остаток" style="position:absolute;top:8px;right:8px;opacity:.6">✎</button>
+    <div class="dim" style="font-size:12.5px">Мой остаток на сегодня</div>
+    <div class="num" style="font-size:30px;font-weight:800;margin:4px 0 0;color:${bal<0?'var(--red)':'var(--ink)'}">${fmt(bal,{bare:true})} ${CUR}</div></div>`);
   cashCard.querySelector("#setStart").onclick=()=>editMemberCash(m?m.id:null);
   v.appendChild(cashCard);
   v.appendChild(h(`<div class="two-up" style="margin-top:10px">
     <div class="card" style="border-color:color-mix(in srgb,var(--red) 25%,var(--line))"><div class="dim" style="font-size:12px">Мой расход · ${ymShort(k)}</div><div class="num" style="font-size:22px;font-weight:700;color:var(--red)">−${fmt(exp,{bare:true})}</div></div>
     <div class="card" style="border-color:color-mix(in srgb,var(--green) 25%,var(--line))"><div class="dim" style="font-size:12px">Мой приход · ${ymShort(k)}</div><div class="num" style="font-size:22px;font-weight:700;color:var(--green)">+${fmt(inc,{bare:true})}</div></div>
   </div>`));
-  const add=h(`<button class="btn primary block" style="padding:15px;font-size:16px;margin-top:12px">＋ Добавить операцию</button>`);
-  add.onclick=()=>openAddTxn(); v.appendChild(add);
   // Подтвердить плановые на сегодня — только мои
   const mDue=duePlanned().filter(x=>(x.p.memberId||null)===mid);
   const mTotal=plannedActive().filter(p=>(p.memberId||null)===mid).length;
@@ -3832,7 +3843,7 @@ function editMemberCash(mid){
 function pgToday(v){
   if(isParticipant()){ return pgParticipantToday(v); }
   const family = state.members.length>=2;
-  if(family){ v.appendChild(viewToggle()); if(!famView()) return pgPersonalToday(v, activeMember()); }
+  if(family){ if(canFamilyView()){ v.appendChild(viewToggle()); if(!famView()) return pgPersonalToday(v, activeMember()); } else return pgPersonalToday(v, activeMember()); }
   const k=curMonth, m=metrics(k);
   const planTotal=planMonthTotal(k);
   const spent=monthExpense(k);
@@ -3983,7 +3994,7 @@ function dayPlan(k, memberId){
 function pgCalendar(v){
   const k=curMonth;
   const family = state.members.length>=2;
-  if(family) v.appendChild(viewToggle());
+  if(family && canFamilyView()) v.appendChild(viewToggle());
   const personal = family && !famView();
   const dp = personal ? dayPlan(k, activeMember()?activeMember().id:null) : dayPlan(k);
   const scopeWord = family ? (famView()?' · семья':' · я') : '';
@@ -4313,7 +4324,7 @@ function factExpenseView(k){ if(famView()) return monthExpense(k)+monthCapital(k
 function pgPlan(v){
   const k=curMonth; const plan=state.plans[k]||{};
   const family = state.members.length>=2;
-  if(family) v.appendChild(viewToggle());
+  if(family && canFamilyView()) v.appendChild(viewToggle());
   const total=planTotalView(k);
   const doneV = famView()? planDoneTotal(k) : (function(){ let t=0; expenseGroups().forEach(g=>catsOfView(g.id).forEach(c=>{ subsOf(c.id).forEach(su=>t+=planDoneSub(k,su.id)); t+=planItemsForMonth(k).filter(p=>p.type==='expense'&&p.categoryId===c.id&&!p.subId&&plannedDoneInMonth({id:p.id},k)).reduce((a,p)=>a+p.amount,0); })); return t; })();
   const remV = Math.max(0, total-doneV);
@@ -4341,11 +4352,13 @@ function pgPlan(v){
     save(); toast("Скопировано "+src.length+" операций"); render_current();
   };
   v.querySelector("#fromGoals").onclick=()=>suggestPlanFromGoals();
+  v.appendChild(h(`<div class="row" style="justify-content:flex-end;margin-bottom:6px"><button class="btn sm ${planEdit?'primary':'ghost'}" id="planEditToggle">${planEdit?'✓ Готово':'✎ Изменить структуру'}</button></div>`));
+  v.querySelector("#planEditToggle").onclick=()=>{ planEdit=!planEdit; render_current(); };
 
   // ---- планирование дохода по источникам + управление источниками ----
-  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход (план)<span class="tag num" id="planIncTag">${fmt(plannedIncomeView(k))}</span><button class="btn sm ghost" id="addSrc" style="margin-left:auto">＋ источник</button></h3>
-    <p class="muted" style="font-size:12px;margin:-2px 0 4px">Сколько ждёте с каждого источника в этом месяце. Здесь же управляйте списком источников. «＋» у строки — разовый плановый доход с датой.</p></div>`);
-  incCard.querySelector("#addSrc").onclick=()=>{ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const src={id:uid(),name:nm.trim(),amount:0,kind:'labor'}; if(!famView()){ const me=activeMember(); if(me) src.ownerId=me.id; } state.incomeSources.push(src); save(); render_current(); } };
+  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход (план)<span class="tag num" id="planIncTag">${fmt(plannedIncomeView(k))}</span>${planEdit?'<button class="btn sm ghost" id="addSrc" style="margin-left:auto">＋ источник</button>':''}</h3>
+    <p class="muted" style="font-size:12px;margin:-2px 0 4px">Нажмите 📅 у источника — добавить плановый доход с датой.</p></div>`);
+  const _addSrc=incCard.querySelector("#addSrc"); if(_addSrc)_addSrc.onclick=()=>{ const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const src={id:uid(),name:nm.trim(),amount:0,kind:'labor'}; if(!famView()){ const me=activeMember(); if(me) src.ownerId=me.id; } state.incomeSources.push(src); save(); render_current(); } };
   const _incList=incForView();
   if(!_incList.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">${famView()?'Источников дохода нет — добавьте кнопкой «＋ источник».':'Ваших источников дохода нет — добавьте свой кнопкой «＋ источник».'}</div>`)); }
   _incList.forEach(s=>{
@@ -4356,13 +4369,13 @@ function pgPlan(v){
         <input style="flex:1;min-width:0;background:transparent;border:none;padding:0;font-weight:600" value="${esc(s.name)}" data-sname>
         <span class="num" style="font-weight:700;color:var(--grpI)">${fmt(srcTotal,{bare:true})}</span>
         <button class="iconbtn" data-plan title="добавить плановый доход с датой">📅</button>
-        <button class="iconbtn" data-del title="удалить источник">✕</button></div>
-      <div class="chiprow" style="margin-top:6px"><button class="chip ${sk==='labor'?'active':''}" data-k="labor">💪 Труд</button><button class="chip ${sk==='capital'?'active':''}" data-k="capital">📈 Капитал</button></div>
+        ${planEdit?'<button class="iconbtn" data-del title="удалить источник">✕</button>':''}</div>
+      ${planEdit?`<div class="chiprow" style="margin-top:6px"><button class="chip ${sk==='labor'?'active':''}" data-k="labor">💪 Труд</button><button class="chip ${sk==='capital'?'active':''}" data-k="capital">📈 Капитал</button></div>`:''}
     </div>`);
     row.querySelector("[data-sname]").onchange=e=>{ s.name=e.target.value.trim()||s.name; save(); };
     row.querySelector("[data-plan]").onclick=()=>editPlanned(null,{type:'income',categoryId:s.id,repeat:false});
-    row.querySelector("[data-del]").onclick=()=>{ if(confirm("Удалить источник «"+s.name+"»? Прошлые доходы останутся.")){ state.incomeSources=state.incomeSources.filter(x=>x.id!==s.id); save(); render_current(); } };
-    row.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); render_current(); });
+    const _sdel=row.querySelector("[data-del]"); if(_sdel)_sdel.onclick=()=>{ if(confirm("Удалить источник «"+s.name+"»? Прошлые доходы останутся.")){ state.incomeSources=state.incomeSources.filter(x=>x.id!==s.id); save(); render_current(); } };
+    row.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); render_current(); }); // chips only in edit
     // плановые доходы этого источника в этом месяце
     planItemsForMonth(k).filter(p=>p.type==='income'&&p.categoryId===s.id).sort((a,b)=>a.day-b.day).forEach(p=>{ const done=plannedDoneInMonth({id:p.id},k); const pr=h(`<div class="lrow" style="padding:2px 2px 2px 34px;cursor:pointer;opacity:.9"><span style="flex:1;min-width:0;font-size:12px;color:var(--ink2)">${p.repeat?'🔁':'📅'} ${esc(p.label)} · ${String(p.day).padStart(2,'0')}.${k.slice(5,7)}${done?' ✓':''}</span><span class="num" style="font-size:12px;color:var(--ink2)">+${fmt(p.amount,{bare:true})}</span></div>`); pr.onclick=()=>editPlanned(p.id); row.appendChild(pr); });
     incCard.appendChild(row);
@@ -4372,20 +4385,18 @@ function pgPlan(v){
   expenseGroups().forEach(g=>{
     const cats=catsOfView(g.id);
     let gTot=0; cats.forEach(c=>gTot+=planCat(k,c.id));
-    const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}<span class="tag num" data-gtag="${g.id}">${fmt(gTot)}</span><button class="btn sm ghost" data-addcat style="margin-left:auto">＋ категория</button></h3></div>`);
-    card.querySelector("[data-addcat]").onclick=()=>{ const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const em=(prompt("Эмодзи для категории (по желанию):","🏷️")||"").trim()||"🏷️"; const c={id:uid(),groupId:g.id,name:nm.trim(),icon:em,scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); save(); render_current(); } };
+    const card=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:${g.color};display:inline-block"></span>${esc(g.name)}<span class="tag num" data-gtag="${g.id}">${fmt(gTot)}</span>${planEdit?'<button class="btn sm ghost" data-addcat style="margin-left:auto">＋ категория</button>':''}</h3></div>`);
+    const _addcat=card.querySelector("[data-addcat]"); if(_addcat)_addcat.onclick=()=>{ const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const em=(prompt("Эмодзи для категории (по желанию):","🏷️")||"").trim()||"🏷️"; const c={id:uid(),groupId:g.id,name:nm.trim(),icon:em,scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); save(); render_current(); } };
     cats.forEach(c=>{
       const subs=subsOf(c.id);
-      const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:6px;align-items:center;flex-wrap:wrap"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}${(famView()&&(c.scope||'shared')==='shared')?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}</span>
+      const chead=h(`<div class="linrow" style="margin:12px 0 2px;font-weight:600;gap:4px;align-items:center"><span style="flex:1 1 120px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.icon||'•')} ${esc(c.name)}${(famView()&&(c.scope||'shared')==='shared')?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}</span>
         ${subs.length?`<span class="num dim" data-ctag="${c.id}" style="font-size:12px">${fmt(subs.reduce((a,su)=>a+planSub(k,su.id),0))}</span>`:''}
         <button class="iconbtn" data-cplan title="плановый платёж">📅</button>
-        <button class="iconbtn" data-caddsub title="подкатегория">＋</button>
-        <button class="iconbtn" data-cedit title="переименовать">✎</button>
-        <button class="iconbtn" data-cdel title="удалить">🗑</button></div>`);
+        ${planEdit?'<button class="iconbtn" data-caddsub title="подкатегория">＋</button><button class="iconbtn" data-cedit title="переименовать">✎</button><button class="iconbtn" data-cdel title="удалить">🗑</button>':''}</div>`);
       chead.querySelector("[data-cplan]").onclick=()=>editPlanned(null,{type:'expense',categoryId:c.id,repeat:false});
-      chead.querySelector("[data-caddsub]").onclick=()=>{ const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ const su={id:uid(),categoryId:c.id,name:nm.trim(),scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); save(); render_current(); } };
-      chead.querySelector("[data-cedit]").onclick=()=>{ const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){ c.name=nm.trim(); save(); render_current(); } };
-      chead.querySelector("[data-cdel]").onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); render_current(); } };
+      const _caddsub=chead.querySelector("[data-caddsub]"); if(_caddsub)_caddsub.onclick=()=>{ const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ const su={id:uid(),categoryId:c.id,name:nm.trim(),scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); save(); render_current(); } };
+      const _cedit=chead.querySelector("[data-cedit]"); if(_cedit)_cedit.onclick=()=>{ const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){ c.name=nm.trim(); save(); render_current(); } };
+      const _cdel=chead.querySelector("[data-cdel]"); if(_cdel)_cdel.onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); render_current(); } };
       card.appendChild(chead);
       if(subs.length){
         subs.forEach(su=>{
@@ -4396,7 +4407,7 @@ function pgPlan(v){
             <div class="t1" style="flex:1;min-width:0">${esc(su.name)}${badge}${sDone>0?` <span class="dim" style="font-size:10.5px">✓ ${fmt(sDone,{bare:true})}</span>`:''}</div>
             <span class="num" style="font-weight:600;color:${sTot>0?'var(--ink)':'var(--ink3)'}">${sTot>0?fmt(sTot,{bare:true}):'—'}</span>
             <button class="iconbtn" data-splan title="добавить плановую операцию с датой">📅</button>
-            ${locked?'':'<button class="iconbtn" data-sdel title="удалить">✕</button>'}</div>`);
+            ${(locked||!planEdit)?'':'<button class="iconbtn" data-sdel title="удалить">✕</button>'}</div>`);
           row.querySelector("[data-splan]").onclick=()=>editPlanned(null,{type:'expense',categoryId:c.id,subId:su.id,repeat:false});
           const sd=row.querySelector("[data-sdel]"); if(sd) sd.onclick=()=>{ if(confirm("Удалить подкатегорию «"+su.name+"»? История сохранится.")){ su.deleted=true; save(); render_current(); } };
           card.appendChild(row);
@@ -4450,7 +4461,7 @@ function refreshPlanTotals(){
 function pgFact(v){
   const k=curMonth; const plan=state.plans[k]||{};
   const family = state.members.length>=2;
-  if(family) v.appendChild(viewToggle());
+  if(family && canFamilyView()) v.appendChild(viewToggle());
   const scopeWord = family ? (famView()?' · семья':' · я') : '';
   v.appendChild(h(`<div class="page-title">План / Факт</div><div class="page-sub">${ymLabel(k)}${scopeWord} · выполнение бюджета по категориям</div>`));
 
@@ -4629,7 +4640,7 @@ function pgPersonalDash(v, m){
 }
 function pgDash(v){
   const family = state.members.length>=2;
-  if(family) v.appendChild(viewToggle());
+  if(family && canFamilyView()) v.appendChild(viewToggle());
   if(family && !famView()) return pgPersonalDash(v, activeMember());
   const k=curMonth, m=metrics(k);
   v.appendChild(h(`<div><div class="page-title">Финансовое здоровье семьи</div><div class="page-sub hide-mobile">${ymLabel(k)}${isClosed(k)?' · <span style="color:var(--gold);font-weight:600">месяц закрыт (зафиксировано)</span>':' · ключевые показатели · нажмите ⓘ у любого'}</div></div>`));
@@ -4808,6 +4819,7 @@ function estimatedMonthlyExpense(){
   return Math.round(tot/months.length);
 }
 let histYear=new Date().getFullYear();
+let planEdit=false;
 function pgHistory(v){
   const year=histYear, rm=realMonth();
   v.appendChild(h(`<div><div class="page-title">История</div><div class="page-sub">Ключевые показатели семьи помесячно · ${year}</div></div>`));
@@ -5038,7 +5050,7 @@ function pgDebts(v){
    ============================================================ */
 function pgGoals(v){
   const family = state.members.length>=2;
-  if(family) v.appendChild(viewToggle());
+  if(family && canFamilyView()) v.appendChild(viewToggle());
   const scopeWord = family ? (famView()?' · общие цели семьи':' · мои личные цели') : '';
   v.appendChild(h(`<div class="page-title">Цели на 5 лет</div><div class="page-sub">${famView()?'Финансовый помощник: из цели считает нужный взнос и ведёт к результату':'Ваши личные цели и копилки'}${scopeWord}</div>`));
   const goals=goalsForView();
