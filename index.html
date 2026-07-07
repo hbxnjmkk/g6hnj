@@ -9,6 +9,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20viewBox%3D%220%200%2040%2040%22%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%3E%3Crect%20width%3D%2240%22%20height%3D%2240%22%20rx%3D%2211%22%20fill%3D%22%230F6F6E%22/%3E%3Cpath%20d%3D%22M20%2032%20V20%22%20stroke%3D%22%23EAF7F4%22%20stroke-width%3D%222.4%22%20stroke-linecap%3D%22round%22%20fill%3D%22none%22/%3E%3Cpath%20d%3D%22M19.6%2023.5%20C%2015.2%2023%2012.4%2019.6%2012%2014.8%20C%2016.6%2016.6%2019.2%2019.8%2019.6%2023.5%20Z%22%20fill%3D%22%235FBFB7%22/%3E%3Cpath%20d%3D%22M20.4%2023.5%20C%2024.8%2023%2027.6%2019.6%2028%2014.8%20C%2023.4%2016.6%2020.8%2019.8%2020.4%2023.5%20Z%22%20fill%3D%22%235FBFB7%22/%3E%3Cpath%20d%3D%22M20%2020.5%20C%2017.2%2017%2017.2%2012.5%2020%208.8%20C%2022.8%2012.5%2022.8%2017%2020%2020.5%20Z%22%20fill%3D%22%23BFF0EA%22/%3E%3C/svg%3E">
 <script>if("serviceWorker" in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("sw.js").catch(function(){});});}</script>
 <meta name="robots" content="noindex, nofollow, noarchive">
@@ -2715,7 +2716,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.1-design2";
+const APP_VERSION="v7.2-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3014,11 +3015,29 @@ function monthIncome(k){ const t=sumTxns(txnsOfMonth(k),"income"); return t; }
 function monthExpense(k){ // consumption only = expense-type txns whose group is not capital
   return txnsOfMonth(k).filter(t=>t.type==="expense" && (groupOf(t.categoryId)||{}).kind!=="capital").reduce((a,t)=>a+(+t.amount||0),0);
 }
-function monthCapital(k){ return txnsOfMonth(k).filter(t=>t.type==="expense" && (groupOf(t.categoryId)||{}).kind==="capital").reduce((a,t)=>a+(+t.amount||0),0); }
+function monthCapital(k){ return txnsOfMonth(k).filter(t=>t.type==="expense" && (groupOf(t.categoryId)||{}).kind==="capital" && t.categoryId!=="c_debt").reduce((a,t)=>a+(+t.amount||0),0); }
+function monthDebtPrincipal(k){ return txnsOfMonth(k).filter(t=>t.type==="expense" && t.categoryId==="c_debt").reduce((a,t)=>a+(+t.amount||0),0); }
 function groupSpend(k,gid){ return txnsOfMonth(k).filter(t=>t.type==="expense" && (byId(state.categories,t.categoryId)||{}).groupId===gid).reduce((a,t)=>a+(+t.amount||0),0); }
 function catSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid).reduce((a,t)=>a+(+t.amount||0),0); }
 function subSpend(k,sid){ return txnsOfMonth(k).filter(t=>t.subId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
 function catDirectSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid && !t.subId).reduce((a,t)=>a+(+t.amount||0),0); }
+function incomeSrcActual(k,sid){ return txnsOfMonth(k).filter(t=>t.type==='income'&&t.categoryId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
+function planOpApplied(opId,k){
+  const all=planItemsForMonth(k); const p=all.find(x=>x.id===opId); if(!p||p.type!=='expense') return 0;
+  const isSub=!!p.subId;
+  const match=(t)=> t.type==='expense' && (isSub? t.subId===p.subId : (t.categoryId===p.categoryId && !t.subId));
+  const facts=txnsOfMonth(k).filter(match);
+  const peers=all.filter(x=> x.type==='expense' && (isSub? x.subId===p.subId : (x.categoryId===p.categoryId && !x.subId))).sort((a,b)=>(a.day-b.day)||String(a.id).localeCompare(String(b.id)));
+  const direct=(id)=>facts.filter(t=>t.fromPlanned===id).reduce((a,t)=>a+(+t.amount||0),0);
+  const dApplied={}; peers.forEach(x=>{ dApplied[x.id]=Math.min(x.amount, direct(x.id)); });
+  const linkedToExisting=facts.filter(t=>t.fromPlanned && peers.some(x=>x.id===t.fromPlanned)).reduce((a,t)=>a+(+t.amount||0),0);
+  let pool=facts.reduce((a,t)=>a+(+t.amount||0),0) - linkedToExisting;
+  let extra=0;
+  for(const x of peers){ const rem=Math.max(0,x.amount-dApplied[x.id]); const take=Math.max(0,Math.min(rem,pool)); if(x.id===opId){ extra=take; break; } pool-=take; }
+  return Math.min(p.amount, (dApplied[opId]||0)+extra);
+}
+function planOpRemainingById(opId,k){ const p=planItemsForMonth(k).find(x=>x.id===opId); if(!p) return 0; if(p.type==='income'){ return state.txns.some(t=>t.fromPlanned===opId && ym(t.date)===k) ? 0 : p.amount; } return Math.max(0, p.amount-planOpApplied(opId,k)); }
+function planOpInMonth(opId,k){ return planItemsForMonth(k).some(x=>x.id===opId); }
 function fixedSpend(k){ return groupSpend(k,"g1"); }
 function essentialSpend(k){ return groupSpend(k,"g1")+groupSpend(k,"g2")+groupSpend(k,"g3"); } // «нужное» для подушки: обязательные+переменные+семья
 // стабильная оценка «нужных» трат за месяц (для подушки): план на месяц, иначе среднее по прошлым месяцам, иначе текущий
@@ -3825,12 +3844,12 @@ function pgPersonalToday(v, m){
   if(mDue.length||mTotal){
     const pcard=h(`<div class="card" style="margin-top:12px"><h3>Подтвердить плановые на сегодня ${mDue.length?`<span class="tag">${mDue.length}</span>`:''}</h3></div>`);
     if(mDue.length){
-      mDue.forEach(({p,date,overdue})=>{
+      mDue.forEach(({p,date,overdue,remaining})=>{
         const dstr=date.slice(8,10)+"."+date.slice(5,7);
         const row=h(`<div class="lrow"><div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
           <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
           <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">просрочено</span>':''} · ${p.type==='income'?'доход':'расход'}${p.subId?' · '+esc(subName(p.subId)):''}${p.repeat?' · ежемесячно':''}</div></div>
-          <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt(p.amount)}</div>
+          <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt((remaining!=null&&p.type==='expense')?remaining:p.amount)}</div>
           <button class="btn sm primary" data-yes style="margin-left:8px">Да</button>
           <button class="btn sm" data-no style="margin-left:6px">Нет</button></div>`);
         row.querySelector("[data-yes]").onclick=()=>{ confirmPlanned(p,date); toast("Подтверждено"); render_current(); };
@@ -3938,12 +3957,12 @@ function pgToday(v){
   const pcard=h(`<div class="card"><h3>Подтвердить плановые на сегодня ${duep.length?`<span class="tag">${duep.length}</span>`:''}<button class="btn sm ghost" id="planManage" style="margin-left:auto">Плановые</button></h3></div>`);
   pcard.querySelector("#planManage").onclick=openPlannedManager;
   if(duep.length){
-    duep.forEach(({p,date,overdue})=>{
+    duep.forEach(({p,date,overdue,remaining})=>{
       const dstr=date.slice(8,10)+"."+date.slice(5,7);
       const row=h(`<div class="lrow"><div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
         <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
           <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">просрочено</span>':''} · ${p.type==='income'?'доход':'расход'}${p.repeat?' · ежемесячно':''}</div></div>
-        <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt(p.amount)}</div>
+        <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt((remaining!=null&&p.type==='expense')?remaining:p.amount)}</div>
         <button class="btn sm primary" data-yes style="margin-left:8px">Да</button>
         <button class="btn sm" data-no style="margin-left:6px">Нет</button></div>`);
       row.querySelector("[data-yes]").onclick=()=>{ confirmPlanned(p,date); toast("Подтверждено"); render_current(); };
@@ -4091,7 +4110,7 @@ function plannedOpValid(p){
 }
 function plannedActive(){ return (state.planned||[]).filter(p=>p.active!==false && plannedOpValid(p)); }
 // повторяющийся уже проведён в этом месяце?
-function plannedDoneInMonth(p,k){ return state.txns.some(t=>t.fromPlanned===p.id && ym(t.date)===k); }
+function plannedDoneInMonth(p,k){ if(!p||!planOpInMonth(p.id,k)) return false; return planOpRemainingById(p.id,k) <= 0.5; }
 // повторяющийся пропущен («Нет») в этом месяце?
 function plannedSkippedInMonth(p,k){ return Array.isArray(p.skip) && p.skip.includes(k); }
 // «Нет»: разовый — удалить; повторяющийся — сбросить только этот месяц
@@ -4107,8 +4126,8 @@ function plannedDateInMonth(p,k){ if(p.repeat){ return k+"-"+String(Math.min(+p.
 function plannedForMonth(k){
   const out=[];
   plannedActive().forEach(p=>{
-    if(p.repeat){ if(!plannedDoneInMonth(p,k) && !plannedSkippedInMonth(p,k)) out.push({date:plannedDateInMonth(p,k),day:Math.min(+p.day||1,mlenOf(k)),type:p.type,amount:+p.amount||0,categoryId:p.categoryId,subId:p.subId||null,memberId:p.memberId||null,label:p.label||catName(p.categoryId),repeat:true,id:p.id}); }
-    else { if(p.date && ym(p.date)===k && !plannedDoneInMonth(p,k)) out.push({date:p.date,day:+String(p.date).slice(8,10),type:p.type,amount:+p.amount||0,categoryId:p.categoryId,subId:p.subId||null,memberId:p.memberId||null,label:p.label||catName(p.categoryId),repeat:false,id:p.id}); }
+    if(p.repeat){ if(!plannedSkippedInMonth(p,k)){ const rem=planOpRemainingById(p.id,k); if(rem>0.5) out.push({date:plannedDateInMonth(p,k),day:Math.min(+p.day||1,mlenOf(k)),type:p.type,amount:rem,categoryId:p.categoryId,subId:p.subId||null,memberId:p.memberId||null,label:p.label||catName(p.categoryId),repeat:true,id:p.id}); } }
+    else { if(p.date && ym(p.date)===k){ const rem=planOpRemainingById(p.id,k); if(rem>0.5) out.push({date:p.date,day:+String(p.date).slice(8,10),type:p.type,amount:rem,categoryId:p.categoryId,subId:p.subId||null,memberId:p.memberId||null,label:p.label||catName(p.categoryId),repeat:false,id:p.id}); } }
   });
   return out;
 }
@@ -4126,21 +4145,22 @@ function planSub(k,subId){ return planItemsForMonth(k).filter(p=>p.type==='expen
 function planCatDirect(k,catId){ return planItemsForMonth(k).filter(p=>p.type==='expense'&&p.categoryId===catId&&!p.subId).reduce((a,p)=>a+p.amount,0); }
 function planCat(k,catId){ let t=planCatDirect(k,catId); subsOf(catId).forEach(su=>t+=planSub(k,su.id)); return t; }
 // «выполнено» = сумма плановых операций, уже подтверждённых в факт (план от этого не уменьшается — он остаётся, просто помечен выполненным)
-function planDoneTotal(k){ return planItemsForMonth(k).filter(p=>p.type==='expense'&&plannedDoneInMonth({id:p.id},k)).reduce((a,p)=>a+p.amount,0); }
-function planDoneSub(k,subId){ return planItemsForMonth(k).filter(p=>p.type==='expense'&&p.subId===subId&&plannedDoneInMonth({id:p.id},k)).reduce((a,p)=>a+p.amount,0); }
+function planDoneTotal(k){ let t=0; planItemsForMonth(k).filter(p=>p.type==='expense').forEach(p=>t+=planOpApplied(p.id,k)); return t; }
+function planDoneSub(k,subId){ return Math.min(subSpend(k,subId), planSub(k,subId)); }
 // плановые «к подтверждению на сегодня»: наступил день/дата и ещё не проведены (старые → новые)
 function duePlanned(){
   const rm=realMonth(), today=todayISOdate();
   const list=[];
   plannedActive().forEach(p=>{
-    if(p.repeat){ const d=plannedDateInMonth(p,rm); if(d<=today && !plannedDoneInMonth(p,rm) && !plannedSkippedInMonth(p,rm)) list.push({p,date:d,overdue:d<today}); }
-    else { if(p.date && p.date<=today && !plannedDoneInMonth(p,ym(p.date))) list.push({p,date:p.date,overdue:p.date<today}); } // разовый: висит, пока не подтвердят
+    if(p.repeat){ const d=plannedDateInMonth(p,rm); const rem=planOpRemainingById(p.id,rm); if(d<=today && rem>0.5 && !plannedSkippedInMonth(p,rm)) list.push({p,date:d,overdue:d<today,remaining:rem}); }
+    else { if(p.date && p.date<=today){ const rem=planOpRemainingById(p.id,ym(p.date)); if(rem>0.5) list.push({p,date:p.date,overdue:p.date<today,remaining:rem}); } } // разовый: висит, пока факт не покроет
   });
   return list.sort((a,b)=> a.date<b.date?-1:(a.date>b.date?1:0));
 }
 // подтвердить плановый пункт → создать факт-операцию; разовый удаляется
 function confirmPlanned(p,dateStr,amount){
-  const amt=amount!=null?amount:(+p.amount||0);
+  const rem=planOpRemainingById(p.id, ym(dateStr));
+  const amt=amount!=null?amount:(rem>0.5?rem:(+p.amount||0));
   state.txns.push({id:uid(),type:p.type||"expense",date:dateStr,amount:amt,categoryId:p.categoryId,subId:p.subId,comment:(p.label||catName(p.categoryId))+(p.repeat?" (авто)":" (план)"),memberId:p.memberId||curMember(),createdAt:nowISO(),fromPlanned:p.id});
   state.freq[p.categoryId]=(state.freq[p.categoryId]||0)+1;
   save();
@@ -4207,7 +4227,7 @@ function editPlanned(id, preset){
       el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{ cap(); draft.categoryId=b.dataset.cat; const ss=subsOf(draft.categoryId); draft.subId=ss.length===1?ss[0].id:null; render(); });
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{ cap(); draft.subId=b.dataset.sub; render(); });
       el.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{ cap(); draft.repeat=(b.dataset.mode==="repeat"); render(); });
-      el.querySelector("#rCancel").onclick=openPlannedManager;
+      el.querySelector("#rCancel").onclick=()=>closeSheet();
       el.querySelector("#rSave").onclick=()=>{
         const amount=parseFloat(String(el.querySelector("#rAmt").value).replace(/\s/g,"").replace(",",".")); 
         if(!amount||amount<=0){ toast("Введите сумму"); return; }
@@ -4220,9 +4240,9 @@ function editPlanned(id, preset){
         else { const date=el.querySelector("#rDate").value||todayISOdate(); rec={type:draft.type,amount,categoryId:draft.categoryId,subId,repeat:false,day:null,date,label}; }
         if(id){ Object.assign(p,rec); }
         else { state.planned.push({id:uid(),memberId:curMember(),active:true,...rec}); }
-        save(); toast("Сохранено"); openPlannedManager();
+        save(); closeSheet(); render_current(); toast("Плановая сохранена");
       };
-      if(id){ el.querySelector("#rDel").onclick=()=>{ if(confirm("Удалить плановую операцию?")){ state.planned=state.planned.filter(x=>x.id!==id); save(); toast("Удалено"); openPlannedManager(); } }; }
+      if(id){ el.querySelector("#rDel").onclick=()=>{ if(confirm("Удалить плановую операцию?")){ state.planned=state.planned.filter(x=>x.id!==id); save(); closeSheet(); render_current(); toast("Удалено"); } }; }
     });
   };
   render();
@@ -4695,18 +4715,19 @@ function pgDash(v){
   (function(){
     const inc=m.income;
     if(inc>0){
-      const needs=essentialSpend(k), wants=groupSpend(k,"g4"), giving=groupSpend(k,"g6"), savings=monthCapital(k);
-      const leftover=inc-needs-wants-giving-savings;
+      const needs=essentialSpend(k), wants=groupSpend(k,"g4"), giving=groupSpend(k,"g6"), savings=monthCapital(k), debt=monthDebtPrincipal(k);
+      const leftover=inc-needs-wants-giving-savings-debt;
       const seg=(val,color)=> val>0? `<div style="width:${clamp(val/inc*100,0,100)}%;background:${color}"></div>`:'';
       const card=h(`<div class="card"><h3>Куда уходит доход <span class="tag num">${fmt(inc)}</span></h3>
         <div style="display:flex;height:16px;border-radius:8px;overflow:hidden;margin:4px 0 12px;background:var(--line)">
-          ${seg(needs,'var(--grp1)')}${seg(wants,'var(--grp4)')}${seg(giving,'#C77DA6')}${seg(savings,'var(--grp5)')}${leftover>0?seg(leftover,'var(--line2)'):''}
+          ${seg(needs,'var(--grp1)')}${seg(wants,'var(--grp4)')}${seg(giving,'#C77DA6')}${seg(debt,'var(--violet)')}${seg(savings,'var(--grp5)')}${leftover>0?seg(leftover,'var(--line2)'):''}
         </div></div>`);
       const rows=[["Нужное","var(--grp1)",needs,"обязательные+переменные+семья","≈50%"],
                   ["Приятное","var(--grp4)",wants,"качество жизни","≈30%"],
                   ["Пожертвования","#C77DA6",giving,"десятина и благотворительность",""],
-                  ["Сбережения","var(--grp5)",savings,"накопления+инвест.+долг","≈20%"]];
-      rows.forEach(([lbl,c,val,sub,tgt])=>{ if(val<=0 && lbl==="Пожертвования") return;
+                  ["Погашение долга","var(--violet)",debt,"тело кредита",""],
+                  ["Сбережения","var(--grp5)",savings,"накопления+инвестиции","≈20%"]];
+      rows.forEach(([lbl,c,val,sub,tgt])=>{ if(val<=0 && (lbl==="Пожертвования"||lbl==="Погашение долга")) return;
         card.appendChild(h(`<div class="linrow" style="padding:6px 0"><span style="min-width:0"><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:${c};margin-right:7px"></span>${lbl}<span class="dim" style="font-size:11px"> · ${esc(sub)}</span></span><span class="num" style="font-weight:600;white-space:nowrap">${pct(val/inc)}${tgt?` <span class="dim" style="font-weight:400;font-size:11px">${tgt}</span>`:''}</span></div>`)); });
       if(leftover>0.005*inc) card.appendChild(h(`<div class="linrow" style="padding:6px 0"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--line2);margin-right:7px"></span>Не распределено</span><span class="num" style="font-weight:600">${pct(leftover/inc)}</span></div>`));
       else if(leftover<-0.005*inc) card.appendChild(h(`<div class="linrow" style="padding:6px 0;color:var(--red)"><span>Потрачено больше дохода</span><span class="num">−${fmt(-leftover,{bare:true})}</span></div>`));
