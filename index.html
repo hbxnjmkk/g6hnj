@@ -18,13 +18,13 @@
 <script>try{var _t=localStorage.getItem("famfin.theme")||"auto",_a=localStorage.getItem("famfin.accent")||"gold";var _d=_t==="dark"||(_t==="auto"&&matchMedia("(prefers-color-scheme:dark)").matches);var _e=document.documentElement;_e.setAttribute("data-theme",_d?"dark":"light");_e.setAttribute("data-accent",_a);}catch(e){}</script>
 <style>
 :root{
-  --bg:#EEF2F7; --bg2:#FFFFFF; --panel:#FFFFFF; --panel2:#F1F5F9;
-  --line:#E4EAF1; --line2:#D2DBE6;
-  --ink:#1E2B3A; --ink2:#566472; --ink3:#8A98A7;
-  --gold:#D3A23F; --gold2:#BC8C2C; --on-accent:#241905;
-  --teal:#4E9BB8; --green:#3DAA7C; --amber:#D89E45; --red:#D77873; --violet:#9C82D4;
-  --grp1:#6690DE; --grp2:#4FA0BA; --grp3:#4FB78B; --grp4:#A183D2; --grp5:#CF9F44; --grpI:#54B78D;
-  --shadow:0 10px 30px rgba(30,45,66,.14);
+  --bg:#F7F4EC; --bg2:#FFFDF7; --panel:#FFFDF7; --panel2:#F0ECE0;
+  --line:#E3DED0; --line2:#D9D3C3;
+  --ink:#202226; --ink2:#5F646B; --ink3:#8C9099;
+  --gold:#0F6F6E; --gold2:#084C4B; --on-accent:#FFFDF7;
+  --teal:#0F6F6E; --green:#0F6F6E; --amber:#C99A2E; --red:#F26B5E; --violet:#9C82D4;
+  --grp1:#0F6F6E; --grp2:#7FD8D0; --grp3:#C9B98F; --grp4:#F4A6B8; --grp5:#D9B24A; --grpI:#0F6F6E;
+  --shadow:0 16px 40px rgba(32,34,38,.07);
   --r:16px; --r2:12px; --r3:10px;
   --nav-h:64px; --top-h:56px; --sidebar-w:236px;
   --f-num:"SF Mono",ui-monospace,"Roboto Mono",Menlo,Consolas,monospace;
@@ -34,17 +34,20 @@
 
 /* ===== Темы и акценты (пункт 14) ===== */
 html[data-theme="dark"]{
-  --bg:#0E1621; --bg2:#141F2C; --panel:#18242F; --panel2:#20303F;
-  --line:#243444; --line2:#33475C;
-  --ink:#E9EFF6; --ink2:#AAB9C8; --ink3:#7C8C9E;
-  --shadow:0 12px 34px rgba(0,0,0,.5);
+  --bg:#101418; --bg2:#171D22; --panel:#171D22; --panel2:#20282E;
+  --line:#2B353B; --line2:#39454C;
+  --ink:#F4F1E8; --ink2:#AEB7B8; --ink3:#737E82;
+  --gold:#3FB7B3; --gold2:#65D8D2; --on-accent:#06231F;
+  --green:#3FB7B3; --red:#FF7A6F;
+  --grp1:#3FB7B3; --grp2:#7FD8D0; --grp4:#EFA0B2; --grp5:#F1D46A;
+  --shadow:0 20px 50px rgba(0,0,0,.42);
 }
 html[data-accent="blue"]{ --gold:#5486DC; --gold2:#4272CE; --on-accent:#fff }
 html[data-accent="green"]{ --gold:#3DAA7C; --gold2:#2F9068; --on-accent:#fff }
 html[data-accent="violet"]{ --gold:#9C82D4; --gold2:#8266C2; --on-accent:#fff }
-html[data-accent="teal"]{ --gold:#4E9BB8; --gold2:#3E86A4; --on-accent:#fff }
+html[data-accent="teal"]{ --gold:#0F6F6E; --gold2:#084C4B; --on-accent:#FFFDF7 }
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);overflow-x:hidden;max-width:100%;width:100%;touch-action:manipulation;-webkit-text-size-adjust:100%;
-  font-family:-apple-system,"SF Pro Text","SF Pro Display",system-ui,"Segoe UI",Roboto,Inter,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Inter","Roboto",system-ui,"Segoe UI",sans-serif;
   font-size:15px;line-height:1.45;-webkit-font-smoothing:antialiased;overscroll-behavior-y:none}
 body{min-height:100dvh}
 button{font-family:inherit;cursor:pointer;color:inherit;border:none;background:none}
@@ -97,6 +100,10 @@ input[type=checkbox],input[type=radio]{width:auto;flex:none;accent-color:var(--g
 .bottomnav.min button{gap:0;font-size:0}
 .bottomnav.min button .ic{font-size:23px}
 .bottomnav button .ic{font-size:19px;line-height:1}
+.bottomnav button .ic svg,.bottomnav.min button .ic svg{width:23px;height:23px}
+.sidebar .navi .ic svg{width:20px;height:20px}
+.tileic svg{width:22px;height:22px}
+
 .bottomnav button.active{color:var(--gold)}
 .bottomnav .more-wrap{position:relative}
 .fab{position:fixed;right:18px;bottom:calc(var(--nav-h) + env(safe-area-inset-bottom) + 16px);z-index:50;
@@ -2698,7 +2705,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.1";
+const APP_VERSION="v7.1-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3334,20 +3341,20 @@ sheetEl.addEventListener("touchcancel",_shEnd);
 
 /* ---------- navigation ---------- */
 const NAV=[
-  {id:"today",name:"Сегодня",icon:"🎯",grp:"Каждый день"},
-  {id:"ops",name:"Операции",icon:"📝",grp:"Каждый день"},
-  {id:"plan",name:"План",icon:"🎚️",grp:"Каждый день"},
-  {id:"calendar",name:"Календарь",icon:"📅",grp:"Каждый день"},
-  {id:"fact",name:"Факт",icon:"✅",grp:"Каждый день"},
-  {id:"dash",name:"Дашборд",icon:"📊",grp:"Управление"},
-  {id:"forecast",name:"Прогноз",icon:"🔮",grp:"Управление"},
-  {id:"history",name:"История",icon:"📈",grp:"Управление"},
-  {id:"balance",name:"Баланс / Капитал",icon:"⚖️",grp:"Капитал"},
-  {id:"debts",name:"Долги",icon:"🔻",grp:"Капитал"},
-  {id:"goals",name:"Цели 5 лет",icon:"🧭",grp:"Капитал"},
-  {id:"capital",name:"Путь к капиталу",icon:"🌟",grp:"Капитал"},
-  {id:"help",name:"Помощь",icon:"❓",grp:"Система"},
-  {id:"settings",name:"Настройка",icon:"⚙️",grp:"Система"},
+  {id:"today",name:"Сегодня",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',grp:"Каждый день"},
+  {id:"ops",name:"Операции",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',grp:"Каждый день"},
+  {id:"plan",name:"План",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M2 15h4M10 8h4M18 17h4"/></svg>',grp:"Каждый день"},
+  {id:"calendar",name:"Календарь",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>',grp:"Каждый день"},
+  {id:"fact",name:"Факт",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',grp:"Каждый день"},
+  {id:"dash",name:"Дашборд",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',grp:"Управление"},
+  {id:"forecast",name:"Прогноз",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>',grp:"Управление"},
+  {id:"history",name:"История",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',grp:"Управление"},
+  {id:"balance",name:"Баланс / Капитал",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M5 20h14"/><path d="M12 6 4.5 8.2M12 6l7.5 2.2"/><path d="M2 13a2.5 2.5 0 0 0 5 0L4.5 8 2 13zM17 13a2.5 2.5 0 0 0 5 0l-2.5-5L17 13z"/></svg>',grp:"Капитал"},
+  {id:"debts",name:"Долги",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M21 13v4h-4"/></svg>',grp:"Капитал"},
+  {id:"goals",name:"Цели 5 лет",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.6"/></svg>',grp:"Капитал"},
+  {id:"capital",name:"Путь к капиталу",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.9 6.3.7-4.7 4.3 1.3 6.2L12 17.9 6.1 20.4l1.3-6.2L2.7 9.6l6.3-.7z"/></svg>',grp:"Капитал"},
+  {id:"help",name:"Помощь",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.6 1.3c0 1.6-2.2 2-2.2 3.6"/><path d="M12 17.2h.01"/></svg>',grp:"Система"},
+  {id:"settings",name:"Настройка",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M4.4 4.4l2.1 2.1M17.5 17.5l2.1 2.1M2.5 12h3M18.5 12h3M4.4 19.6l2.1-2.1M17.5 6.5l2.1-2.1"/></svg>',grp:"Система"},
 ];
 const BOTTOM=["today","ops","dash","goals"]; // + more
 let route="today";
