@@ -2693,7 +2693,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v6.8";
+const APP_VERSION="v6.9";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -4734,13 +4734,18 @@ function pgDash(v){
 function pgCashflow(v){
   v.appendChild(h(`<div class="page-title">Денежный поток</div><div class="page-sub">Скользящие 12 месяцев · ${ymShort(horizonStart())} – ${ymShort(addMonths(horizonStart(),state.settings.horizon-1))}</div>`));
   const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
-  let cum=0;
-  const card=h(`<div class="card" style="overflow-x:auto"><h3>Операционный, кредитный и капитальный потоки</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Приход</th><th class="right">Потребление</th><th class="right">В капитал</th><th class="right">Δ месяца</th><th class="right">Накоплено</th></tr></thead><tbody id="cfBody"></tbody></table></div>`);
+  const rm=realMonth();
+  let cum=liquidAssets();
+  const card=h(`<div class="card" style="overflow-x:auto"><h3>Приход, отток и накопления по месяцам</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Приход</th><th class="right">Ушло из кэша</th><th class="right">В накопления</th><th class="right">Δ кэша</th><th class="right">Остаток кэша</th></tr></thead><tbody id="cfBody"></tbody></table></div>`);
   const body=card.querySelector("#cfBody");
-  months.forEach(mm=>{ const inc=projIncome(mm), exp=projConsumption(mm), cap=projCapital(mm); const delta=inc-exp-cap; cum+=delta;
-    body.appendChild(h(`<tr><td>${ymShort(mm)}</td><td class="right num" style="color:var(--green)">${inc?fmt(inc,{bare:true}):'—'}</td><td class="right num">${exp?fmt(exp,{bare:true}):'—'}</td><td class="right num" style="color:var(--gold)">${cap?fmt(cap,{bare:true}):'—'}</td><td class="right num" style="color:${delta<0?'var(--red)':'var(--ink)'}">${(inc||exp||cap)?fmt(delta,{bare:true,plus:true}):'—'}</td><td class="right num" style="color:${cum<0?'var(--red)':'var(--ink2)'}">${fmt(cum,{bare:true})}</td></tr>`)); });
+  months.forEach(mm=>{
+    const inc=projIncome(mm)+(mm>rm?(typeof assetCashYieldForMonth==='function'?assetCashYieldForMonth(mm):0):0);
+    const cashOut=projCashOut(mm);
+    const toCapital=Math.max(0, projExpense(mm)-projCashOut(mm)); // накопления/инвестиции — остаются кэсом
+    const delta=inc-cashOut; cum+=delta;
+    body.appendChild(h(`<tr><td>${ymShort(mm)}</td><td class="right num" style="color:var(--green)">${inc?fmt(inc,{bare:true}):'—'}</td><td class="right num">${cashOut?fmt(cashOut,{bare:true}):'—'}</td><td class="right num" style="color:var(--gold)">${toCapital?fmt(toCapital,{bare:true}):'—'}</td><td class="right num" style="color:${delta<0?'var(--red)':'var(--ink)'}">${(inc||cashOut)?fmt(delta,{bare:true,plus:true}):'—'}</td><td class="right num" style="color:${cum<0?'var(--red)':'var(--ink2)'};font-weight:600">${fmt(cum,{bare:true})}</td></tr>`)); });
   v.appendChild(card);
-  v.appendChild(h(`<div class="infobox">Для текущего месяца — факт по сегодня плюс остаток плана; для будущих — план (повторяющиеся и разовые плановые операции), а если плана нет — оценка. Детальный прогноз остатка — во вкладке «Прогноз».</div>`));
+  v.appendChild(h(`<div class="infobox">«Остаток кэша» стартует от текущего кэса ${fmt(liquidAssets())} и совпадает с «Прогнозом денег». <b>Δ кэша = приход − то, что уходит из кэша</b> (потребление, тело долга, десятина). Взносы <b>в накопления</b> кэс не покидают — показаны отдельной колонкой и не уменьшают остаток. Текущий месяц — факт по сегодня + остаток плана; будущие — план, а если плана нет — оценка.</div>`));
 }
 
 /* ============================================================
