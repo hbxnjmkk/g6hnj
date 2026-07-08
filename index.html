@@ -2716,7 +2716,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.2-design2";
+const APP_VERSION="v7.3-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -6020,6 +6020,7 @@ const ACCT = {
   biometricOn(){ try{ return localStorage.getItem(LS_BIO)==="1" && !!localStorage.getItem(LS_FACEID) && !!localStorage.getItem(LS_BIODEK); }catch(e){ return false; } },
   async enableBiometric(){
     if(!this.dek) throw new Error("locked");
+    try{ await requestPersistentStorage(); }catch(e){}
     await faceIdRegister();                                   // создаёт passkey (бросит при отказе/недоступности)
     try{
       localStorage.setItem(LS_BIODEK, _obf(await VaultCrypto.exportDEK(this.dek)));
@@ -6316,9 +6317,10 @@ function showAuthGate(mode){
         catch(e){ btn.disabled=false; btn.textContent='Разблокировать'; msg.textContent='Неверный пароль'; }
       };
       if(bio){
-        const runBio=async()=>{ try{ await ACCT.unlockBiometric(); g.classList.remove('show'); bootApp(); }catch(e){} };
-        box.querySelector('#aFace').onclick=runBio;
-        setTimeout(runBio, 300);
+        const faceBtn=box.querySelector('#aFace');
+        const runBio=async(auto)=>{ if(faceBtn) faceBtn.disabled=true; try{ await ACCT.unlockBiometric(); g.classList.remove('show'); bootApp(); }catch(e){ if(faceBtn) faceBtn.disabled=false; const nm=e&&e.name; if(nm==='NotAllowedError'||nm==='AbortError'){ if(!auto) msg.textContent='Отменено — нажмите ещё раз или войдите паролем'; } else { msg.textContent='Face ID недоступен — войдите паролем'; } } };
+        if(faceBtn) faceBtn.onclick=()=>runBio(false);
+        setTimeout(()=>runBio(true), 400);
       }
     } else if(mode==='join'){
       box.innerHTML='<div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:4px">Вас пригласили в семейный бюджет</div>'+
@@ -6400,9 +6402,9 @@ function showEncGate(env){
   ok.onclick=()=>trySubmit(inp.value); inp.addEventListener("keydown",e=>{ if(e.key==="Enter"){e.preventDefault();trySubmit(inp.value);} });
   if(faceEnc){
     const fb=box.querySelector("#gfaceEnc");
-    const runFace=async()=>{ try{ await faceIdUnlock(); const code=_deobf(localStorage.getItem(LS_ENCFACE)); if(!code) throw 0; await trySubmit(code); }catch(e){} };
-    if(fb) fb.onclick=runFace;
-    faceIdAvailable().then(av=>{ if(av) runFace(); });
+    const runFace=async(auto)=>{ if(fb) fb.disabled=true; try{ await faceIdUnlock(); const code=_deobf(localStorage.getItem(LS_ENCFACE)); if(!code) throw new Error('no-code'); await trySubmit(code); }catch(e){ if(fb) fb.disabled=false; } };
+    if(fb) fb.onclick=()=>runFace(false);
+    faceIdAvailable().then(av=>{ if(av) runFace(true); });
   }
   setTimeout(()=>inp.focus(),150);
 }
@@ -6445,6 +6447,7 @@ window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet
 /* ---------- защита входа: заглушка + опциональная блокировка + Face ID ---------- */
 function bufToB64(buf){ return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
 function b64ToBuf(b){ b=b.replace(/-/g,"+").replace(/_/g,"/"); const s=atob(b); const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i); return a.buffer; }
+async function requestPersistentStorage(){ try{ if(navigator.storage&&navigator.storage.persist){ if(!(await navigator.storage.persisted())) return await navigator.storage.persist(); return true; } }catch(e){} return false; }
 async function faceIdAvailable(){ try{ return !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }catch(e){ return false; } }
 async function faceIdRegister(){
   const cred=await navigator.credentials.create({publicKey:{
@@ -6508,6 +6511,7 @@ function biometricCard(){
 }
 let booted=false;
 function bootApp(){
+  try{ requestPersistentStorage(); }catch(e){}
   if(booted)return; booted=true;
   applyTheme(); applyFont(); setupScrollShrink();
   try{ rolloverSinkingFunds(); }catch(e){}
