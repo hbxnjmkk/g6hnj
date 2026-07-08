@@ -2716,7 +2716,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.3-design2";
+const APP_VERSION="v7.4-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -2836,7 +2836,7 @@ function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||
   if(Array.isArray(s.assets)) s.assets.forEach(a=>{ if(!a.class) a.class=a.liquid?'reserve':'personal'; });
   if(Array.isArray(s.incomeSources)) s.incomeSources.forEach(x=>{ if(!x.kind) x.kind='labor'; });
   // Гибрид «личное+общее»: поля по умолчанию сохраняют прежнее поведение (всё общее)
-  if(Array.isArray(s.members)) s.members.forEach((m,i)=>{ if(!m.accountType) m.accountType=(m.role==='owner'||i===0?'owner':'simple'); if(m.startCash==null) m.startCash=0; if(!m.startCashDate) m.startCashDate='1970-01-01'; });
+  if(Array.isArray(s.members)) s.members.forEach((m,i)=>{ if(!m.accountType) m.accountType=(m.role==='owner'||i===0?'owner':'simple'); if(m.familyAllowed==null) m.familyAllowed=(m.accountType==='full'||m.accountType==='owner'); if(m.startCash==null) m.startCash=0; if(!m.startCashDate) m.startCashDate='1970-01-01'; });
   if(Array.isArray(s.categories)) s.categories.forEach(c=>{ if(!c.scope) c.scope='shared'; if(c.scope==='personal' && (!c.icon || c.icon==='•')) c.icon='🏷️'; });
   if(Array.isArray(s.subcategories)) s.subcategories.forEach(su=>{ if(!su.scope) su.scope='shared'; });
   if(s.settings && s.settings.withdrawRatePct==null) s.settings.withdrawRatePct=4;
@@ -3070,8 +3070,9 @@ function cashLeftToday(k){
 // ---- Гибрид «личное+общее»: переключатель вида и личный баланс ----
 const LS_VIEW="famfin.view";
 let viewScope=(function(){ try{ return localStorage.getItem(LS_VIEW)||'family'; }catch(e){ return 'family'; } })();
-function activeMember(){ return memberById(isParticipant()?participantMemberId():curMember()); }
-function canFamilyView(){ if(isParticipant()){ const m=activeMember(); return !!(m && m.accountType==='full'); } return true; }
+function activeMember(){ return memberById(isJoinedMember()?participantMemberId():curMember()); }
+function isJoinedMember(){ try{ if(localStorage.getItem(LS_PREVIEW)==="1") return true; }catch(e){} return (ACCT&&ACCT.role)==="member"; }
+function canFamilyView(){ if(isJoinedMember()){ const m=activeMember(); return !!(m && m.familyAllowed && m.accountType==='full'); } return true; }
 function famView(){ if(!canFamilyView()) return false; if((state.members||[]).length<2) return true; return viewScope!=='me'; }
 function setViewScope(v){ viewScope=v; try{ localStorage.setItem(LS_VIEW,v); }catch(e){} }
 // Личный баланс участника — производная величина (стартовый кэш + мой доход − мои расходы). Безопасно для слияния устройств.
@@ -3369,6 +3370,8 @@ sheetEl.addEventListener("touchend",_shEnd);
 sheetEl.addEventListener("touchcancel",_shEnd);
 
 /* ---------- navigation ---------- */
+const ICON_ME='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>';
+const ICON_FAM='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:5px"><circle cx="9" cy="8" r="3"/><path d="M2.5 19a6.5 6.5 0 0 1 13 0"/><path d="M16 6.2a3 3 0 0 1 0 5.6M21.5 19a6.2 6.2 0 0 0-4-5.8"/></svg>';
 const NAV=[
   {id:"today",name:"Сегодня",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',grp:"Каждый день"},
   {id:"ops",name:"Операции",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',grp:"Каждый день"},
@@ -3393,7 +3396,7 @@ function horizonStart(){ return ym(new Date()); }
 const SIMPLE_NAV=["today","plan","fact","goals","settings"];
 function isSimpleMode(){ try{ return localStorage.getItem(LS_SIMPLE)==="1"; }catch(e){ return false; } }
 // Роль «Участник»: только ввод + своя история. Owner может включить предпросмотр.
-function isParticipant(){ try{ if(localStorage.getItem(LS_PREVIEW)==="1") return true; }catch(e){} if((ACCT&&ACCT.role)!=="member") return false; const m=memberById(ACCT&&ACCT.memberId); return !m || m.accountType!=='full'; }
+function isParticipant(){ try{ if(localStorage.getItem(LS_PREVIEW)==="1") return true; }catch(e){} if((ACCT&&ACCT.role)!=="member") return false; const m=memberById(ACCT&&ACCT.memberId); return !m || !(m.familyAllowed && m.accountType==='full'); }
 function participantMemberId(){ if(ACCT&&ACCT.memberId&&memberById(ACCT.memberId)) return ACCT.memberId; return curMember(); }
 // QR как SVG-строка (офлайн, без внешних запросов) — для ссылки-приглашения
 function qrSVG(text, cell, margin){ try{ const q=window.qrcode(0,'M'); q.addData(String(text)); q.make(); return q.createSvgTag({cellSize:cell||4, margin:(margin==null?4:margin), scalable:true}); }catch(e){ return ''; } }
@@ -3411,14 +3414,14 @@ function openInviteSheet(presetLabel){
     <div class="field"><label>Имя участника</label>
       <div class="opts" id="invLabels">${labels.map(n=>`<button class="opt ${presetLabel===n?'active':''}" data-lbl="${esc(n)}">${esc(n)}</button>`).join('')}<button class="opt" data-lbl="__new">＋ Другое имя</button></div>
       <input id="invName" placeholder="имя участника" autocomplete="off" style="margin-top:8px;${(labels.length&&presetLabel==null)||presetLabel!=null?'display:none':''}"></div>
-    <div class="field"><label>Тип аккаунта</label>
-      <div class="opts" id="invType"><button class="opt active" data-type="simple">Упрощённый</button><button class="opt" data-type="full">Полный</button></div>
-      <small class="hint" id="invTypeHint">Упрощённый: свой кэш, траты и личное планирование, без семейной аналитики и баланса.</small></div>
+    <div class="field"><label>Доступ участника</label>
+      <div class="opts" id="invType"><button class="opt active" data-acc="full">Видит семью · может переключать режим</button><button class="opt" data-acc="simple">Только свой бюджет</button></div>
+      <small class="hint" id="invTypeHint">С доступом к семье: личные финансы + семейный вид (общий бюджет, капитал, долги, цели); участник сам переключается между упрощённым и полным режимом.</small></div>
     <button class="btn primary block" id="invMake" style="padding:13px">Создать ссылку-приглашение</button>
     <div id="invOut" style="margin-top:12px"></div>`, el=>{
     let chosen = presetLabel!=null ? presetLabel : (labels.length ? null : '');
-    let acctType='simple';
-    el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{ el.querySelectorAll("[data-type]").forEach(x=>x.classList.remove("active")); b.classList.add("active"); acctType=b.dataset.type; el.querySelector("#invTypeHint").textContent = acctType==='simple' ? "Упрощённый: свой кэш, траты и личное планирование, без семейной аналитики и баланса." : "Полный: личные финансы плюс семейный вид (общий бюджет, капитал, долги, цели). Чужое личное — только итогом."; });
+    let access='full';
+    el.querySelectorAll("[data-acc]").forEach(b=>b.onclick=()=>{ el.querySelectorAll("[data-acc]").forEach(x=>x.classList.remove("active")); b.classList.add("active"); access=b.dataset.acc; el.querySelector("#invTypeHint").textContent = access==='simple' ? "Только свой бюджет: свой кэш, траты и личное планирование. Без семейной аналитики и без переключения на полный режим." : "С доступом к семье: личные финансы + семейный вид (общий бюджет, капитал, долги, цели); участник сам переключается между упрощённым и полным режимом."; });
     const nameInp=el.querySelector("#invName");
     el.querySelectorAll("[data-lbl]").forEach(b=>b.onclick=()=>{
       el.querySelectorAll("[data-lbl]").forEach(x=>x.classList.remove("active")); b.classList.add("active");
@@ -3431,8 +3434,9 @@ function openInviteSheet(presetLabel){
       ensureOwnerLabel();   // у владельца появляется своя метка → включается вид «Я/Семья»
       // метка участника + тип аккаунта (тип прочитает клиент участника после присоединения)
       let mem=(state.members||[]).find(x=>String(x.name).trim().toLowerCase()===name.toLowerCase());
-      if(!mem){ mem={id:uid(),name,emoji:'🙂',color:MEMBER_COLORS[(state.members||[]).length%MEMBER_COLORS.length],accountType:acctType,startCash:0,startCashDate:todayISOdate()}; state.members=state.members||[]; state.members.push(mem); }
-      mem.accountType=acctType; save();
+      const fam=(access==='full'); const acctType=fam?'full':'simple';
+      if(!mem){ mem={id:uid(),name,emoji:'🙂',color:MEMBER_COLORS[(state.members||[]).length%MEMBER_COLORS.length],accountType:acctType,familyAllowed:fam,startCash:0,startCashDate:todayISOdate()}; state.members=state.members||[]; state.members.push(mem); }
+      mem.accountType=acctType; mem.familyAllowed=fam; save();
       const btn=el.querySelector("#invMake"); btn.disabled=true; btn.textContent="Создаём…";
       try{
         const {token,secret}=await ACCT.createInvite(name,72);
@@ -3538,6 +3542,7 @@ function openMore(){
 /* ---------- участник: индикатор в шапке + выбор «кто я» на этом устройстве ---------- */
 function renderMe(){
   const btn=document.getElementById("meBtn"), ico=document.getElementById("meIco");
+  if(isJoinedMember()){ if(btn) btn.style.display="none"; return; } else if(btn) btn.style.display="";
   const m=memberById(curMember());
   if(m){ ico.textContent=m.emoji||"👤"; btn.style.borderColor=tint(m.color,45);
     if(!btn.querySelector(".nm")){ const s=document.createElement("span"); s.className="nm"; btn.appendChild(s); }
@@ -3688,7 +3693,7 @@ function openAddTxn(preset){
       </div>
       <div class="field">
         <label>${draft.type==='income'?'Источник дохода':'Категория'}</label>
-        ${showCatTabs?`<div class="seg" style="margin-bottom:8px"><button data-ctab="mine" class="${draft.catTab==='mine'?'active':''}">🙂 Мои</button><button data-ctab="family" class="${draft.catTab==='family'?'active':''}">👨‍👩‍👧 Семейные</button></div>`:''}
+        ${showCatTabs?`<div class="seg" style="margin-bottom:8px"><button data-ctab="mine" class="${draft.catTab==='mine'?'active':''}">${ICON_ME}Мои</button><button data-ctab="family" class="${draft.catTab==='family'?'active':''}">${ICON_FAM}Семейные</button></div>`:''}
         <div class="opts" id="catOpts">
           ${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}
           ${(!part && draft.type==='income')?`<button class="opt" data-cat="__addsrc">＋ источник</button>`:''}
@@ -3765,14 +3770,23 @@ function editTxn(id){
   const t=byId(state.txns,id); if(!t)return;
   let draft={...t};
   const render=()=>{
-    const cats = draft.type==="income" ? state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'})) : frequentCats(); const subs=draft.categoryId?subsOf(draft.categoryId):[];
+    const isExp = draft.type!=="income"; const _me=activeMember();
+    const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'}));
+    const myC  = isExp ? allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id) : [];
+    const famC = isExp ? allCats.filter(c=>(c.scope||'shared')==='shared') : [];
+    const showCatTabs = isExp && myC.length>0 && famC.length>0;
+    if(showCatTabs && draft.catTab==null) draft.catTab=(draft.categoryId && myC.some(c=>c.id===draft.categoryId))?'mine':'family';
+    const cats = !isExp ? allCats : (showCatTabs ? (draft.catTab==='mine'?myC:famC) : allCats);
+    const subs=draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
       <div class="sheet-sticky">
       <h3>Операция</h3>
       <div class="seg" style="margin-bottom:12px"><button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button><button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button></div>
       <input class="amount-big num" id="amt" inputmode="decimal" value="${esc(String(draft.amount))}">
       </div>
-      <div class="field"><label>${draft.type==='income'?'Источник дохода':'Категория'}</label><div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}</div></div>
+      <div class="field"><label>${draft.type==='income'?'Источник дохода':'Категория'}</label>
+        ${showCatTabs?`<div class="seg" style="margin-bottom:8px"><button data-ctab="mine" class="${draft.catTab==='mine'?'active':''}">${ICON_ME}Мои</button><button data-ctab="family" class="${draft.catTab==='family'?'active':''}">${ICON_FAM}Семейные</button></div>`:''}
+        <div class="opts">${cats.map(c=>`<button class="opt ${draft.categoryId===c.id?'active':''}" data-cat="${c.id}">${esc(c.icon||'•')} ${esc(c.name)}</button>`).join("")}</div></div>
       ${subs.length?`<div class="field"><label>Подкатегория</label><div class="opts">${subs.map(s=>`<button class="opt ${draft.subId===s.id?'active':''}" data-sub="${s.id}">${esc(s.name)}</button>`).join("")}</div></div>`:''}
       <div class="field"><label>Дата</label><input type="date" id="dt" value="${draft.date}"></div>
       ${state.members.length?`<div class="field"><label>Кто</label><div class="opts">${state.members.map(m=>`<button class="opt ${draft.memberId===m.id?'active':''}" data-who="${m.id}">${esc(m.emoji||'👤')} ${esc(m.name)}</button>`).join("")}</div></div>`:''}
@@ -3780,7 +3794,8 @@ function editTxn(id){
       <button class="btn primary block" id="upd" style="padding:13px;margin-top:4px">Сохранить</button>
       <button class="btn danger block" id="del" style="margin-top:8px">Удалить операцию</button>
     `,el=>{
-      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;render();});
+      el.querySelectorAll("[data-type]").forEach(b=>b.onclick=()=>{draft.type=b.dataset.type;draft.categoryId=null;draft.subId=null;draft.catTab=null;render();});
+      el.querySelectorAll("[data-ctab]").forEach(b=>b.onclick=()=>{draft.amount=el.querySelector("#amt").value;draft.comment=(el.querySelector("#cm")||{}).value;draft.catTab=b.dataset.ctab;render();});
       el.querySelectorAll("[data-cat]").forEach(b=>b.onclick=()=>{draft.categoryId=b.dataset.cat;draft.subId=null;render();});
       el.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{draft.subId=b.dataset.sub;render();});
       el.querySelectorAll("[data-who]").forEach(b=>b.onclick=()=>{draft.memberId=b.dataset.who;el.querySelectorAll("[data-who]").forEach(x=>x.classList.toggle("active",x.dataset.who===draft.memberId));});
@@ -5487,10 +5502,26 @@ function participantAccountCard(){
     <div class="okbox" style="margin-bottom:10px">Вход: <b>${esc(ACCT.email||'—')}</b>${nm?' · метка «'+esc(nm)+'»':''}</div>
     <div class="row" style="gap:8px;flex-wrap:wrap">
       <button class="btn" id="pPass">🔑 Сменить пароль</button>
+      <button class="btn" id="pLeave">Покинуть семью</button>
       <button class="btn danger" id="pOut">Выйти</button>
-    </div></div>`);
+    </div>
+    <p class="muted" style="font-size:11.5px;margin-top:8px">Вы можете сменить только свой пароль и отвязать себя от семьи. Пароли, ключи восстановления и участники владельца вам недоступны.</p></div>`);
   c.querySelector("#pPass").onclick=openChangePassword;
+  c.querySelector("#pLeave").onclick=()=>{ if(confirm("Покинуть общий семейный бюджет? Вы выйдете из аккаунта на этом устройстве. Ваши прошлые операции останутся у владельца.")){ try{ if(ACCT.leaveFamily) ACCT.leaveFamily(); }catch(e){} ACCT.logout(); } };
   c.querySelector("#pOut").onclick=()=>{ if(confirm("Выйти из аккаунта на этом устройстве?")) ACCT.logout(); };
+  return c;
+}
+function participantModeCard(){
+  const mid=participantMemberId(); const m=mid?memberById(mid):null;
+  if(!m || !m.familyAllowed) return null;
+  const full=m.accountType==='full';
+  const c=h(`<div class="card"><h3>Режим сервиса</h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Упрощённый — только ваш личный бюджет. Полный — плюс семейный вид (общий бюджет, капитал, долги, цели).</p><div class="seg"><button data-am="simple" class="${!full?'active':''}">Упрощённый</button><button data-am="full" class="${full?'active':''}">Полный</button></div></div>`);
+  c.querySelectorAll("[data-am]").forEach(b=>b.onclick=()=>{ m.accountType=b.dataset.am==='full'?'full':'simple'; save(); try{setViewScope(m.accountType==='full'?'family':'me');}catch(e){} toast(m.accountType==='full'?'Полный режим включён':'Упрощённый режим'); render_current(); });
+  return c;
+}
+function participantDataCard(){
+  const c=h(`<div class="card"><h3>Мои данные</h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Можно выгрузить только свои операции. Импорт и сброс данных участнику недоступны.</p><button class="btn block" id="expOwn" style="padding:11px">⬇ Экспорт моих операций (JSON)</button></div>`);
+  c.querySelector("#expOwn").onclick=exportOwnJSON;
   return c;
 }
 function cloudCard(){
@@ -5719,6 +5750,7 @@ function pgSettings(v){
   bar.querySelectorAll("[data-tab]").forEach(b=>b.onclick=()=>{ settingsTab=b.dataset.tab; render_current(); });
   v.appendChild(bar);
   const body=h(`<div></div>`); v.appendChild(body);
+  const joined=isJoinedMember();
   const tabAppend=(t,el)=>{ if(settingsTab===t) body.appendChild(el); };
   // Предпросмотр режима участника (owner) / выход из него
   const prevOn=(function(){try{return localStorage.getItem(LS_PREVIEW)==="1";}catch(e){return false;}})();
@@ -5766,13 +5798,14 @@ function pgSettings(v){
   dc.querySelector("#exp").onclick=exportJSON;
   dc.querySelector("#imp").onclick=()=>dc.querySelector("#impFile").click();
   dc.querySelector("#impFile").onchange=importJSON;
-  if(!part) v.appendChild(dc);
+  if(!joined) v.appendChild(dc); else v.appendChild(participantDataCard());
 
   // Облако (аккаунт) — синхронизация через сервер, E2E «один пароль»
-  tabAppend("account", isParticipant()?participantAccountCard():cloudCard());
-  if(!isParticipant()) tabAppend("account", familyMembersCard());
-  if(!isParticipant()) tabAppend("account", biometricCard());
-  if(!isParticipant()){
+  tabAppend("account", joined?participantAccountCard():cloudCard());
+  if(joined){ const mc=participantModeCard(); if(mc) tabAppend("account", mc); }
+  if(!joined) tabAppend("account", familyMembersCard());
+  tabAppend("account", biometricCard());
+  if(!joined){
   tabAppend("account", h(`<div class="card"><h3>Почта и уведомления <span class="pill" style="margin-left:auto">скоро</span></h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Подтверждение регистрации и письма для сброса пароля. Подключим на следующем шаге.</p></div>`));
   tabAppend("account", h(`<div class="card"><h3>Оплата и подписка <span class="pill" style="margin-left:auto">скоро</span></h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Тариф Pro, способы оплаты и история платежей появятся здесь (Фаза 2).</p></div>`));
   }
@@ -5791,11 +5824,12 @@ function pgSettings(v){
       btn.onclick=()=>{ if(!ok())return; try{localStorage.removeItem(LS_KEY);localStorage.removeItem(LS_ENCFACE);}catch(e){} state=seedState(); __lastSaved=_clone(state); save(false); closeSheet(); toast("Все данные удалены"); render_current(); };
     });
   };
-  if(!part) v.appendChild(rc);
+  if(!joined) v.appendChild(rc);
 
   v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">ДомФин · данные остаются у вас</p>`));
 }
 function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="7ya-fin-"+todayISOdate()+".json"; a.click(); toast("Экспортировано"); }
+function exportOwnJSON(){ const mid=participantMemberId(); const mine=(state.txns||[]).filter(t=>t.memberId===mid); const data={exportedBy:(ACCT&&ACCT.email)||null,memberId:mid,txns:mine}; const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="мои-операции-"+todayISOdate()+".json"; a.click(); toast("Экспортировано"); }
 
 /* ---------- Экспорт в Excel (.xlsx) без внешних библиотек ---------- */
 function xmlEsc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&apos;"}[c])); }
