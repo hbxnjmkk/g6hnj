@@ -354,6 +354,11 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 </style>
 </head>
 <body>
+<div id="bootSplash" style="position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#F7F4EC;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',sans-serif">
+  <svg width="72" height="72" viewBox="0 0 40 40" style="border-radius:18px"><rect width="40" height="40" rx="11" fill="#0F6F6E"/><path d="M20 32 V20" stroke="#EAF7F4" stroke-width="2.4" stroke-linecap="round" fill="none"/><path d="M19.6 23.5 C 15.2 23 12.4 19.6 12 14.8 C 16.6 16.6 19.2 19.8 19.6 23.5 Z" fill="#5FBFB7"/><path d="M20.4 23.5 C 24.8 23 27.6 19.6 28 14.8 C 23.4 16.6 20.8 19.8 20.4 23.5 Z" fill="#5FBFB7"/><path d="M20 20.5 C 17.2 17 17.2 12.5 20 8.8 C 22.8 12.5 22.8 17 20 20.5 Z" fill="#BFF0EA"/></svg>
+  <div style="width:26px;height:26px;border:3px solid #d9d3c3;border-top-color:#0F6F6E;border-radius:50%;animation:bspin .8s linear infinite"></div>
+  <style>@keyframes bspin{to{transform:rotate(360deg)}}@media(prefers-color-scheme:dark){#bootSplash{background:#101418!important}#bootSplash div{border-color:#2b353b;border-top-color:#3FB7B3}}</style>
+</div>
 <div id="app">
   <div class="topbar">
     <div class="brand"><svg viewBox="0 0 40 40" width="24" height="24" style="border-radius:9px;display:block" aria-hidden="true"><rect width="40" height="40" rx="11" fill="#0F6F6E"/><path d="M20 32 V20" stroke="#EAF7F4" stroke-width="2.4" stroke-linecap="round" fill="none"/><path d="M19.6 23.5 C 15.2 23 12.4 19.6 12 14.8 C 16.6 16.6 19.2 19.8 19.6 23.5 Z" fill="#5FBFB7"/><path d="M20.4 23.5 C 24.8 23 27.6 19.6 28 14.8 C 23.4 16.6 20.8 19.8 20.4 23.5 Z" fill="#5FBFB7"/><path d="M20 20.5 C 17.2 17 17.2 12.5 20 8.8 C 22.8 12.5 22.8 17 20 20.5 Z" fill="#BFF0EA"/></svg><span>ДомФин</span></div>
@@ -2716,7 +2721,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.4-design2";
+const APP_VERSION="v7.6-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -3414,14 +3419,11 @@ function openInviteSheet(presetLabel){
     <div class="field"><label>Имя участника</label>
       <div class="opts" id="invLabels">${labels.map(n=>`<button class="opt ${presetLabel===n?'active':''}" data-lbl="${esc(n)}">${esc(n)}</button>`).join('')}<button class="opt" data-lbl="__new">＋ Другое имя</button></div>
       <input id="invName" placeholder="имя участника" autocomplete="off" style="margin-top:8px;${(labels.length&&presetLabel==null)||presetLabel!=null?'display:none':''}"></div>
-    <div class="field"><label>Доступ участника</label>
-      <div class="opts" id="invType"><button class="opt active" data-acc="full">Видит семью · может переключать режим</button><button class="opt" data-acc="simple">Только свой бюджет</button></div>
-      <small class="hint" id="invTypeHint">С доступом к семье: личные финансы + семейный вид (общий бюджет, капитал, долги, цели); участник сам переключается между упрощённым и полным режимом.</small></div>
+    <small class="hint" style="display:block;margin:-4px 0 10px">Новый участник по умолчанию видит только свой бюджет. Доступ к семье включается позже переключателем в «Настройки → Аккаунт → Семья и участники».</small>
     <button class="btn primary block" id="invMake" style="padding:13px">Создать ссылку-приглашение</button>
     <div id="invOut" style="margin-top:12px"></div>`, el=>{
     let chosen = presetLabel!=null ? presetLabel : (labels.length ? null : '');
-    let access='full';
-    el.querySelectorAll("[data-acc]").forEach(b=>b.onclick=()=>{ el.querySelectorAll("[data-acc]").forEach(x=>x.classList.remove("active")); b.classList.add("active"); access=b.dataset.acc; el.querySelector("#invTypeHint").textContent = access==='simple' ? "Только свой бюджет: свой кэш, траты и личное планирование. Без семейной аналитики и без переключения на полный режим." : "С доступом к семье: личные финансы + семейный вид (общий бюджет, капитал, долги, цели); участник сам переключается между упрощённым и полным режимом."; });
+    let access='simple';
     const nameInp=el.querySelector("#invName");
     el.querySelectorAll("[data-lbl]").forEach(b=>b.onclick=()=>{
       el.querySelectorAll("[data-lbl]").forEach(x=>x.classList.remove("active")); b.classList.add("active");
@@ -3481,6 +3483,14 @@ function familyMembersCard(){
       const inv=row.querySelector("[data-invite]"); if(inv) inv.onclick=()=>openInviteSheet(m.name);
       const unl=row.querySelector("[data-unlink]"); if(unl) unl.onclick=()=>{ if(confirm("Отвязать «"+m.name+"» от семьи? Аккаунт участника потеряет доступ к общему бюджету. Метка и прошлые операции останутся.")){ ACCT.revokeMember(unl.dataset.unlink).then(()=>{toast("Участник отвязан"); render_current();}).catch(()=>toast("Не удалось отвязать")); } };
       list.appendChild(row);
+      if(!me){
+        const fa=!!m.familyAllowed;
+        const tog=h(`<div style="padding:2px 2px 10px 44px">
+          <button class="btn sm ${fa?'primary':''}" data-fam style="min-width:190px;justify-content:center">${fa?'Видит семью':'Только свой бюджет'}</button>
+          <div class="hint" style="font-size:11px;margin-top:4px">${fa?'Участник видит общий бюджет и сам переключает упрощённый/полный режим.':'Участник видит только свой личный бюджет, без доступа к семье.'}</div></div>`);
+        tog.querySelector("[data-fam]").onclick=()=>{ m.familyAllowed=!m.familyAllowed; if(!m.familyAllowed) m.accountType='simple'; save(); toast(m.familyAllowed?'«'+m.name+'» теперь видит семью':'«'+m.name+'» — только свой бюджет'); render_current(); };
+        list.appendChild(tog);
+      }
     });
     if(!(state.members||[]).length) list.innerHTML='<div class="dim" style="font-size:12px;padding:2px">Пока никого. Добавьте участника кнопкой ниже, затем пригласите под ним члена семьи.</div>';
     if(offline) list.appendChild(h('<p class="muted" style="font-size:11.5px;margin-top:6px">Статус семьи недоступен (нет связи с сервером) — показаны метки; приглашения временно недоступны.</p>'));
@@ -6279,6 +6289,7 @@ function startAuthFlow(){
   showAuthGate('welcome');
 }
 function showAuthGate(mode){
+  try{ var _bs=document.getElementById("bootSplash"); if(_bs) _bs.remove(); }catch(e){}
   const g=document.getElementById("gate"), box=document.getElementById("gbox");
   g.classList.add("show"); mode=mode||'welcome';
   const V='<div class="gver">'+APP_VERSION+'</div>';
@@ -6336,7 +6347,7 @@ function showAuthGate(mode){
       const bio=ACCT.biometricOn();
       box.innerHTML='<div style="font-size:14px;color:var(--ink3);text-align:center">Разблокировка данных</div>'+
         '<div style="font-size:14px;text-align:center;margin:4px 0 10px"><b>'+esc(ACCT.email||'')+'</b></div>'+
-        (bio?'<button class="gbtn2" id="aFace" type="button">🙂 Войти по Face ID</button><div style="text-align:center;font-size:12px;color:var(--ink3);margin:8px 0 6px">или паролем</div>':'')+
+        (bio?'<button class="gbtn2" id="aFace" type="button" style="background:var(--gold);color:var(--on-accent);border:none;font-weight:600;padding:14px;font-size:16px"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:8px"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M9 10.5v1M15 10.5v1M12 10v3l-1 1"/><path d="M9.5 15.5s1 .8 2.5 .8 2.5-.8 2.5-.8"/></svg>Войти по Face ID</button><div style="text-align:center;font-size:12px;color:var(--ink3);margin:10px 0 6px">или войдите паролем</div>':'')+
         '<input id="aPw" type="password" autocomplete="current-password" placeholder="пароль" style="width:100%">'+
         '<div id="aMsg" class="gmsg"></div>'+
         '<button class="gbtn2" id="aGo" type="button">Разблокировать</button>'+
@@ -6354,7 +6365,7 @@ function showAuthGate(mode){
         const faceBtn=box.querySelector('#aFace');
         const runBio=async(auto)=>{ if(faceBtn) faceBtn.disabled=true; try{ await ACCT.unlockBiometric(); g.classList.remove('show'); bootApp(); }catch(e){ if(faceBtn) faceBtn.disabled=false; const nm=e&&e.name; if(nm==='NotAllowedError'||nm==='AbortError'){ if(!auto) msg.textContent='Отменено — нажмите ещё раз или войдите паролем'; } else { msg.textContent='Face ID недоступен — войдите паролем'; } } };
         if(faceBtn) faceBtn.onclick=()=>runBio(false);
-        setTimeout(()=>runBio(true), 400);
+        setTimeout(()=>runBio(true), 60);
       }
     } else if(mode==='join'){
       box.innerHTML='<div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:4px">Вас пригласили в семейный бюджет</div>'+
@@ -6546,6 +6557,7 @@ function biometricCard(){
 let booted=false;
 function bootApp(){
   try{ requestPersistentStorage(); }catch(e){}
+  try{ var _bs=document.getElementById("bootSplash"); if(_bs) _bs.remove(); }catch(e){}
   if(booted)return; booted=true;
   applyTheme(); applyFont(); setupScrollShrink();
   try{ rolloverSinkingFunds(); }catch(e){}
@@ -6576,6 +6588,7 @@ try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.me
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 ACCT.boot().then(()=>{
+  try{ setTimeout(function(){var b=document.getElementById("bootSplash"); if(b) b.remove();}, 8000); }catch(e){}
   if(__encEnv){ showEncGate(__encEnv); return; }  // устаревший путь: локальные данные под старым кодом
   startAuthFlow();
 });
