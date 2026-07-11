@@ -150,6 +150,7 @@ input[type=checkbox],input[type=radio]{width:auto;flex:none;accent-color:var(--g
 .chiprow::-webkit-scrollbar{display:none}
 .chip{flex:none;padding:8px 13px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);font-size:13px;font-weight:600;color:var(--ink2);white-space:nowrap}
 .chip.active{background:color-mix(in srgb,var(--gold) 14%,transparent);border-color:var(--gold);color:var(--gold)}
+.chip.mini{padding:4px 11px;font-size:11.5px;font-weight:600}
 
 /* KPI */
 .kpi{background:linear-gradient(160deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--r2);padding:13px 14px;min-width:0}
@@ -2721,7 +2722,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.6-design2";
+const APP_VERSION="v7.7-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -2963,7 +2964,7 @@ const subsOf=cid=>state.subcategories.filter(s=>s.categoryId===cid && !s.deleted
 const subsOfAll=cid=>state.subcategories.filter(s=>s.categoryId===cid);
 const catsOf=gid=>state.categories.filter(c=>c.groupId===gid && !c.deleted);
 // Гибрид: видимость категорий/дохода по виду «Я / Семья»
-function catScopeVisible(c){ if((c.scope||'shared')==='shared') return famView(); const me=activeMember(); return !famView() && !!(me && c.ownerId===me.id); }
+function catScopeVisible(c){ const me=activeMember(); if((c.scope||'shared')==='shared'){ if(famView()) return true; if(!me) return false; return plannedActive().some(p=>p.categoryId===c.id && (p.memberId||null)===me.id) || (state.txns||[]).some(t=>t.categoryId===c.id && (t.memberId||null)===me.id); } return !famView() && !!(me && c.ownerId===me.id); }
 function catsOfView(gid){ return catsOf(gid).filter(catScopeVisible); }
 function catsForEntry(){ const me=activeMember(); return expenseCats().filter(c=>(c.scope||'shared')==='shared' || (c.scope==='personal' && me && c.ownerId===me.id)); }
 function incForView(){ if(famView()) return state.incomeSources; const me=activeMember(); return state.incomeSources.filter(s=>me && s.ownerId===me.id); }
@@ -3024,9 +3025,9 @@ function monthCapital(k){ return txnsOfMonth(k).filter(t=>t.type==="expense" && 
 function monthDebtPrincipal(k){ return txnsOfMonth(k).filter(t=>t.type==="expense" && t.categoryId==="c_debt").reduce((a,t)=>a+(+t.amount||0),0); }
 function groupSpend(k,gid){ return txnsOfMonth(k).filter(t=>t.type==="expense" && (byId(state.categories,t.categoryId)||{}).groupId===gid).reduce((a,t)=>a+(+t.amount||0),0); }
 function catSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid).reduce((a,t)=>a+(+t.amount||0),0); }
-function subSpend(k,sid){ return txnsOfMonth(k).filter(t=>t.subId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
-function catDirectSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid && !t.subId).reduce((a,t)=>a+(+t.amount||0),0); }
-function incomeSrcActual(k,sid){ return txnsOfMonth(k).filter(t=>t.type==='income'&&t.categoryId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
+function subSpend(k,sid){ const m=planFilterMember(); return txnsOfMonth(k).filter(t=>t.subId===sid && (!m||(t.memberId||null)===m)).reduce((a,t)=>a+(+t.amount||0),0); }
+function catDirectSpend(k,cid){ const m=planFilterMember(); return txnsOfMonth(k).filter(t=>t.categoryId===cid && !t.subId && (!m||(t.memberId||null)===m)).reduce((a,t)=>a+(+t.amount||0),0); }
+function incomeSrcActual(k,sid){ const m=planFilterMember(); return txnsOfMonth(k).filter(t=>t.type==='income'&&t.categoryId===sid && (!m||(t.memberId||null)===m)).reduce((a,t)=>a+(+t.amount||0),0); }
 function planOpApplied(opId,k){
   const all=planItemsForMonth(k); const p=all.find(x=>x.id===opId); if(!p||p.type!=='expense') return 0;
   const isSub=!!p.subId;
@@ -3080,6 +3081,8 @@ function isJoinedMember(){ try{ if(localStorage.getItem(LS_PREVIEW)==="1") retur
 function canFamilyView(){ if(isJoinedMember()){ const m=activeMember(); return !!(m && m.familyAllowed && m.accountType==='full'); } return true; }
 function famView(){ if(!canFamilyView()) return false; if((state.members||[]).length<2) return true; return viewScope!=='me'; }
 function setViewScope(v){ viewScope=v; try{ localStorage.setItem(LS_VIEW,v); }catch(e){} }
+// В личном виде всё считается по операциям активного участника (по memberId); в семейном — без фильтра
+function planFilterMember(){ if(famView()) return null; const me=activeMember(); return me?me.id:null; }
 // Личный баланс участника — производная величина (стартовый кэш + мой доход − мои расходы). Безопасно для слияния устройств.
 function memberBalance(m){ if(!m) return 0; const from=m.startCashDate||'1970-01-01'; let bal=+m.startCash||0; state.txns.forEach(t=>{ if((t.memberId||null)!==m.id) return; if(String(t.date)<from) return; if(t.type==='income') bal+=(+t.amount||0); else if(t.type==='expense' && reducesCash(t.categoryId,t.subId)) bal-=(+t.amount||0); }); return bal; }
 function memberMonthIncome(m,k){ if(!m) return 0; return txnsOfMonth(k).filter(t=>t.type==='income'&&(t.memberId||null)===m.id).reduce((a,t)=>a+(+t.amount||0),0); }
@@ -3688,8 +3691,8 @@ function openAddTxn(preset){
     const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'}));
     const myC  = isExp ? allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id) : [];
     const famC = isExp ? allCats.filter(c=>(c.scope||'shared')==='shared') : [];
-    const showCatTabs = isExp && myC.length>0 && famC.length>0;
-    if(showCatTabs && draft.catTab==null) draft.catTab = (draft.categoryId && myC.some(c=>c.id===draft.categoryId)) ? 'mine' : 'family';
+    const showCatTabs = isExp && (myC.length>0 || famC.length>0);
+    if(showCatTabs && draft.catTab==null) draft.catTab = draft.categoryId ? (myC.some(c=>c.id===draft.categoryId)?'mine':'family') : (myC.length?'mine':'family');
     const cats = !isExp ? allCats : (showCatTabs ? (draft.catTab==='mine'?myC:famC) : allCats);
     const subs = draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
@@ -3784,8 +3787,8 @@ function editTxn(id){
     const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'}));
     const myC  = isExp ? allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id) : [];
     const famC = isExp ? allCats.filter(c=>(c.scope||'shared')==='shared') : [];
-    const showCatTabs = isExp && myC.length>0 && famC.length>0;
-    if(showCatTabs && draft.catTab==null) draft.catTab=(draft.categoryId && myC.some(c=>c.id===draft.categoryId))?'mine':'family';
+    const showCatTabs = isExp && (myC.length>0 || famC.length>0);
+    if(showCatTabs && draft.catTab==null) draft.catTab= draft.categoryId ? (myC.some(c=>c.id===draft.categoryId)?'mine':'family') : (myC.length?'mine':'family');
     const cats = !isExp ? allCats : (showCatTabs ? (draft.catTab==='mine'?myC:famC) : allCats);
     const subs=draft.categoryId?subsOf(draft.categoryId):[];
     openSheet(`
@@ -4160,10 +4163,10 @@ function plannedForMonth(k){
 function planItemsForMonth(k){
   const out=[];
   plannedActive().forEach(p=>{
-    if(p.repeat){ if(!plannedSkippedInMonth(p,k)) out.push({type:p.type,amount:+p.amount||0,categoryId:p.categoryId,subId:p.subId||null,day:Math.min(+p.day||1,mlenOf(k)),label:p.label||catName(p.categoryId),repeat:true,id:p.id}); }
-    else { if(p.date && ym(p.date)===k) out.push({type:p.type,amount:+p.amount||0,categoryId:p.categoryId,subId:p.subId||null,day:+String(p.date).slice(8,10),label:p.label||catName(p.categoryId),repeat:false,id:p.id}); }
+    if(p.repeat){ if(!plannedSkippedInMonth(p,k)) out.push({type:p.type,amount:+p.amount||0,categoryId:p.categoryId,subId:p.subId||null,memberId:p.memberId||null,day:Math.min(+p.day||1,mlenOf(k)),label:p.label||catName(p.categoryId),repeat:true,id:p.id}); }
+    else { if(p.date && ym(p.date)===k) out.push({type:p.type,amount:+p.amount||0,categoryId:p.categoryId,subId:p.subId||null,memberId:p.memberId||null,day:+String(p.date).slice(8,10),label:p.label||catName(p.categoryId),repeat:false,id:p.id}); }
   });
-  return out;
+  const _mid=planFilterMember(); return _mid? out.filter(o=>(o.memberId||null)===_mid) : out;
 }
 // Суммы плана = суммы плановых операций месяца
 function planSub(k,subId){ return planItemsForMonth(k).filter(p=>p.type==='expense'&&p.subId===subId).reduce((a,p)=>a+p.amount,0); }
@@ -4433,7 +4436,7 @@ function pgPlan(v){
         <span class="num" style="font-weight:700;color:var(--grpI)">${fmt(srcTotal,{bare:true})}</span>
         <button class="iconbtn addic" data-plan title="добавить плановый доход с датой"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v3M16 2.5v3M12 12.5v4M10 14.5h4"/></svg></button>
         ${planEdit?'<button class="iconbtn" data-del title="удалить источник">✕</button>':''}</div>
-      ${planEdit?`<div class="chiprow" style="margin-top:6px"><button class="chip ${sk==='labor'?'active':''}" data-k="labor">💪 Труд</button><button class="chip ${sk==='capital'?'active':''}" data-k="capital">📈 Капитал</button></div>`:''}
+      ${planEdit?`<div class="chiprow" style="margin-top:2px;padding:2px 8px 4px"><span class="dim" style="font-size:11px;align-self:center;margin-right:2px">тип:</span><button class="chip mini ${sk==='labor'?'active':''}" data-k="labor">Труд</button><button class="chip mini ${sk==='capital'?'active':''}" data-k="capital">Капитал</button></div>`:''}
     </div>`);
     row.querySelector("[data-sname]").onchange=e=>{ s.name=e.target.value.trim()||s.name; save(); };
     row.querySelector("[data-plan]").onclick=()=>editPlanned(null,{type:'income',categoryId:s.id,repeat:false});
@@ -4528,9 +4531,18 @@ function pgFact(v){
   const scopeWord = family ? (famView()?' · семья':' · я') : '';
   v.appendChild(h(`<div class="page-title">План / Факт</div><div class="page-sub">${ymLabel(k)}${scopeWord} · выполнение бюджета по категориям</div>`));
 
-  // ---- доход: план / факт по источникам ----
+  // ---- доход: план / факт ----
   const incPlan=plannedIncomeView(k), incFact=factIncomeView(k);
-  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход · план/факт<span class="tag num" style="color:${incFact>=incPlan&&incPlan>0?'var(--green)':'var(--ink2)'}">${fmt(incFact)} / ${fmt(incPlan)}</span></h3></div>`);
+  let incFromPlan=0; incForView().forEach(s=>{ incFromPlan+=Math.min(monthIncomeBySource(k,s.id), incomeSrcPlanned(k,s.id)); });
+  const incUnplan=Math.max(0,incFact-incFromPlan), incRest=Math.max(0,incPlan-incFromPlan), incOver=Math.max(0,incFact-incPlan);
+  v.appendChild(h(`<div class="eyebrow" style="margin:2px 2px 4px">Доходы · план / факт за месяц</div>`));
+  v.appendChild(h(`<div class="grid g3" style="margin-bottom:6px">
+    ${kpiCard("План доходов",fmt(incPlan),"","")}
+    ${kpiCard("Факт доходов",fmt(incFact),"по плану "+fmt(incFromPlan,{bare:true})+" · вне "+fmt(incUnplan,{bare:true}),"")}
+    ${kpiCard("Остаток ожидаемых",fmt(incRest),incPlan?"из плана "+fmt(incPlan,{bare:true}):"плана нет","")}
+  </div>`));
+  v.appendChild(h(`<div class="card" style="padding:12px 14px;margin-bottom:6px"><div class="linrow" style="font-size:13px"><span class="dim">Итого получено</span><span class="num" style="font-weight:700">${fmt(incFact)}</span></div><div class="linrow" style="font-size:11.5px;margin-top:4px"><span class="dim">плановые ${fmt(incFromPlan,{bare:true})} + внеплановые ${fmt(incUnplan,{bare:true})}</span>${incOver>0?`<span class="num" style="color:var(--green)">превышение плана +${fmt(incOver,{bare:true})}</span>`:''}</div></div>`));
+  const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход по источникам</h3></div>`);
   const _incList=incForView();
   if(!_incList.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет — добавьте на «Плане».</div>`)); }
   _incList.forEach(s=>{
@@ -4543,12 +4555,14 @@ function pgFact(v){
   });
   v.appendChild(incCard);
   const planT=planTotalView(k), factT=factExpenseView(k);
+  const expFromPlan=planDoneTotal(k), expUnplan=Math.max(0,factT-expFromPlan), expRestPlan=Math.max(0,planT-expFromPlan), expOver=Math.max(0,factT-planT);
   v.appendChild(h(`<div class="eyebrow" style="margin:10px 2px 4px">Расходы · план / факт за месяц</div>`));
   v.appendChild(h(`<div class="grid g3" style="margin-bottom:6px">
     ${kpiCard("План расходов",fmt(planT),"","")}
-    ${kpiCard("Факт расходов",fmt(factT),"","")}
-    ${kpiCard("Осталось потратить",fmt(planT-factT),planT?pct(planT?factT/planT:0)+" бюджета":"плана нет",planT-factT>=0?"pos":"neg")}
+    ${kpiCard("Факт расходов",fmt(factT),"по плану "+fmt(expFromPlan,{bare:true})+" · вне "+fmt(expUnplan,{bare:true}),"")}
+    ${kpiCard("Осталось по плану",fmt(expRestPlan),planT?pct(planT?expFromPlan/planT:0)+" плана":"плана нет","pos")}
   </div>`));
+  if(planT>0||factT>0) v.appendChild(h(`<div class="card" style="padding:12px 14px;margin-bottom:6px"><div class="linrow" style="font-size:13px"><span class="dim">Итого потрачено</span><span class="num" style="font-weight:700">${fmt(factT)}</span></div><div class="linrow" style="font-size:11.5px;margin-top:4px"><span class="dim">плановые ${fmt(expFromPlan,{bare:true})} + внеплановые ${fmt(expUnplan,{bare:true})}</span>${expOver>0?`<span class="num" style="color:var(--red)">превышение плана +${fmt(expOver,{bare:true})}</span>`:''}</div></div>`));
   if(planT===0 && factT===0){ v.appendChild(h(`<div class="card"><div class="empty"><div class="big">🎚️</div>Плановый бюджет не задан и расходов пока нет.<br>Откройте «План», чтобы поставить лимиты, — здесь появится план/факт со светофором.<br><button class="btn primary sm" style="margin-top:12px" data-nav="plan">К плану →</button></div></div>`)); return; }
   if(planT===0){ v.appendChild(h(`<div class="infobox">Плановый бюджет на месяц не задан — ниже показан только факт по категориям. Лимиты можно поставить во вкладке «План».</div>`)); }
   // расходы: сводка план/факт по группам
