@@ -94,7 +94,7 @@ input[type=checkbox],input[type=radio]{width:auto;flex:none;accent-color:var(--g
 
 .shell{flex:1;display:flex;min-height:0}
 .sidebar{display:none}
-.main{flex:1;min-width:0;padding:16px 16px calc(var(--nav-h) + env(safe-area-inset-bottom) + 26px);max-width:1180px;margin:0 auto;width:100%}
+.main{flex:1;min-width:0;padding:16px 11px calc(var(--nav-h) + env(safe-area-inset-bottom) + 26px);max-width:1180px;margin:0 auto;width:100%}
 
 /* ---------- Bottom nav (mobile) ---------- */
 .bottomnav{position:fixed;left:0;right:0;bottom:0;z-index:45;height:calc(var(--nav-h) + env(safe-area-inset-bottom));
@@ -222,14 +222,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .seg button.active{background:var(--gold);color:var(--on-accent)}
 .opts{display:flex;flex-wrap:wrap;gap:8px}
 /* ---- План: строки, иконки-действия (на десктопе — по наведению), прогресс ---- */
-.ibtn2{width:28px;height:28px;border-radius:8px;border:none;background:transparent;color:var(--ink3);display:grid;place-items:center;cursor:pointer;flex:none;opacity:.45;transition:opacity .12s,background .12s}
+.ibtn2{width:26px;height:26px;border-radius:8px;border:none;background:transparent;color:var(--ink3);display:grid;place-items:center;cursor:pointer;flex:none;opacity:.45;transition:opacity .12s,background .12s}
 .ibtn2 svg{width:15px;height:15px}
 .ibtn2:hover{background:var(--panel2);color:var(--gold);opacity:1}
 @media (hover:hover){ .prow .ibtn2{opacity:0} .prow:hover .ibtn2{opacity:.55} .prow:hover .ibtn2:hover{opacity:1} }
 .pgrp{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow)}
-.prow{display:flex;align-items:center;gap:8px;padding:10px 10px;border-radius:10px;cursor:pointer;user-select:none}
+.prow{display:flex;align-items:center;gap:7px;padding:8px 6px;border-radius:10px;cursor:pointer;user-select:none;min-height:38px}
 .prow:hover{background:var(--panel2)}
-.phead{padding:13px 12px}
+.phead{padding:12px 10px}
 .gdot{width:10px;height:10px;border-radius:3px;flex:none}
 .pname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:14.5px}
 .psrc .pname,.psub .pname,.chead .pname{font-weight:600;font-size:13.5px}
@@ -238,22 +238,22 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .pcaret{width:16px;height:16px;color:var(--ink3);flex:none;transition:transform .18s}
 .pcaret svg{width:16px;height:16px}
 .pgrp.open>.phead .pcaret,.pcat.open>.chead .pcaret{transform:rotate(90deg)}
-.pbody{display:none;padding:0 6px 8px}
+.pbody{display:none;padding:0 4px 6px}
 .pgrp.open>.pbody{display:block}
-.cbody{display:none;padding:0 0 6px 38px}
+.cbody{display:none;padding:0 0 4px 16px}
 .pcat.open>.cbody{display:block}
 .pcat.open>.chead{background:var(--panel2)}
 .pbar{height:7px;border-radius:99px;background:var(--panel2);overflow:hidden}
 .pbar i{display:block;height:100%;background:var(--gold)}
-.pbar.sm{height:4px;margin:0 12px 8px}
-.pbar.xs{height:3px;margin:5px 40px 0 10px}
-.pmeta{font-size:10.5px;color:var(--ink3);margin:3px 0 0 10px}
+.pbar.sm{height:4px;margin:0 10px 8px}
+.pbar.xs{height:3px;margin:4px 34px 0 6px}
+.pmeta{font-size:10.5px;color:var(--ink3);margin:2px 0 0 6px}
 .pmeta b{color:var(--green);font-weight:600}
-.sinp{width:92px;text-align:right;border:1px solid transparent;background:transparent;color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;padding:4px 6px;border-radius:8px;font-family:var(--f-num)}
+.sinp{width:84px;text-align:right;border:1px solid transparent;background:transparent;color:var(--ink);font:inherit;font-size:13.5px;font-weight:600;padding:4px 6px;border-radius:8px;font-family:var(--f-num)}
 .sinp:hover{border-color:var(--line2)}
 .sinp:focus{outline:none;border-color:var(--gold);background:var(--panel)}
 .sinp.empty{color:var(--ink3);font-weight:400}
-.pop{display:flex;align-items:center;gap:7px;padding:5px 10px;font-size:12px;color:var(--ink2);border-radius:8px;cursor:pointer}
+.pop{display:flex;align-items:center;gap:6px;padding:4px 6px;font-size:12px;color:var(--ink2);border-radius:8px;cursor:pointer}
 .pop:hover{background:var(--panel2)}
 .pop.done{opacity:.5}
 .pop.done .opl{text-decoration:line-through}
@@ -261,7 +261,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .opi svg{width:14px;height:14px}
 .opl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .opa{font-size:12px}
-.chipadd{display:inline-flex;align-items:center;gap:5px;margin:4px 0 2px 10px;padding:4px 11px;border:1px dashed var(--line2);border-radius:99px;font-size:11.5px;font-weight:600;color:var(--ink3);cursor:pointer;background:transparent}
+.chipadd{display:inline-flex;align-items:center;gap:5px;margin:3px 0 2px 6px;padding:4px 11px;border:1px dashed var(--line2);border-radius:99px;font-size:11.5px;font-weight:600;color:var(--ink3);cursor:pointer;background:transparent}
 .chipadd:hover{border-color:var(--gold);color:var(--gold);border-style:solid}
 .chipadd svg{width:12px;height:12px}
 
@@ -2766,7 +2766,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.9-design2";
+const APP_VERSION="v7.10-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
@@ -4520,19 +4520,21 @@ function pgPlan(v){
   const doneV = famView()? planDoneTotal(k) : (function(){ let t=0; expenseGroups().forEach(g=>catsOfView(g.id).forEach(c=>{ subsOf(c.id).forEach(su=>t+=planDoneSub(k,su.id)); t+=planItemsForMonth(k).filter(p=>p.type==='expense'&&p.categoryId===c.id&&!p.subId&&plannedDoneInMonth({id:p.id},k)).reduce((a,p)=>a+p.amount,0); })); return t; })();
   const remV = Math.max(0, total-doneV);
   const scopeWord = family ? (famView()?' · общий бюджет семьи':' · мой личный бюджет') : '';
-  v.appendChild(h(`<div class="page-title">План месяца</div><div class="page-sub">${ymLabel(k)}${scopeWord}</div>`));
+  v.appendChild(h(`<div class="page-title">План месяца</div><div class="page-sub">${ymLabel(k)}${scopeWord} · двойное нажатие по строке — переименовать или удалить</div>`));
   if(planMonthTotal(k)===0 && plannedIncome(k)===0){
     v.appendChild(h(`<div class="infobox" style="margin-bottom:12px"><b>Как планировать:</b> раскройте группу, добавьте категорию (＋), в ней подкатегорию (＋), затем впишите сумму прямо в строке или добавьте плановую операцию с датой (иконка календаря). Двойное нажатие по строке — переименовать или удалить.<br><br>Когда плановая операция происходит, подтвердите её на «Сегодня» — она станет фактом, но останется в плане с пометкой ✓. План не уменьшается, растёт «выполнено».</div>`));
   }
   const pct = total>0 ? Math.min(100, doneV/total*100) : 0;
-  v.appendChild(h(`<div class="card"><div class="row"><div style="flex:1;min-width:0"><div class="eyebrow" style="margin:0">Плановый бюджет</div><div class="num" id="planBudgetBig" style="font-size:26px;font-weight:800;margin-top:4px">${fmt(total)}</div></div>
-     <div class="row" style="gap:8px">
-       <button class="btn sm" id="copyPrev">⇦ Из прошлого</button>
-       <button class="btn sm primary" id="fromGoals">Собрать из целей</button>
-     </div></div>
+  v.appendChild(h(`<div class="card">
+     <div class="eyebrow" style="margin:0">Плановый бюджет</div>
+     <div class="num" id="planBudgetBig" style="font-size:26px;font-weight:800;margin-top:3px">${fmt(total)}</div>
      ${total>0?`<div class="pbar" style="margin-top:10px"><i style="width:${pct}%"></i></div>
      <div class="linrow" style="margin-top:6px;font-size:11.5px"><span style="color:var(--green)">✓ выполнено ${fmt(doneV,{bare:true})}</span><span class="dim">осталось ${fmt(remV,{bare:true})}</span></div>`:''}
-     <div id="planSummaryLine" style="margin-top:12px"></div>
+     <div id="planSummaryLine" style="margin-top:10px"></div>
+     <div class="row" style="gap:8px;margin-top:12px">
+       <button class="btn sm" id="copyPrev" style="flex:1">⇦ Из прошлого</button>
+       <button class="btn sm primary" id="fromGoals" style="flex:1">Собрать из целей</button>
+     </div>
   </div>`));
   v.querySelector("#copyPrev").onclick=()=>{
     const pm=addMonths(k,-1);
@@ -4546,6 +4548,7 @@ function pgPlan(v){
   v.querySelector("#fromGoals").onclick=()=>suggestPlanFromGoals();
 
   // ---------- ДОХОД ----------
+  v.appendChild(h(`<div class="eyebrow" style="margin:14px 2px 6px">Доходы</div>`));
   const incOpen=planOpen.has('inc');
   const incCard=h(`<div class="pgrp${incOpen?' open':''}"><div class="prow phead"><span class="gdot" style="background:var(--grpI)"></span>
       <span class="pname">Доход (план)</span><span class="num psum" id="planIncTag" style="color:var(--grpI)">${fmt(plannedIncomeView(k))}</span>
@@ -4558,13 +4561,11 @@ function pgPlan(v){
   if(!_incList.length) incBody.appendChild(h(`<div class="empty" style="padding:12px">Источников дохода нет — нажмите ＋</div>`));
   _incList.forEach(s=>{
     const srcTotal=incomeSrcPlanned(k,s.id);
-    const row=h(`<div class="prow psrc"><div class="ic" style="width:29px;height:29px;background:${tint('var(--grpI)',13)};color:var(--grpI)">${SVG_MONEY}</div>
+    const row=h(`<div class="prow psrc"><div class="ic" style="width:26px;height:26px;background:${tint('var(--grpI)',13)};color:var(--grpI)">${SVG_MONEY}</div>
       <span class="pname" style="font-weight:600">${esc(s.name)}<span class="pkind">${(s.kind||'labor')==='capital'?'Капитал':'Труд'}</span></span>
       <span class="num" style="font-weight:700;color:var(--grpI)">${fmt(srcTotal,{bare:true})}</span>
-      <button class="ibtn2" data-plan title="Плановый доход с датой">${SVG_CAL}</button>
-      <button class="ibtn2" data-more title="Ещё">${SVG_DOTS}</button></div>`);
+      <button class="ibtn2" data-plan title="Плановый доход с датой">${SVG_CAL}</button></div>`);
     row.querySelector("[data-plan]").onclick=e=>{ e.stopPropagation(); editPlanned(null,{type:'income',categoryId:s.id,repeat:false}); };
-    row.querySelector("[data-more]").onclick=e=>{ e.stopPropagation(); openSrcSheet(s); };
     bindPlanRow(row, ()=>openSrcSheet(s), ()=>openSrcSheet(s));
     incBody.appendChild(row);
     planItemsForMonth(k).filter(p=>p.type==='income'&&p.categoryId===s.id).sort((a,b)=>a.day-b.day).forEach(p=>{
@@ -4576,6 +4577,7 @@ function pgPlan(v){
   v.appendChild(incCard);
 
   // ---------- РАСХОДЫ ----------
+  v.appendChild(h(`<div class="eyebrow" style="margin:16px 2px 6px">Расходы</div>`));
   expenseGroups().forEach(g=>{
     const cats=catsOfView(g.id);
     let gTot=0,gDone=0; cats.forEach(c=>{ gTot+=planCat(k,c.id); subsOf(c.id).forEach(su=>gDone+=planDoneSub(k,su.id)); });
@@ -4593,15 +4595,13 @@ function pgPlan(v){
       const subs=subsOf(c.id);
       const cTot=planCat(k,c.id);
       const cOpen=planOpen.has(c.id);
-      const cel=h(`<div class="pcat${cOpen?' open':''}"><div class="prow chead"><span class="ic" style="width:29px;height:29px;background:${tint(g.color,14)};color:${g.color}">${esc(c.icon||'•')}</span>
+      const cel=h(`<div class="pcat${cOpen?' open':''}"><div class="prow chead"><span class="ic" style="width:26px;height:26px;font-size:13px;background:${tint(g.color,14)};color:${g.color}">${esc(c.icon||'•')}</span>
           <span class="pname" style="font-weight:600">${esc(c.name)}${(famView()&&(c.scope||'shared')==='shared')?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}</span>
           <span class="num" data-ctag="${c.id}" style="font-weight:600;color:${cTot>0?'var(--ink)':'var(--ink3)'}">${cTot>0?fmt(cTot,{bare:true}):'—'}</span>
-          <button class="ibtn2" data-addsub title="Добавить подкатегорию">${SVG_PLUS}</button>
-          <button class="ibtn2" data-cmore title="Ещё">${SVG_DOTS}</button><span class="pcaret">${SVG_CARET}</span></div>
+          <button class="ibtn2" data-addsub title="Добавить подкатегорию">${SVG_PLUS}</button><span class="pcaret">${SVG_CARET}</span></div>
         <div class="cbody"></div></div>`);
       const cb=cel.querySelector('.cbody');
       cel.querySelector('[data-addsub]').onclick=e=>{ e.stopPropagation(); const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ const su={id:uid(),categoryId:c.id,name:nm.trim(),scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); planOpen.add(c.id); save(); render_current(); } };
-      cel.querySelector('[data-cmore]').onclick=e=>{ e.stopPropagation(); openCatSheet(c); };
       bindPlanRow(cel.querySelector('.chead'), ()=>{ planOpen.has(c.id)?planOpen.delete(c.id):planOpen.add(c.id); render_current(); }, ()=>openCatSheet(c));
 
       if(subs.length){
@@ -4614,8 +4614,7 @@ function pgPlan(v){
           const w=h(`<div class="psubwrap">
             <div class="prow psub"><span class="pname">${esc(su.name)}${badge}</span>
               <input class="sinp${sTot>0?'':' empty'}" value="${sTot>0?fmt(sTot,{bare:true}):'—'}" inputmode="numeric" ${ops.length>1?'readonly':''}>
-              <button class="ibtn2" data-splan title="Плановая операция с датой">${SVG_CAL}</button>
-              ${locked?'':`<button class="ibtn2" data-smore title="Ещё">${SVG_DOTS}</button>`}</div>
+              <button class="ibtn2" data-splan title="Плановая операция с датой">${SVG_CAL}</button></div>
             ${sTot>0?`<div class="pbar xs"><i style="width:${Math.min(100,(over?spent:sDone)/sTot*100)}%;background:${over?'var(--red)':'var(--green)'}"></i></div>
               <div class="pmeta">${over?`<span style="color:var(--red)">перерасход +${fmt(spent-sTot,{bare:true})}</span> · план ${fmt(sTot,{bare:true})}`:`<b>✓ ${fmt(sDone,{bare:true})}</b> · осталось ${fmt(Math.max(0,sTot-sDone),{bare:true})}`}</div>`:''}
             <div class="opsbox"></div></div>`);
@@ -4628,7 +4627,6 @@ function pgPlan(v){
           opsbox.appendChild(chip);
           const srow=w.querySelector('.psub');
           srow.querySelector('[data-splan]').onclick=e=>{ e.stopPropagation(); editPlanned(null,{type:'expense',categoryId:c.id,subId:su.id,repeat:false}); };
-          const sm=srow.querySelector('[data-smore]'); if(sm) sm.onclick=e=>{ e.stopPropagation(); openSubSheet(su); };
           const inp=srow.querySelector('.sinp');
           inp.onclick=e=>e.stopPropagation();
           inp.onfocus=()=>{ if(inp.classList.contains('empty')) inp.value=''; };
