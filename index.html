@@ -227,7 +227,9 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .ibtn2:hover{background:var(--panel2);color:var(--gold);opacity:1}
 @media (hover:hover){ .prow .ibtn2{opacity:0} .prow:hover .ibtn2{opacity:.55} .prow:hover .ibtn2:hover{opacity:1} }
 .pgrp{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow)}
-.prow{display:flex;align-items:center;gap:7px;padding:8px 6px;border-radius:10px;cursor:pointer;user-select:none;min-height:38px}
+.prow{display:flex;align-items:center;gap:8px;padding:8px 6px;border-radius:10px;cursor:pointer;user-select:none;min-height:40px}
+.prow .ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:16px;line-height:1;flex:none;background:var(--panel2)}
+.prow .ic svg{width:16px;height:16px}
 .prow:hover{background:var(--panel2)}
 .phead{padding:12px 10px}
 .gdot{width:10px;height:10px;border-radius:3px;flex:none}
@@ -2766,7 +2768,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.14-design2";
+const APP_VERSION="v7.15-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
@@ -4621,7 +4623,7 @@ function pgPlan(v){
   if(!_incList.length) incBody.appendChild(h(`<div class="empty" style="padding:12px">Источников дохода нет — нажмите ＋</div>`));
   const _renderSrc=(s)=>{
     const srcTotal=incomeSrcPlanned(k,s.id);
-    const row=h(`<div class="prow psrc"><div class="ic" style="width:26px;height:26px;background:${tint('var(--grpI)',13)};color:var(--grpI)">${SVG_MONEY}</div>
+    const row=h(`<div class="prow psrc"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">${SVG_MONEY}</div>
       <span class="pname" style="font-weight:600">${esc(s.name)}<span class="pkind">${(s.kind||'labor')==='capital'?'Капитал':'Труд'}</span></span>
       <span class="num" style="font-weight:700;color:var(--grpI)">${fmt(srcTotal,{bare:true})}</span>
       <button class="ibtn2" data-plan title="Плановый доход с датой">${SVG_CAL}</button></div>`);
@@ -4667,7 +4669,7 @@ function pgPlan(v){
       const subs=subsOf(c.id);
       const cTot=planCat(k,c.id);
       const cOpen=planOpen.has(c.id);
-      const cel=h(`<div class="pcat${cOpen?' open':''}"><div class="prow chead"><span class="ic" style="width:26px;height:26px;font-size:13px;background:${tint(g.color,14)};color:${g.color}">${esc(c.icon||'•')}</span>
+      const cel=h(`<div class="pcat${cOpen?' open':''}"><div class="prow chead"><span class="ic" style="background:${tint(g.color,14)}">${esc(c.icon||'•')}</span>
           <span class="pname" style="font-weight:600">${esc(c.name)}${(famView()&&(c.scope||'shared')==='shared')?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}</span>
           <span class="num" data-ctag="${c.id}" style="font-weight:600;color:${cTot>0?'var(--ink)':'var(--ink3)'}">${cTot>0?fmt(cTot,{bare:true}):'—'}</span>
           <button class="ibtn2" data-addsub title="Добавить подкатегорию">${SVG_PLUS}</button><span class="pcaret">${SVG_CARET}</span></div>
