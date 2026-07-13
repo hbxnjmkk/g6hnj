@@ -268,6 +268,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .chipadd{display:inline-flex;align-items:center;gap:5px;margin:3px 0 2px 6px;padding:4px 11px;border:1px dashed var(--line2);border-radius:99px;font-size:11.5px;font-weight:600;color:var(--ink3);cursor:pointer;background:transparent}
 .chipadd:hover{border-color:var(--gold);color:var(--gold);border-style:solid}
 .chipadd svg{width:12px;height:12px}
+.emogrid{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;max-height:38vh;overflow:auto}
+.emo{font-size:20px;padding:8px 0;border:1px solid var(--line);background:transparent;border-radius:10px;cursor:pointer;line-height:1}
+.emo:hover{border-color:var(--gold);background:var(--panel2)}
+.emo.active{border-color:var(--gold);background:color-mix(in srgb,var(--gold) 18%,transparent)}
 
 .tilegrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .tile{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:14px;border-radius:16px;background:var(--panel2);border:1px solid var(--line);cursor:pointer;text-align:left;transition:transform .08s}
@@ -416,7 +420,6 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
       <div class="lbl num" id="mLbl">—</div>
       <button id="mNext" aria-label="Следующий месяц">›</button>
     </div>
-    <button class="me" id="meBtn" title="Кто ведёт учёт"><span id="meIco">👤</span></button>
     <button class="sync" id="syncBtn" title="Синхронизация"><span id="syncIco">☁</span><span class="badge"></span></button>
   </div>
   <div class="shell">
@@ -2770,7 +2773,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.17-design2";
+const APP_VERSION="v7.19-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
@@ -3235,7 +3238,12 @@ function forecastSeries(back){
     const allExp = past ? (monthExpense(mm)+monthCapital(mm)) : projExpense(mm);
     const toCapital = Math.max(0, allExp-cashOut);
     const delta = inc-cashOut; bal+=delta;
-    return {mm,inc,cashOut,toCapital,delta,balance:bal,past,isCur:mm===rm};
+    // расшифровка: сколько уже фактически прошло и сколько ещё ожидается
+    const incFact = monthIncome(mm);
+    const incExpect = Math.max(0, inc - incFact);
+    const outFact = actualCashOut(mm);
+    const outExpect = Math.max(0, cashOut - outFact);
+    return {mm,inc,cashOut,toCapital,delta,balance:bal,past,isCur:mm===rm,incFact,incExpect,outFact,outExpect,yld};
   });
 }
 
@@ -3624,6 +3632,7 @@ function openMore(){
 /* ---------- участник: индикатор в шапке + выбор «кто я» на этом устройстве ---------- */
 function renderMe(){
   const btn=document.getElementById("meBtn"), ico=document.getElementById("meIco");
+  if(!btn||!ico) return;   // переключатель участника убран
   if(isJoinedMember()){ if(btn) btn.style.display="none"; return; } else if(btn) btn.style.display="";
   const m=memberById(curMember());
   if(m){ ico.textContent=m.emoji||"👤"; btn.style.borderColor=tint(m.color,45);
@@ -3662,6 +3671,51 @@ function performClose(k){
   state.netWorthHistory.sort((a,b)=>a.date.localeCompare(b.date));
   save();
 }
+/* ---------- Автозакрытие месяца ----------
+   Закрывает завершившиеся месяцы при первом входе в новом месяце.
+   ВАЖНО: снимок берёт ТЕКУЩИЕ остатки активов/долгов, поэтому:
+   • не трогаем старую историю (только месяцы начиная с момента включения — маркер autoCloseSince);
+   • закрываем максимум 3 месяца подряд (если человек не заходил дольше — попросим закрыть вручную);
+   • после автозакрытия показываем плашку «проверьте остатки по долгам» с кнопкой пересчёта. */
+function autoCloseMonths(){
+  try{
+    state.settings=state.settings||{};
+    if(state.settings.autoCloseMonth===false) return [];       // выключено в настройках
+    if(ACCT && ACCT.role==='member') return [];                // закрывает владелец (снимок — общий)
+    const rm=realMonth();
+    if(!state.settings.autoCloseSince){ state.settings.autoCloseSince=rm; save(false); return []; }
+    const since=state.settings.autoCloseSince;
+    const pend=unclosedMonths().filter(k=> k>=since && k<rm && state.txns.some(t=>ym(t.date)===k));
+    if(!pend.length) return [];
+    if(pend.length>3){                                          // давно не заходили — не гадаем, просим вручную
+      state.settings.autoCloseTooMany=pend.length; save(false); return [];
+    }
+    const done=[];
+    pend.forEach(k=>{ performClose(k); done.push(k); });        // performClose сам сохраняет
+    state.settings.autoClosedNotice=done;
+    delete state.settings.autoCloseTooMany;
+    save(false);
+    return done;
+  }catch(e){ return []; }
+}
+// Плашка-уведомление на «Сегодня»
+function autoCloseNoticeCard(){
+  const st=state.settings||{};
+  if(st.autoCloseTooMany){
+    const c=h(`<div class="warnbox"><b>Не закрыто месяцев: ${st.autoCloseTooMany}.</b> Автоматически закрывать их небезопасно — остатки по долгам и активам за те месяцы уже не восстановить точно. Закройте их вручную, уточнив остатки. <button class="btn sm" id="acFix" style="margin-top:8px">Закрыть месяц →</button></div>`);
+    c.querySelector('#acFix').onclick=()=>openMonthClose(monthToClose());
+    return c;
+  }
+  const done=st.autoClosedNotice;
+  if(!done || !done.length) return null;
+  const names=done.map(k=>ymShort(k)).join(', ');
+  const c=h(`<div class="okbox"><b>Месяц закрыт автоматически: ${names}.</b> Капитал, подушка и показатели записаны в историю по остаткам на момент закрытия.
+    <div style="font-size:12px;margin-top:6px" class="dim">Если остатки по кредитам изменились в конце месяца — уточните их, и снимок пересчитается.</div>
+    <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm" id="acRe">Уточнить остатки</button><button class="btn sm ghost" id="acOk">Понятно</button></div></div>`);
+  c.querySelector('#acRe').onclick=()=>openMonthClose(done[done.length-1]);
+  c.querySelector('#acOk').onclick=()=>{ delete state.settings.autoClosedNotice; save(false); render_current(); };
+  return c;
+}
 function openMonthClose(k){
   k=k||monthToClose(); if(!k){ toast("Нет месяцев для закрытия"); return; }
   const liabs=state.liabilities, assetRows=state.assets;
@@ -3697,17 +3751,6 @@ function openMonthClose(k){
       closeSheet(); render_current(); toast("Месяц "+ymShort(k)+" закрыт");
     };
   });
-}
-function openMemberPicker(){
-  if(!state.members.length){
-    openSheet('<h3>Кто ведёт учёт</h3><div class="infobox">Участников пока нет. Добавьте членов семьи — и сможете отмечать, кто сделал каждый расход или доход.</div><button class="btn primary block" id="toMembers">Добавить участников</button>',
-      el=>{ el.querySelector("#toMembers").onclick=()=>{closeSheet();go("settings");setTimeout(()=>editMember(),150);}; });
-    return;
-  }
-  const cur=curMember();
-  openSheet('<h3>Кто я на этом устройстве</h3><p class="muted" style="font-size:12.5px;margin-top:-6px">Выбор запоминается только на этом устройстве и не меняет его у других.</p><div class="opts" style="flex-direction:column">'+
-    state.members.map(m=>'<button class="btn block '+(m.id===cur?'':'')+'" style="justify-content:flex-start;gap:10px;'+(m.id===cur?'border-color:'+esc(m.color)+';color:'+esc(m.color):'')+'" data-m="'+m.id+'"><span style="font-size:18px">'+esc(m.emoji||"👤")+'</span>'+esc(m.name)+(m.id===cur?' ✓':'')+'</button>').join("")+
-    '</div>', el=>{ el.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>{ setCurMember(b.dataset.m); closeSheet(); renderMe(); toast("Теперь вы: "+memberById(b.dataset.m).name); }); });
 }
 function editMember(id){
   const m=id?memberById(id):{id:null,name:"",emoji:"🙂",color:MEMBER_COLORS[state.members.length%MEMBER_COLORS.length]};
@@ -4000,6 +4043,7 @@ function pgToday(v){
 
   v.appendChild(h(`<div><div class="page-title">Сегодня</div><div class="page-sub hide-mobile">${ymLabel(k)}${isClosed(k)?' · <span style="color:var(--gold);font-weight:600">месяц закрыт</span>':' · короткий взгляд на семейные финансы'}</div></div>`));
 
+  const _acn=autoCloseNoticeCard(); if(_acn) v.appendChild(_acn);
   const mtc=monthToClose();
   if(mtc){ const rb=h(`<div class="warnbox" style="display:flex;align-items:center;gap:10px;background:${tint('var(--gold)',12)};border-color:${tint('var(--gold)',42)};color:var(--ink)">
      <span style="font-size:20px">📌</span>
@@ -4542,6 +4586,103 @@ function bindPlanRow(el, onOpen, onEdit){
     ['touchend','touchmove','touchcancel'].forEach(ev=>el.addEventListener(ev, ()=>clearTimeout(lp), {passive:true}));
   }
 }
+/* ---------- Каталог готовых категорий/подкатегорий (подсказки при добавлении) ---------- */
+const CAT_SUGGEST = {
+  g1: [ // Обязательные
+    {n:"Жильё", i:"🏠", subs:["Аренда","Ипотека / платёж","Ремонт и улучшения","Хозтовары"]},
+    {n:"Коммунальные", i:"💡", subs:["Газ","Электричество","Вода","Отопление","Вывоз мусора"]},
+    {n:"Связь", i:"📶", subs:["Интернет","Мобильная связь","Подписки и сервисы"]},
+    {n:"Проценты по кредитам", i:"％", subs:["Проценты банков"]},
+    {n:"Образование детей", i:"🎓", subs:["Школа","Детский сад","Репетиторы","Кружки"]},
+    {n:"Страхование", i:"🛡️", subs:["ОСАГО / КАСКО","Медицинская страховка","Страхование жилья"]},
+    {n:"Налоги", i:"🧾", subs:["Налог на имущество","Транспортный налог","Самозанятость / ИП"]}
+  ],
+  g2: [ // Переменные
+    {n:"Продукты", i:"🛒", subs:["Продукты домой","Маркетплейсы","Продукты на работу"]},
+    {n:"Транспорт", i:"🚗", subs:["Такси","Общественный транспорт","Платные дороги","Мойка","ТО и ремонт","Парковка","Штрафы"]},
+    {n:"Бензин", i:"⛽", subs:["Бензин","Зарядка электро"]},
+    {n:"Бытовое", i:"🧴", subs:["Бытовая химия","Мелкий ремонт","Клининг"]}
+  ],
+  g3: [ // Семья
+    {n:"Дети", i:"🧒", subs:["Карманные","Кружки и спорт","Игрушки","Психолог","Лагерь"]},
+    {n:"Здоровье", i:"➕", subs:["Медицина","Аптека","Стоматология","Анализы","Психотерапия"]},
+    {n:"Одежда", i:"👕", subs:["Одежда","Обувь","Аксессуары"]},
+    {n:"Домашние животные", i:"🐾", subs:["Корм","Ветеринар","Груминг","Игрушки и аксессуары"]},
+    {n:"Помощь родителям", i:"🤝", subs:["Продукты","Лекарства","Быт"]}
+  ],
+  g4: [ // Качество жизни
+    {n:"Кафе и рестораны", i:"☕", subs:["Кафе","Рестораны","Доставка еды"]},
+    {n:"Развлечения", i:"🎬", subs:["Кино и театр","Концерты","Игры","Хобби"]},
+    {n:"Поездки", i:"✈️", subs:["Билеты","Проживание","Питание в поездке","Экскурсии"]},
+    {n:"Подарки", i:"🎁", subs:["Подарки","Дни рождения и праздники"]},
+    {n:"Красота", i:"💇", subs:["Стрижки","Маникюр","Косметика","Уход"]},
+    {n:"Спорт", i:"🏋️", subs:["Абонемент","Экипировка","Тренер"]},
+    {n:"Образование себе", i:"📚", subs:["Курсы","Книги","Конференции"]}
+  ],
+  g5: [ // Капитал
+    {n:"Подушка безопасности", i:"🛟", subs:["Пополнение резерва"]},
+    {n:"Накопления", i:"🏦", subs:["Накопления","Крупная покупка"]},
+    {n:"Инвестиции", i:"📈", subs:["Брокерский счёт","ИИС","Вклад"]},
+    {n:"Погашение долга (тело)", i:"⚡", subs:["Досрочное гашение"]},
+    {n:"Пенсия", i:"👵", subs:["Пенсионные накопления"]}
+  ],
+  g6: [ // Пожертвования
+    {n:"Десятина и благотворительность", i:"🤲", subs:["Десятина / храм","Благотворительность","Помощь родным"]}
+  ]
+};
+const SUB_SUGGEST_ANY = ["Прочее","Разовое","Ежемесячное"];
+const EMOJI_PICK = ["🏷️","🏠","💡","📶","🎓","🛒","🚗","⛽","🍽️","☕","🧒","➕","👕","🐾","🎬","🎁","✈️","💇","🏋️","📚","🛟","🏦","📈","⚡","🤲","🧾","🛡️","🎮","🎵","💊","🧴","🔧","🐶","🌱","💼","💰","🪙","📱","🎂","🏥"];
+
+// Лист выбора категории: готовые варианты для группы + «своя»
+function openCatPicker(group, onPick){
+  const used=new Set(state.categories.filter(c=>!c.deleted && c.groupId===group.id).map(c=>c.name.toLowerCase()));
+  const list=(CAT_SUGGEST[group.id]||[]).filter(x=>!used.has(x.n.toLowerCase()));
+  const opts=list.map((x,idx)=>`<button class="btn block sug" data-i="${idx}" style="justify-content:flex-start;gap:10px"><span style="font-size:17px">${x.i}</span><span>${esc(x.n)}</span></button>`).join('');
+  openSheet(`<h3>Категория в «${esc(group.name)}»</h3>
+    <p class="muted" style="font-size:12px;margin:-4px 0 8px">Выберите готовую или создайте свою.</p>
+    <div class="opts" style="flex-direction:column;max-height:46vh;overflow:auto">${opts||'<div class="dim" style="font-size:12.5px;padding:6px">Все готовые категории уже добавлены.</div>'}</div>
+    <button class="btn block primary" data-own style="margin-top:10px">＋ Своя категория</button>`, el=>{
+    el.querySelectorAll('.sug').forEach(b=>b.onclick=()=>{ const x=list[+b.dataset.i]; closeSheet(); onPick(x.n, x.i, x.subs||[]); });
+    el.querySelector('[data-own]').onclick=()=>{
+      const nm=prompt("Название категории:"); if(!nm||!nm.trim()){ closeSheet(); return; }
+      closeSheet(); openEmojiPicker("🏷️", em=>onPick(nm.trim(), em, []));
+    };
+  });
+}
+// Лист выбора подкатегории: подсказки по категории + «своя»
+function openSubCatalog(cat, onPick){
+  const used=new Set(state.subcategories.filter(x=>!x.deleted && x.categoryId===cat.id).map(x=>x.name.toLowerCase()));
+  let sug=[];
+  Object.values(CAT_SUGGEST).forEach(arr=>arr.forEach(x=>{ if(x.n.toLowerCase()===cat.name.toLowerCase()) sug=x.subs||[]; }));
+  if(!sug.length) sug=SUB_SUGGEST_ANY;
+  const list=sug.filter(n=>!used.has(n.toLowerCase()));
+  const opts=list.map((n,idx)=>`<button class="btn block sug" data-i="${idx}" style="justify-content:flex-start">${esc(n)}</button>`).join('');
+  openSheet(`<h3>Подкатегория в «${esc(cat.name)}»</h3>
+    <p class="muted" style="font-size:12px;margin:-4px 0 8px">Выберите готовую или создайте свою.</p>
+    <div class="opts" style="flex-direction:column;max-height:44vh;overflow:auto">${opts||'<div class="dim" style="font-size:12.5px;padding:6px">Все готовые уже добавлены.</div>'}</div>
+    <button class="btn block primary" data-own style="margin-top:10px">＋ Своя подкатегория</button>`, el=>{
+    el.querySelectorAll('.sug').forEach(b=>b.onclick=()=>{ const n=list[+b.dataset.i]; closeSheet(); onPick(n); });
+    el.querySelector('[data-own]').onclick=()=>{ const nm=prompt("Название подкатегории:"); closeSheet(); if(nm&&nm.trim()) onPick(nm.trim()); };
+  });
+}
+// Выбор эмодзи сеткой (вместо prompt)
+function openEmojiPicker(current, onPick){
+  const grid=EMOJI_PICK.map(e=>`<button class="emo${e===current?' active':''}" data-e="${e}">${e}</button>`).join('');
+  openSheet(`<h3>Значок</h3><div class="emogrid">${grid}</div>
+    <button class="btn block" data-own style="margin-top:10px">Ввести свой эмодзи</button>`, el=>{
+    el.querySelectorAll('.emo').forEach(b=>b.onclick=()=>{ closeSheet(); onPick(b.dataset.e); });
+    el.querySelector('[data-own]').onclick=()=>{ const em=prompt("Эмодзи:",current||"🏷️"); closeSheet(); if(em&&em.trim()) onPick(em.trim()); };
+  });
+}
+// создать категорию (+ сразу её подкатегории из каталога)
+function createCategoryFrom(group, name, icon, subs){
+  const c={id:uid(),groupId:group.id,name:name,icon:icon||"🏷️",scope:famView()?'shared':'personal'};
+  if(!famView()){ const me=activeMember(); if(me) c.ownerId=me.id; }
+  state.categories.push(c);
+  (subs||[]).forEach(n=>{ const su={id:uid(),categoryId:c.id,name:n,scope:c.scope}; if(c.ownerId) su.ownerId=c.ownerId; state.subcategories.push(su); });
+  planOpen.add(group.id); planOpen.add(c.id);
+  save(); toast(subs&&subs.length?`Добавлено: ${name} и подкатегорий: ${subs.length}`:`Добавлено: ${name}`); render_current();
+}
 function openCatSheet(c){
   openSheet(`<h3>${esc(c.name)}</h3><div class="opts" style="flex-direction:column">
     <button class="btn block" data-a="ren" style="justify-content:flex-start">Переименовать</button>
@@ -4549,8 +4690,8 @@ function openCatSheet(c){
     <button class="btn block" data-a="sub" style="justify-content:flex-start">Добавить подкатегорию</button>
     <button class="btn block danger" data-a="del" style="justify-content:flex-start">Удалить категорию</button></div>`, el=>{
     el.querySelector('[data-a=ren]').onclick=()=>{ const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){ c.name=nm.trim(); save(); } closeSheet(); render_current(); };
-    el.querySelector('[data-a=ico]').onclick=()=>{ const em=prompt("Значок (эмодзи):",c.icon||"🏷️"); if(em&&em.trim()){ c.icon=em.trim(); save(); } closeSheet(); render_current(); };
-    el.querySelector('[data-a=sub]').onclick=()=>{ const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ const su={id:uid(),categoryId:c.id,name:nm.trim(),scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); planOpen.add(c.id); save(); } closeSheet(); render_current(); };
+    el.querySelector('[data-a=ico]').onclick=()=>{ closeSheet(); openEmojiPicker(c.icon||"🏷️", em=>{ c.icon=em; save(); render_current(); }); };
+    el.querySelector('[data-a=sub]').onclick=()=>{ closeSheet(); openSubCatalog(c, nm=>{ const su={id:uid(),categoryId:c.id,name:nm,scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); planOpen.add(c.id); save(); render_current(); }); };
     el.querySelector('[data-a=del]').onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); } closeSheet(); render_current(); };
   });
 }
@@ -4579,7 +4720,7 @@ function openSrcSheet(s){
       else { const me=activeMember(); if(!me){ toast('Нет активного участника'); return; } s.scope='personal'; s.ownerId=me.id; }
       save(); closeSheet(); render_current();
     });
-    el.querySelector('[data-a=ico]').onclick=()=>{ const em=prompt("Значок источника (эмодзи):",s.icon||"💼"); if(em&&em.trim()){ s.icon=em.trim(); save(); } closeSheet(); render_current(); };
+    el.querySelector('[data-a=ico]').onclick=()=>{ closeSheet(); openEmojiPicker(s.icon||"💼", em=>{ s.icon=em; save(); render_current(); }); };
     el.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); closeSheet(); render_current(); });
     el.querySelector('[data-a=plan]').onclick=()=>{ closeSheet(); editPlanned(null,{type:'income',categoryId:s.id,repeat:false}); };
     el.querySelector('[data-a=ren]').onclick=()=>{ const nm=prompt("Название источника:",s.name); if(nm&&nm.trim()){ s.name=nm.trim(); save(); } closeSheet(); render_current(); };
@@ -4628,18 +4769,18 @@ function pgPlan(v){
       <button class="ibtn2" data-addsrc title="Добавить источник">${SVG_PLUS}</button><span class="pcaret">${SVG_CARET}</span></div>
     <div class="pbody"></div></div>`);
   const incBody=incCard.querySelector('.pbody');
-  incCard.querySelector('[data-addsrc]').onclick=e=>{ e.stopPropagation(); const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ const em=(prompt("Значок (эмодзи, по желанию):","💼")||"").trim()||"💼"; const src={id:uid(),name:nm.trim(),amount:0,kind:'labor',icon:em}; if(!famView()){ const me=activeMember(); if(me) src.ownerId=me.id; } state.incomeSources.push(src); planOpen.add('inc'); save(); render_current(); } };
+  incCard.querySelector('[data-addsrc]').onclick=e=>{ e.stopPropagation(); const nm=prompt("Название источника дохода:"); if(nm&&nm.trim()){ openEmojiPicker("💼", em=>{ const src={id:uid(),name:nm.trim(),amount:0,kind:'labor',icon:em}; if(!famView()){ const me=activeMember(); if(me){ src.scope='personal'; src.ownerId=me.id; } } state.incomeSources.push(src); planOpen.add('inc'); save(); render_current(); }); } };
   bindPlanRow(incCard.querySelector('.phead'), ()=>{ planOpen.has('inc')?planOpen.delete('inc'):planOpen.add('inc'); render_current(); }, null);
   const _incList=incForView();
   if(!_incList.length) incBody.appendChild(h(`<div class="empty" style="padding:12px">Источников дохода нет — нажмите ＋</div>`));
   const _renderSrc=(s)=>{
     const srcTotal=incomeSrcPlanned(k,s.id);
-    const row=h(`<div class="prow psrc"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">${SVG_MONEY}</div>
+    const row=h(`<div class="prow psrc"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">${s.icon?esc(s.icon):SVG_MONEY}</div>
       <span class="pname" style="font-weight:600">${esc(s.name)}${(famView()&&!srcOwner(s))?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}<span class="pkind">${(s.kind||'labor')==='capital'?'Капитал':'Труд'}</span></span>
       <span class="num" style="font-weight:700;color:var(--grpI)">${fmt(srcTotal,{bare:true})}</span>
       <button class="ibtn2" data-plan title="Плановый доход с датой">${SVG_CAL}</button></div>`);
     row.querySelector("[data-plan]").onclick=e=>{ e.stopPropagation(); editPlanned(null,{type:'income',categoryId:s.id,repeat:false}); };
-    bindPlanRow(row, ()=>openSrcSheet(s), ()=>openSrcSheet(s));
+    bindPlanRow(row, null, ()=>openSrcSheet(s));   // 1 тап — ничего; 2 тапа — правка (как в расходах)
     incBody.appendChild(row);
     planItemsForMonth(k).filter(p=>p.type==='income'&&p.categoryId===s.id).sort((a,b)=>a.day-b.day).forEach(p=>{
       const done=plannedDoneInMonth({id:p.id},k);
@@ -4677,7 +4818,7 @@ function pgPlan(v){
       <div class="pbody"></div></div>`);
     const body=card.querySelector('.pbody');
     const _renderCats = gOpen;   // ленивo: содержимое строим только у раскрытой группы
-    card.querySelector('[data-addcat]').onclick=e=>{ e.stopPropagation(); const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const em=(prompt("Эмодзи (по желанию):","🏷️")||"").trim()||"🏷️"; const c={id:uid(),groupId:g.id,name:nm.trim(),icon:em,scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); planOpen.add(g.id); save(); render_current(); } };
+    card.querySelector('[data-addcat]').onclick=e=>{ e.stopPropagation(); openCatPicker(g, (nm,ic,subs)=>createCategoryFrom(g,nm,ic,subs)); };
     bindPlanRow(card.querySelector('.phead'), ()=>{ planOpen.has(g.id)?planOpen.delete(g.id):planOpen.add(g.id); render_current(); }, null);
 
     if(_renderCats) cats.forEach(c=>{
@@ -4690,7 +4831,7 @@ function pgPlan(v){
           <button class="ibtn2" data-addsub title="Добавить подкатегорию">${SVG_PLUS}</button><span class="pcaret">${SVG_CARET}</span></div>
         <div class="cbody"></div></div>`);
       const cb=cel.querySelector('.cbody');
-      cel.querySelector('[data-addsub]').onclick=e=>{ e.stopPropagation(); const nm=prompt("Новая подкатегория в «"+c.name+"»:"); if(nm&&nm.trim()){ const su={id:uid(),categoryId:c.id,name:nm.trim(),scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); planOpen.add(c.id); save(); render_current(); } };
+      cel.querySelector('[data-addsub]').onclick=e=>{ e.stopPropagation(); openSubCatalog(c, nm=>{ const su={id:uid(),categoryId:c.id,name:nm,scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); planOpen.add(c.id); save(); toast("Добавлено: "+nm); render_current(); }); };
       bindPlanRow(cel.querySelector('.chead'), ()=>{ planOpen.has(c.id)?planOpen.delete(c.id):planOpen.add(c.id); render_current(); }, ()=>openCatSheet(c));
 
       if(subs.length){
@@ -5133,17 +5274,25 @@ function pgForecast(v){
   series.forEach(r=>{
     const badge = r.past? ' <span class="dim" style="font-size:10px">факт</span>' : (r.isCur? ' <span style="color:var(--gold);font-size:10px">сейчас</span>':'');
     const row=h(`<tr style="cursor:pointer"><td>${ymShort(r.mm)}${badge}</td><td class="right num">${r.inc?fmt(r.inc,{bare:true}):'—'}</td><td class="right num" style="color:${r.balance<0?'var(--red)':'var(--ink)'};font-weight:600">${fmt(r.balance,{bare:true})}</td></tr>`);
-    const det=h(`<tr style="display:none"><td colspan="3" style="padding:6px 10px;background:var(--panel2)">
-      <div class="linrow" style="font-size:12px"><span class="dim">Приход</span><span class="num" style="color:var(--green)">${fmt(r.inc,{bare:true})}</span></div>
-      <div class="linrow" style="font-size:12px"><span class="dim">Ушло из кэша</span><span class="num">${fmt(r.cashOut,{bare:true})}</span></div>
-      ${r.toCapital>0?`<div class="linrow" style="font-size:12px"><span class="dim">В накопления (остаётся кэсом)</span><span class="num" style="color:var(--gold)">${fmt(r.toCapital,{bare:true})}</span></div>`:''}
-      <div class="linrow" style="font-size:12px"><span class="dim">Δ кэша</span><span class="num" style="color:${r.delta<0?'var(--red)':'var(--green)'}">${fmt(r.delta,{bare:true,plus:true})}</span></div>
+    const sub=(lbl,val,color)=>`<div class="linrow" style="font-size:11.5px;padding:2px 0 2px 12px"><span class="dim">${lbl}</span><span class="num" style="color:${color||'var(--ink2)'}">${fmt(val,{bare:true})}</span></div>`;
+    const det=h(`<tr style="display:none"><td colspan="3" style="padding:8px 10px;background:var(--panel2)">
+      <div class="linrow" style="font-size:12.5px;font-weight:700"><span>Приход</span><span class="num" style="color:var(--green)">${fmt(r.inc,{bare:true})}</span></div>
+      ${r.past
+        ? sub('уже получено (факт)', r.incFact, 'var(--green)')
+        : sub('уже получено (факт)', r.incFact, 'var(--green)') + sub('ещё ожидается по плану', r.incExpect) + (r.yld>0?sub('доход с активов', r.yld):'')}
+      <div class="linrow" style="font-size:12.5px;font-weight:700;margin-top:6px"><span>Ушло из кэша</span><span class="num">${fmt(r.cashOut,{bare:true})}</span></div>
+      ${r.past
+        ? sub('уже потрачено (факт)', r.outFact)
+        : sub('уже потрачено (факт)', r.outFact) + sub('ещё предстоит по плану', r.outExpect)}
+      ${r.toCapital>0?`<div class="linrow" style="font-size:12px;margin-top:6px"><span class="dim">Из них в накопления — деньги остаются вашими</span><span class="num" style="color:var(--gold)">${fmt(r.toCapital,{bare:true})}</span></div>`:''}
+      <div class="linrow" style="font-size:12.5px;font-weight:700;margin-top:6px;border-top:1px solid var(--line);padding-top:6px"><span>Изменение кэша за месяц</span><span class="num" style="color:${r.delta<0?'var(--red)':'var(--green)'}">${fmt(r.delta,{bare:true,plus:true})}</span></div>
+      <div class="linrow" style="font-size:11.5px"><span class="dim">Остаток на конец месяца</span><span class="num" style="font-weight:600;color:${r.balance<0?'var(--red)':'var(--ink)'}">${fmt(r.balance,{bare:true})}</span></div>
       ${r.past?'':planLinesForMonth(r.mm)}</td></tr>`);
     row.onclick=()=>{ det.style.display = det.style.display==='none'?'':'none'; };
     tb.appendChild(row); tb.appendChild(det);
   });
   v.appendChild(card);
-  v.appendChild(h(`<div class="infobox">Единая линия: слева — факт по прошедшим месяцам, текущий — факт по сегодня + остаток плана, справа — план (или оценка, если плана нет). Ведётся <b>кэш</b>: приход − то, что уходит (потребление, тело долга, десятина). Взносы в накопления остаются кэсом. Полная ретроспектива по всем показателям — во вкладке «История».</div>`));
+  v.appendChild(h(`<div class="infobox">Единая линия: слева — факт по прошедшим месяцам, текущий — факт по сегодня + остаток плана, справа — план (или оценка, если плана нет). Ведётся <b>кэш</b>: приход − то, что уходит (потребление, тело долга, десятина). Взносы в накопления и инвестиции <b>не считаются тратой</b>: эти деньги остаются вашими, просто перекладываются в капитал. Полная ретроспектива по всем показателям — во вкладке «История».</div>`));
 }
 function estimatedMonthlyExpense(){
   const months=[...new Set(state.txns.map(t=>ym(t.date)))];
@@ -5173,16 +5322,37 @@ function pgHistory(v){
   if(netPts.length>=2) v.appendChild(h(`<div class="card"><h3>Чистый капитал по месяцам</h3>${lineChart(netPts,{h:170})}</div>`));
   const incExpRows=rows.filter(r=>r.inc||r.exp||r.cap).map(r=>({label:MONTHS_RU[+r.k.slice(5,7)-1].slice(0,3),values:[{v:r.inc,color:"var(--grpI)"},{v:r.exp+r.cap,color:"var(--grp2)"}]}));
   if(incExpRows.length>=2){ const ic=h(`<div class="card"><h3>Доход и расход по месяцам</h3></div>`); ic.appendChild(h(barsChart(incExpRows,{stacked:false}))); ic.appendChild(h(`<div class="row" style="gap:14px;justify-content:center;margin-top:8px;font-size:12px"><span><span style="background:var(--grpI);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Доход</span><span><span style="background:var(--grp2);width:9px;height:9px;border-radius:2px;display:inline-block;margin-right:5px"></span>Расход</span></div>`)); v.appendChild(ic); }
-  const card=h(`<div class="card" style="overflow-x:auto"><h3>Помесячно</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Доход</th><th class="right">Расход</th><th class="right">В капитал</th><th class="right">Чистый капитал</th></tr></thead><tbody id="hBody"></tbody></table></div>`);
+  const card=h(`<div class="card" style="overflow-x:auto"><h3>Помесячно <span class="dim" style="font-weight:500;font-size:12px">нажмите месяц — детали</span></h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Доход</th><th class="right">Расход</th><th class="right">В капитал</th><th class="right">Чистый капитал</th></tr></thead><tbody id="hBody"></tbody></table></div>`);
   const tb=card.querySelector("#hBody");
   rows.forEach(r=>{
     if(r.fut && !(r.inc||r.exp||r.cap||r.net!=null)) return; // будущие пустые — не показываем
     const tag = r.snap? '<span class="dim" style="font-size:9px"> закрыт</span>' : (r.k===rm?'<span style="color:var(--gold);font-size:9px"> текущий</span>':'');
-    tb.appendChild(h(`<tr><td>${MONTHS_RU[+r.k.slice(5,7)-1]}${tag}</td>
+    const row=h(`<tr style="cursor:pointer"><td>${MONTHS_RU[+r.k.slice(5,7)-1]}${tag}</td>
       <td class="right num" style="color:${r.inc?'var(--green)':'var(--ink3)'}">${r.inc?fmt(r.inc,{bare:true}):'—'}</td>
       <td class="right num">${r.exp?fmt(r.exp,{bare:true}):'—'}</td>
       <td class="right num" style="color:${r.cap?'var(--gold)':'var(--ink3)'}">${r.cap?fmt(r.cap,{bare:true}):'—'}</td>
-      <td class="right num" style="font-weight:600">${r.net!=null?fmt(r.net,{bare:true}):'—'}</td></tr>`));
+      <td class="right num" style="font-weight:600">${r.net!=null?fmt(r.net,{bare:true}):'—'}</td></tr>`);
+    // ---- расшифровка месяца (только факт) ----
+    const gl=(gid)=>groupSpend(r.k,gid);
+    const grpRows=expenseGroups().map(g=>({n:g.name,c:g.color,v:gl(g.id)})).filter(x=>x.v>0);
+    const capRows=(state.categories||[]).filter(c=>{const g=byId(state.groups,c.groupId); return g&&g.kind==='capital';})
+      .map(c=>({n:c.name,v:txnsOfMonth(r.k).filter(t=>t.categoryId===c.id).reduce((a,t)=>a+(+t.amount||0),0)})).filter(x=>x.v>0);
+    const srcRows=(state.incomeSources||[]).map(x=>({n:x.name,i:x.icon,v:monthIncomeBySource(r.k,x.id)})).filter(x=>x.v>0);
+    const line=(l,val,color,ind)=>`<div class="linrow" style="font-size:11.5px;padding:2px 0 2px ${ind||0}px"><span class="dim">${esc(l)}</span><span class="num" style="color:${color||'var(--ink2)'}">${fmt(val,{bare:true})}</span></div>`;
+    const nTx=txnsOfMonth(r.k).length;
+    const det=h(`<tr style="display:none"><td colspan="5" style="padding:8px 10px;background:var(--panel2)">
+      ${nTx===0?'<div class="dim" style="font-size:12px">Операций в этом месяце не было.</div>':`
+      <div class="linrow" style="font-size:12.5px;font-weight:700"><span>Доход</span><span class="num" style="color:var(--green)">${fmt(r.inc,{bare:true})}</span></div>
+      ${srcRows.map(x=>line((x.i?x.i+' ':'')+x.n, x.v, 'var(--green)', 12)).join('')||line('операций нет',0,null,12)}
+      <div class="linrow" style="font-size:12.5px;font-weight:700;margin-top:6px"><span>Расход</span><span class="num">${fmt(r.exp,{bare:true})}</span></div>
+      ${grpRows.map(x=>line(x.n, x.v, null, 12)).join('')||line('операций нет',0,null,12)}
+      ${capRows.length?`<div class="linrow" style="font-size:12.5px;font-weight:700;margin-top:6px"><span>В капитал</span><span class="num" style="color:var(--gold)">${fmt(r.cap,{bare:true})}</span></div>
+      ${capRows.map(x=>line(x.n, x.v, 'var(--gold)', 12)).join('')}`:''}
+      <div class="linrow" style="font-size:12.5px;font-weight:700;margin-top:6px;border-top:1px solid var(--line);padding-top:6px"><span>Осталось (доход − расход)</span><span class="num" style="color:${(r.inc-r.exp-r.cap)<0?'var(--red)':'var(--green)'}">${fmt(r.inc-r.exp-r.cap,{bare:true,plus:true})}</span></div>
+      <div class="linrow" style="font-size:11px"><span class="dim">Операций за месяц</span><span class="num">${nTx}</span></div>`}
+      </td></tr>`);
+    row.onclick=()=>{ det.style.display = det.style.display==='none'?'':'none'; };
+    tb.appendChild(row); tb.appendChild(det);
   });
   const lastNet=rows.filter(r=>r.net!=null).pop();
   tb.appendChild(h(`<tr style="border-top:2px solid var(--line2);font-weight:700"><td>Итого ${year}</td><td class="right num" style="color:var(--green)">${fmt(tInc,{bare:true})}</td><td class="right num">${fmt(tExp,{bare:true})}</td><td class="right num" style="color:var(--gold)">${fmt(tCap,{bare:true})}</td><td class="right num">${lastNet?fmt(lastNet.net,{bare:true}):'—'}</td></tr>`));
@@ -5593,25 +5763,49 @@ function capitalStage(){
   return 5;
 }
 function compoundFV(start, monthly, ratePct, years){ const r=(+ratePct||0)/100; let cap=+start||0; const y=Math.max(0,Math.round(years)); for(let i=0;i<y;i++) cap=cap*(1+r)+(+monthly||0)*12; return cap; }
+// Плановый взнос в капитал на ближайший месяц — из реальных плановых операций
+function plannedCapitalMonthly(k){
+  const capGroups=new Set((state.groups||[]).filter(g=>g.kind==='capital').map(g=>g.id));
+  return planItemsForMonth(k).filter(p=>{ if(p.type!=='expense') return false; const c=byId(state.categories,p.categoryId); return c && capGroups.has(c.groupId); })
+    .reduce((a,p)=>a+p.amount,0);
+}
 function compoundCalcCard(defStart, defMonthly){
-  const card=h(`<div class="card"><h3>Калькулятор капитала</h3>
-    <p class="muted" style="font-size:12px;margin:-2px 0 10px">Сила сложного процента наглядно: деньги приносят доход, доход тоже начинает приносить доход. Значения подставлены из ваших данных — меняйте свободно.</p>
+  const _k=curMonth;
+  const planCap=plannedCapitalMonthly(_k);
+  const factCap=Math.max(0, monthCapital(_k));
+  const saved=(state.settings&&state.settings.capCalc)||{};
+  const card=h(`<div class="card"><h3>Капитал: сейчас и просчёт</h3>
+    <div class="seg" id="ccTop" style="margin-bottom:12px"><button type="button" data-t="now" class="active">Сейчас</button><button type="button" data-t="calc">Просчёт</button></div>
+    <div id="ccNow">
+      <p class="muted" style="font-size:12px;margin:-2px 0 10px">Это ваша реальная картина — по данным из «Баланса» и «Плана».</p>
+      <div class="linrow" style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="dim">Работающий капитал<br><small style="font-size:10.5px">активы с ролью «работающий» в «Балансе»</small></span><span class="num" style="font-weight:700;color:var(--gold)">${fmtK(defStart)}</span></div>
+      <div class="linrow" style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="dim">Плановый взнос в капитал<br><small style="font-size:10.5px">${ymLabel(_k)} · из плановых операций</small></span><span class="num" style="font-weight:700;color:${planCap>0?'var(--gold)':'var(--ink3)'}">${planCap>0?fmt(planCap):'—'}</span></div>
+      <div class="linrow" style="padding:8px 0;border-bottom:1px solid var(--line)"><span class="dim">Фактически внесено в этом месяце</span><span class="num" style="font-weight:600;color:${factCap>0?'var(--green)':'var(--ink3)'}">${factCap>0?fmt(factCap):'—'}</span></div>
+      <div class="linrow" style="padding:8px 0"><span class="dim">Плановая доходность</span><span class="num" style="font-weight:600">${saved.rate!=null?saved.rate:7}% в год</span></div>
+      ${planCap>0
+        ? `<div class="okbox" style="margin-top:10px;font-size:12.5px">При взносе <b>${fmt(planCap)}</b> в месяц и доходности <b>${saved.rate!=null?saved.rate:7}%</b> через 20 лет капитал вырастет примерно до <b>${fmtK(compoundFV(defStart, planCap, (saved.rate!=null?saved.rate:7), 20))}</b>.</div>`
+        : `<div class="warnbox" style="margin-top:10px;font-size:12.5px"><b>Взносы в капитал не запланированы</b> на ${ymLabel(_k)}. Добавьте плановую операцию в группе «Капитал» (Накопления / Инвестиции / Подушка) — тогда здесь появится реальный прогноз роста.</div>`}
+      <button class="btn block" id="ccGoCalc" style="margin-top:10px">Просчитать варианты →</button>
+    </div>
+    <div id="ccCalcWrap" style="display:none">
+    <p class="muted" style="font-size:12px;margin:-2px 0 10px">Прикиньте, что будет при других взносах, сроке и доходности. Расчёт сохраняется.</p>
     <div class="seg" id="ccMode" style="margin-bottom:12px"><button type="button" data-m="fwd" class="active">Накопить капитал</button><button type="button" data-m="rev">Достичь цели</button></div>
     <div id="ccFwd">
-      <div class="field"><label>Стартовый капитал (что уже работает)</label><input class="num" id="ccStart" inputmode="numeric" value="${Math.round(defStart)}"></div>
-      <div class="field"><label>Взнос в месяц</label><input class="num" id="ccMon" inputmode="numeric" value="${Math.round(defMonthly)}"></div>
-      <div class="row" style="gap:10px"><div class="field" style="flex:1"><label>Доходность, %/год</label><input class="num" id="ccRate" inputmode="decimal" value="7"></div>
-        <div class="field" style="flex:1"><label>Срок, лет</label><input class="num" id="ccYears" inputmode="numeric" value="20"></div></div>
+      <div class="field"><label>Стартовый капитал (что уже работает)</label><input class="num" id="ccStart" inputmode="numeric" value="${Math.round(saved.start!=null?saved.start:defStart)}"></div>
+      <div class="field"><label>Взнос в месяц</label><input class="num" id="ccMon" inputmode="numeric" value="${Math.round(saved.mon!=null?saved.mon:(planCap||defMonthly))}"></div>
+      <div class="row" style="gap:10px"><div class="field" style="flex:1"><label>Доходность, %/год</label><input class="num" id="ccRate" inputmode="decimal" value="${saved.rate!=null?saved.rate:7}"></div>
+        <div class="field" style="flex:1"><label>Срок, лет</label><input class="num" id="ccYears" inputmode="numeric" value="${saved.years!=null?saved.years:20}"></div></div>
     </div>
     <div id="ccRev" style="display:none">
-      <div class="field"><label>Цель (капитал)</label><input class="num" id="ccTarget" inputmode="numeric" value="${Math.round(Math.max(defStart*2,3000000))}"></div>
-      <div class="field"><label>Стартовый капитал</label><input class="num" id="ccStart2" inputmode="numeric" value="${Math.round(defStart)}"></div>
-      <div class="row" style="gap:10px"><div class="field" style="flex:1"><label>Доходность, %/год</label><input class="num" id="ccRate2" inputmode="decimal" value="7"></div>
-        <div class="field" style="flex:1"><label>Срок, лет</label><input class="num" id="ccYears2" inputmode="numeric" value="15"></div></div>
+      <div class="field"><label>Цель (капитал)</label><input class="num" id="ccTarget" inputmode="numeric" value="${Math.round(saved.target!=null?saved.target:Math.max(defStart*2,3000000))}"></div>
+      <div class="field"><label>Стартовый капитал</label><input class="num" id="ccStart2" inputmode="numeric" value="${Math.round(saved.start2!=null?saved.start2:defStart)}"></div>
+      <div class="row" style="gap:10px"><div class="field" style="flex:1"><label>Доходность, %/год</label><input class="num" id="ccRate2" inputmode="decimal" value="${saved.rate2!=null?saved.rate2:7}"></div>
+        <div class="field" style="flex:1"><label>Срок, лет</label><input class="num" id="ccYears2" inputmode="numeric" value="${saved.years2!=null?saved.years2:15}"></div></div>
     </div>
     <svg id="ccChart" viewBox="0 0 300 90" style="width:100%;height:90px;margin-top:4px"></svg>
     <div id="ccOut" style="margin-top:8px"></div>
-    <p class="muted" style="font-size:11px;margin-top:8px">Ориентир, а не обещание: реальная доходность колеблется год к году. Что в вашей власти — <b>сколько откладывать</b> и <b>как долго не прерывать</b>.</p></div>`);
+    <p class="muted" style="font-size:11px;margin-top:8px">Ориентир, а не обещание: реальная доходность колеблется год к году. Что в вашей власти — <b>сколько откладывать</b> и <b>как долго не прерывать</b>.</p>
+    </div></div>`);
   const $=(s)=>card.querySelector(s);
   const num=(el)=>parseFloat(String(el.value).replace(/\s/g,"").replace(",","."))||0;
   function drawChart(pts, years){ const max=Math.max(1,...pts), w=300, ht=90; const coords=pts.map((p,i)=>`${(i/Math.max(1,years)*w).toFixed(1)},${(ht-p/max*ht).toFixed(1)}`).join(" "); $("#ccChart").innerHTML=`<polygon points="0,${ht} ${coords} ${w},${ht}" fill="color-mix(in srgb,var(--gold) 12%,transparent)"/><polyline points="${coords}" fill="none" stroke="var(--gold)" stroke-width="2.5"/>`; }
@@ -5636,8 +5830,26 @@ function compoundCalcCard(defStart, defMonthly){
         <p class="muted" style="font-size:11.5px;margin-top:8px">${more?'Это больше, чем вы откладываете сейчас — поищите, что сократить, или увеличьте срок/доходность.':'Вы уже откладываете достаточно для этой цели при такой доходности. 👍'}</p>`;
     }
   }
-  card.querySelectorAll("#ccMode [data-m]").forEach(b=>b.onclick=()=>{ card.querySelectorAll("#ccMode [data-m]").forEach(x=>x.classList.toggle("active",x===b)); $("#ccFwd").style.display=b.dataset.m==="fwd"?"":"none"; $("#ccRev").style.display=b.dataset.m==="rev"?"":"none"; recompute(); });
-  card.querySelectorAll("input").forEach(inp=>inp.oninput=recompute);
+  card.querySelectorAll("#ccMode [data-m]").forEach(b=>b.onclick=()=>{ card.querySelectorAll("#ccMode [data-m]").forEach(x=>x.classList.toggle("active",x===b)); $("#ccFwd").style.display=b.dataset.m==="fwd"?"":"none"; $("#ccRev").style.display=b.dataset.m==="rev"?"":"none"; recompute(); persist(); });
+  // «Сейчас» / «Просчёт»
+  const showTab=(t)=>{ card.querySelectorAll("#ccTop [data-t]").forEach(x=>x.classList.toggle("active",x.dataset.t===t)); $("#ccNow").style.display=t==="now"?"":"none"; $("#ccCalcWrap").style.display=t==="calc"?"":"none"; if(t==="calc") recompute(); };
+  card.querySelectorAll("#ccTop [data-t]").forEach(b=>b.onclick=()=>showTab(b.dataset.t));
+  $("#ccGoCalc").onclick=()=>showTab("calc");
+  // сохранение последнего расчёта
+  function persist(){
+    try{
+      state.settings=state.settings||{};
+      state.settings.capCalc={
+        start:num($("#ccStart")), mon:num($("#ccMon")), rate:num($("#ccRate")), years:num($("#ccYears")),
+        target:num($("#ccTarget")), start2:num($("#ccStart2")), rate2:num($("#ccRate2")), years2:num($("#ccYears2")),
+        mode:(($("#ccMode .active")||{}).dataset||{}).m||"fwd"
+      };
+      save(false);
+    }catch(e){}
+  }
+  let _pt=null;
+  card.querySelectorAll("input").forEach(inp=>inp.oninput=()=>{ recompute(); clearTimeout(_pt); _pt=setTimeout(persist, 600); });
+  if(saved.mode==="rev"){ const b=card.querySelector('#ccMode [data-m="rev"]'); if(b) b.click(); }
   recompute();
   return card;
 }
@@ -5657,48 +5869,46 @@ function pgCapital(v){
     ${kpiCard("Пассивный доход",fmt(pass),"в месяц, от капитала",pass>0?"pos":"")}
     ${kpiCard("Покрытие расходов",pct(cov),"по правилу 4% в год",cov>=1?"pos":"")}
   </div>`));
-  v.appendChild(h(`<div class="card"><h3>Что означают эти цифры</h3>
-    <p class="muted" style="font-size:12.5px;margin:-2px 0 0">
-      <b>Работающий капитал</b> — активы, которые приносят доход (фонды, доля в бизнесе, доходная недвижимость). Задаётся ролью «⚙️ работающий» у актива в «Балансе». Растить его — главная цель.<br><br>
-      <b>Капитал работает на X%</b> — какая доля вашего дохода уже приходит от капитала, а не от труда. Чем выше — тем меньше вы зависите от работы.<br><br>
-      <b>Пассивный доход</b> — сколько в месяц приносит капитал. Складывается из доходности работающих активов и доходов-источников типа «капитал».<br><br>
-      <b>Покрытие расходов</b> — какую часть ваших нужных трат уже мог бы покрыть капитал (по правилу 4% в год). 100% = финансовая независимость.</p></div>`));
-  const target=fiTarget(), wrPct=(state.settings&&state.settings.withdrawRatePct)||4, mult=fiMultiplier();
-  const fic=h(`<div class="card"><h3>Путь к независимости (правило ${mult}×)</h3>
-    <div class="linrow"><span class="num" style="font-weight:700;font-size:16px">${fmtK(wc)}</span><span class="dim num">цель ${fmtK(target)}</span></div>
-    <div class="meter"><span style="width:${fi*100}%;background:var(--gold)"></span></div>
-    <div class="linrow" style="margin-top:6px;font-size:12px"><span class="dim">${pct(fi)} пути</span><span class="dim">цель = нужные траты × 12 ÷ ${wrPct}%</span></div>
-    <div class="field" style="margin:12px 0 0"><label>Ставка изъятия, % в год</label>
-      <input id="wr" class="num" inputmode="decimal" value="${wrPct}" style="width:120px;text-align:center">
-      <small class="hint">Сколько процентов капитала можно снимать в год, не проедая его. Классика — 4% (это и есть правило 25×). Осторожнее — 3–3,5% (больше множитель). Множитель = 100 ÷ ставку.</small></div>
-    <p class="muted" style="font-size:12px;margin-top:8px">Когда работающий капитал достигнет цели, доход от него (около ${wrPct}% в год) сможет покрывать ваши существенные расходы без работы.</p></div>`);
-  const wrInp=fic.querySelector("#wr"); wrInp.onchange=()=>{ let v=parseFloat(String(wrInp.value).replace(",","."))||4; v=Math.max(1,Math.min(20,v)); state.settings.withdrawRatePct=v; save(); render_current(); };
-  v.appendChild(fic);
-  const res=reserveCapital(), per=personalCapital(), totC=res+wc+per;
-  if(totC>0){
-    const seg=(val,color)=> val>0?`<div style="width:${clamp(val/totC*100,0,100)}%;background:${color}"></div>`:'';
-    v.appendChild(h(`<div class="card"><h3>Как разложен капитал</h3>
-      <div style="display:flex;height:16px;border-radius:8px;overflow:hidden;margin:4px 0 12px;background:var(--line)">${seg(res,'var(--grp2)')}${seg(wc,'var(--gold)')}${seg(per,'var(--grp4)')}</div>
-      <div class="linrow" style="padding:5px 0"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--grp2);margin-right:7px"></span>🛟 Резерв</span><span class="num dim">${pct(res/totC)} · ${fmtK(res)}</span></div>
-      <div class="linrow" style="padding:5px 0"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--gold);margin-right:7px"></span>⚙️ Работающий</span><span class="num dim">${pct(wc/totC)} · ${fmtK(wc)}</span></div>
-      <div class="linrow" style="padding:5px 0"><span><span style="display:inline-block;width:9px;height:9px;border-radius:3px;background:var(--grp4);margin-right:7px"></span>🏠 Личное</span><span class="num dim">${pct(per/totC)} · ${fmtK(per)}</span></div>
-      ${wc>0 && wc/totC>0.85?`<div class="warnbox" style="margin:10px 0 0">Почти весь капитал в одном классе — подумайте о распределении рисков.</div>`:''}</div>`));
-  } else {
-    v.appendChild(h(`<div class="card"><div class="empty"><div class="big">⚙️</div>Отметьте активы по ролям в «Балансе» (резерв / работающий / личное) и тип дохода в «Настройке» (труд / капитал) — и здесь появится картина вашего работающего капитала.</div></div>`));
-  }
-  // Что делать, чтобы расти
-  const M=metrics(k), sr=M.savingsRate||0, dl=M.debtLoad||0, cushion=M.cushionMonths||0;
-  const steps=[];
-  if(cushion<3) steps.push("Соберите <b>подушку</b> 3–6 месяцев нужных трат на резервном счёте — это фундамент, без него инвестиции рискованны.");
-  if(dl>0.3) steps.push("<b>Гасите дорогой долг лавиной</b> (сначала самый высокий процент) — это гарантированная «доходность», равная ставке кредита.");
-  if(sr<0.15) steps.push("Поднимите <b>норму сбережений</b> к 15–20%: срежьте необязательные траты в «Качестве жизни», а не в нужном.");
-  steps.push("Каждый месяц направляйте свободные деньги в <b>работающий капитал</b> (фонды, инвестиции), а не в новый уровень трат.");
-  steps.push("Не прерывайте процесс: <b>время</b> и <b>регулярность</b> важнее удачного момента — ниже это видно на калькуляторе.");
-  v.appendChild(h(`<div class="card"><h3>Как улучшить положение и нарастить капитал</h3>
-    <ol style="margin:6px 0 0;padding-left:20px;font-size:13px;line-height:1.7">${steps.map(s=>`<li style="margin-bottom:6px">${s}</li>`).join("")}</ol>
-    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn sm" data-nav="dash">Дашборд →</button><button class="btn sm" data-nav="debts">Долги →</button><button class="btn sm" data-nav="goals">Цели →</button><button class="btn sm" data-nav="balance">Баланс →</button></div></div>`));
-
   v.appendChild(compoundCalcCard(wc, Math.max(0, monthCapital(k))));
+  // ---- Объединённый разбор: что значит цифра и что с ней делать ----
+  const _m=metrics(k); const dl2=_m.debtLoad||0, sr2=_m.savingsRate||0, cush2=_m.cushionMonths||0;
+  const expl=[
+    {t:"Работающий капитал", v:fmtK(wc),
+     what:"Деньги, которые сами зарабатывают: вклады, фонды, доходная недвижимость, доля в бизнесе. Квартира, где вы живёте, и машина сюда <b>не входят</b> — они не приносят дохода.",
+     do: wc<=0 ? "Пока его нет. Начните с малого: любой актив, приносящий доход. В «Балансе» отметьте актив ролью «⚙️ работающий» — и он появится здесь."
+               : "Растите его: каждый месяц отправляйте часть дохода в капитал. Это единственная цифра, которая когда-нибудь заменит вам зарплату."},
+    {t:"Капитал работает на", v:pct(ratio),
+     what:"Какая доля вашего дохода приходит от капитала, а не от вашего труда. 0% — работаете только вы. 100% — работают только деньги.",
+     do: ratio<0.05 ? "Почти всё держится на вашем труде — это нормально в начале. Первый шаг: сделать взносы в капитал <b>обязательной</b> статьёй плана, а не остатком."
+                    : "Хорошее начало. Дальше — увеличивайте взнос при росте дохода, а не уровень трат."},
+    {t:"Пассивный доход", v:fmt(pass),
+     what:"Сколько денег в месяц капитал приносит вам без вашего участия.",
+     do: "Он растёт двумя способами: больше капитала или выше доходность. Первый надёжнее и в вашей власти."},
+    {t:"Покрытие расходов", v:pct(cov),
+     what:"Какую долю ваших ежемесячных расходов уже мог бы оплатить капитал, если снимать 4% в год (безопасная норма). 100% — финансовая независимость: можно не работать.",
+     do: "Ускоряют две вещи: <b>больше откладывать</b> и <b>меньше тратить</b> — второе работает вдвойне, ведь снижает и саму планку."}
+  ];
+  const ec=h(`<div class="card"><h3>Что означают эти цифры и что с ними делать</h3>
+    <p class="muted" style="font-size:12px;margin:-2px 0 8px">Простыми словами — что показывает каждая цифра и какой следующий шаг.</p></div>`);
+  expl.forEach(x=>{
+    ec.appendChild(h(`<div style="padding:10px 0;border-top:1px solid var(--line)">
+      <div class="linrow"><span style="font-weight:700;font-size:13.5px">${x.t}</span><span class="num" style="font-weight:700;color:var(--gold)">${x.v}</span></div>
+      <p class="muted" style="font-size:12.5px;margin:6px 0 0">${x.what}</p>
+      <div style="margin-top:7px;padding:8px 10px;background:var(--panel2);border-radius:10px;font-size:12.5px"><b>Что делать:</b> ${x.do}</div>
+    </div>`));
+  });
+  v.appendChild(ec);
+
+  // ---- Персональные шаги (из ваших данных) ----
+  const steps2=[];
+  if(cush2<3) steps2.push(`<b>Сначала подушка.</b> Сейчас её хватит на ${cush2.toFixed(1)} мес. Доведите до 3–6 месяцев расходов — иначе любая поломка отбросит вас назад и заставит лезть в долги.`);
+  if(dl2>0.3) steps2.push(`<b>Гасите дорогой долг.</b> Долговая нагрузка ${pct(dl2)} — это много. Досрочное гашение даёт гарантированную «доходность», равную ставке кредита: это выгоднее любых инвестиций.`);
+  if(sr2<0.15) steps2.push(`<b>Поднимите норму сбережений.</b> Сейчас ${pct(sr2)}, цель — 15–20%. Режьте «Качество жизни», а не нужное.`);
+  if(plannedCapitalMonthly(k)<=0) steps2.push(`<b>Запланируйте взнос в капитал.</b> На ${ymLabel(k)} взносы не запланированы. Пока капитал пополняется «по остатку», он не растёт — сделайте его плановой операцией, как коммуналку.`);
+  steps2.push(`<b>Не прерывайте.</b> Время и регулярность дают больше, чем удачный момент входа: посмотрите в калькуляторе, какую долю создаёт «наросло само».`);
+  v.appendChild(h(`<div class="card"><h3>Ваши следующие шаги</h3>
+    <ol style="margin:6px 0 0;padding-left:20px;font-size:13px;line-height:1.7">${steps2.map(x=>`<li style="margin-bottom:8px">${x}</li>`).join("")}</ol>
+    <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:12px"><button class="btn sm" data-nav="plan">План →</button><button class="btn sm" data-nav="debts">Долги →</button><button class="btn sm" data-nav="goals">Цели →</button><button class="btn sm" data-nav="balance">Баланс →</button></div></div>`));
 }
 /* ============================================================
    ПОМОЩЬ — пошаговое руководство (листаемые карточки)
@@ -5995,6 +6205,17 @@ function pgSettings(v){
     <button class="btn ${simpleOn?'':'primary'} block" id="simpleToggle" style="padding:12px">${simpleOn?'Вернуть полный режим':'Включить простой режим'}</button></div>`);
   simpleCard.querySelector("#simpleToggle").onclick=()=>{ try{ if(isSimpleMode())localStorage.removeItem(LS_SIMPLE); else localStorage.setItem(LS_SIMPLE,"1"); }catch(e){} renderNav(); render_current(); };
   if(!part) tabAppend("general", simpleCard);
+  // --- автозакрытие месяца ---
+  if(!part){
+    const on = (state.settings||{}).autoCloseMonth !== false;
+    const ac=h(`<div class="card"><h3>Закрытие месяца</h3>
+      <p class="muted" style="font-size:12.5px;margin:-2px 0 8px">Закрытие месяца фиксирует снимок: чистый капитал, стоимость активов, остатки долгов, подушку и показатели. Без него история не накапливается.</p>
+      <div class="linrow" style="padding:8px 0"><span>Закрывать месяц автоматически<br><small class="dim" style="font-size:11px">при первом входе в новом месяце</small></span>
+        <button class="btn sm ${on?'primary':''}" id="acTgl">${on?'Включено':'Выключено'}</button></div>
+      <small class="hint">Снимок берёт остатки на момент закрытия. Если остатки по кредитам к концу месяца изменились — уточните их вручную, снимок пересчитается. Если вы не заходили больше 3 месяцев, автозакрытие не сработает: за давние месяцы точные остатки восстановить нельзя, их нужно закрыть вручную.</small></div>`);
+    ac.querySelector('#acTgl').onclick=()=>{ state.settings=state.settings||{}; state.settings.autoCloseMonth = !((state.settings.autoCloseMonth)!==false); save(); render_current(); };
+    tabAppend("general", ac);
+  }
   tabAppend(part?"account":"general", fontSizeCard());
   tabAppend(part?"account":"general", appearanceCard());
 
@@ -6668,7 +6889,6 @@ document.getElementById("mPrev").onclick=()=>{curMonth=addMonths(curMonth,-1);re
 document.getElementById("mNext").onclick=()=>{curMonth=addMonths(curMonth,1);render_current();};
 document.getElementById("mLbl").onclick=openMonthPicker;
 document.getElementById("syncBtn").onclick=()=>{ if(ACCT.linked) SRV.syncNow(true); };
-document.getElementById("meBtn").onclick=openMemberPicker;
 window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet(); });
 ["gesturestart","gesturechange","gestureend"].forEach(ev=>document.addEventListener(ev,e=>e.preventDefault(),{passive:false}));
 
@@ -6820,6 +7040,7 @@ function bootApp(){
   try{ migrateCashToPersonal(); }catch(e){}
   try{ migratePlannedScope(); }catch(e){}
   try{ migratePlansToOps(); }catch(e){}
+  try{ autoCloseMonths(); }catch(e){}
   document.getElementById("gate").classList.remove("show");
   document.getElementById("app").style.visibility="visible";
   renderNav(); renderMe(); render_current();
@@ -6852,6 +7073,15 @@ restoreDurable().then(n=>{
   startAuthFlow();
 }).catch(()=>{ try{ startAuthFlow(); }catch(e){} });
 console.log("Готово.");
+</script>
+<script id="wheel-zoom-guard">
+/* Запрет зума щипком на тачпаде/десктопе (Ctrl+колесо, жест pinch) и двойным тапом */
+(function(){
+  const stop=e=>{ if(e.ctrlKey){ e.preventDefault(); } };
+  window.addEventListener('wheel', stop, {passive:false});
+  ['gesturestart','gesturechange','gestureend'].forEach(ev=>document.addEventListener(ev, e=>e.preventDefault(), {passive:false}));
+  window.addEventListener('keydown', e=>{ if((e.ctrlKey||e.metaKey) && ['+','-','=','_'].includes(e.key)) e.preventDefault(); }, {passive:false});
+})();
 </script>
 </body>
 </html>
