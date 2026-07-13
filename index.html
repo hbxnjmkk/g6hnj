@@ -2766,9 +2766,8 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.10-design2";
+const APP_VERSION="v7.14-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
-function simpleHash(s){ let h=5381>>>0,h2=52711>>>0; for(let i=0;i<s.length;i++){const c=s.charCodeAt(i); h=(((h<<5)+h)+c)>>>0; h2=(((h2<<5)+h2)^c)>>>0;} return h.toString(16).padStart(8,"0")+h2.toString(16).padStart(8,"0"); }
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
 const nowISO = () => new Date().toISOString();
@@ -2797,7 +2796,6 @@ function fmtNumInput(el){
   el.value=(intp?groupNum(intp):"")+dec;
 }
 function attachNum(el){ if(!el)return; el.addEventListener("input",()=>{ const end=(el.selectionStart===el.value.length); fmtNumInput(el); if(end){ try{ el.selectionStart=el.selectionEnd=el.value.length; }catch(e){} } }); fmtNumInput(el); }
-function parseNum(s){ return parseFloat(String(s).replace(/[\s\u202F\u00A0]/g,"").replace(",",".")); }
 const MONTHS_RU=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
 const MONTHS_RU_SHORT=["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"];
 function ym(d){ if(typeof d==='string') return d.slice(0,7); const x=new Date(d); return x.getFullYear()+"-"+String(x.getMonth()+1).padStart(2,"0"); }
@@ -3012,6 +3010,12 @@ function catScopeVisible(c){ if((c.scope||'shared')==='shared') return famView()
 function catsOfView(gid){ return catsOf(gid).filter(catScopeVisible); }
 function catsForEntry(){ const me=activeMember(); return expenseCats().filter(c=>(c.scope||'shared')==='shared' || (c.scope==='personal' && me && c.ownerId===me.id)); }
 function incForView(){ if(famView()) return state.incomeSources; const me=activeMember(); return state.incomeSources.filter(s=>me && s.ownerId===me.id); }
+function srcOwner(s){ return (s.scope==='personal'||s.ownerId) ? (s.ownerId||null) : null; }
+function personalSources(mid){ return state.incomeSources.filter(s=>srcOwner(s)===mid); }
+// плановый доход участника (по его личным источникам)
+function memberPlannedIncome(k,mid){ return personalSources(mid).reduce((a,s)=>a+incomeSrcPlanned(k,s.id),0); }
+// фактический доход участника за месяц (по memberId операций — кто получил)
+function memberFactIncome(k,mid){ return txnsOfMonth(k).filter(t=>t.type==='income' && (t.memberId||null)===mid).reduce((a,t)=>a+(+t.amount||0),0); }
 function ensureOwnerLabel(){ if(ACCT.role==='member') return null; let ow=state.members.find(m=>m.accountType==='owner'); if(!ow){ ow={id:uid(),name:(ACCT.email?String(ACCT.email).split('@')[0]:'Я'),emoji:'🙂',color:MEMBER_COLORS[0],accountType:'owner',startCash:0,startCashDate:todayISOdate()}; state.members.push(ow); if(!curMember()||!memberById(curMember())) setCurMember(ow.id); save(false); } return ow; }
 // Миграция (вариант «а»): единый ручной «Кэш на счетах» → в личный стартовый остаток владельца; семейный кэш теперь = сумма личных остатков.
 // Порция A: переносим плоские планы (state.plans / state.incomePlans) в плановые операции с датами
@@ -3085,7 +3089,6 @@ function groupSpend(k,gid){ return txnsOfMonth(k).filter(t=>t.type==="expense" &
 function catSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid).reduce((a,t)=>a+(+t.amount||0),0); }
 function subSpend(k,sid){ return txnsOfMonth(k).filter(t=>t.subId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
 function catDirectSpend(k,cid){ return txnsOfMonth(k).filter(t=>t.categoryId===cid && !t.subId).reduce((a,t)=>a+(+t.amount||0),0); }
-function incomeSrcActual(k,sid){ return txnsOfMonth(k).filter(t=>t.type==='income'&&t.categoryId===sid).reduce((a,t)=>a+(+t.amount||0),0); }
 function planOpApplied(opId,k){
   const all=planItemsForMonth(k); const p=all.find(x=>x.id===opId); if(!p||p.type!=='expense') return 0;
   const isSub=!!p.subId;
@@ -3158,13 +3161,6 @@ function memberMonthIncome(m,k){ if(!m) return 0; return txnsOfMonth(k).filter(t
 function memberMonthExpense(m,k){ if(!m) return 0; return txnsOfMonth(k).filter(t=>t.type==='expense'&&(t.memberId||null)===m.id).reduce((a,t)=>a+(+t.amount||0),0); }
 // личный остаток на дату (для стартовой точки личного календаря)
 function memberBalanceAsOf(m, dateExcl){ if(!m) return 0; const from=m.startCashDate||'1970-01-01'; let bal=+m.startCash||0; state.txns.forEach(t=>{ if((t.memberId||null)!==m.id) return; const dd=String(t.date); if(dd<from || dd>=dateExcl) return; if(t.type==='income') bal+=(+t.amount||0); else if(t.type==='expense' && reducesCash(t.categoryId,t.subId)) bal-=(+t.amount||0); }); return bal; }
-function setLiquidCash(v){
-  v=Math.max(0,Math.round(+v||0));
-  const liq=state.assets.filter(a=>a.liquid);
-  if(liq.length===1){ liq[0].value=v; }
-  else if(liq.length===0){ if(v>0) state.assets.push({id:uid(),name:"Счета и наличные",kind:"кэш",value:v,liquid:true}); }
-  else { const others=liq.slice(1).reduce((a,x)=>a+(+x.value||0),0); liq[0].value=Math.max(0,v-others); }
-}
 // --- Пассивы: тело и проценты привязаны к конкретному долгу через авто-подкатегории ---
 const DEBT_CAT="c_debt", INT_CAT="c_int";
 function liabPrincipalSub(L){ return state.subcategories.find(s=>s.liabId===L.id && s.debtRole==='principal' && !s.deleted); }
@@ -3571,7 +3567,7 @@ function familyMembersCard(){
   else draw([],true);
   return card;
 }
-function familyCard(){ return familyMembersCard(); }   // совместимость
+   // совместимость
 function getFontSize(){ try{ return localStorage.getItem(LS_FONT)||"md"; }catch(e){ return "md"; } }
 function applyFont(){ try{ const z={sm:0.9,md:1,lg:1.12}[getFontSize()]||1; document.body.style.zoom=z; }catch(e){} }
 function fontSizeCard(){
@@ -3757,10 +3753,10 @@ function openAddTxn(preset){
   const render=()=>{
     const isExp = draft.type!=="income";
     const _me = activeMember();
-    const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'}));
-    const myC  = isExp ? allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id) : [];
-    const famC = isExp ? allCats.filter(c=>(c.scope||'shared')==='shared') : [];
-    const showCatTabs = isExp && (myC.length>0 || famC.length>0);
+    const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰',scope:s.scope||((s.ownerId)?'personal':'shared'),ownerId:s.ownerId}));
+    const myC  = allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id);
+    const famC = allCats.filter(c=>(c.scope||'shared')==='shared');
+    const showCatTabs = (myC.length>0 || famC.length>0);
     if(showCatTabs && draft.catTab==null) draft.catTab = draft.categoryId ? (myC.some(c=>c.id===draft.categoryId)?'mine':'family') : (myC.length?'mine':'family');
     const cats = !isExp ? allCats : (showCatTabs ? (draft.catTab==='mine'?myC:famC) : allCats);
     const subs = draft.categoryId?subsOf(draft.categoryId):[];
@@ -3850,13 +3846,14 @@ function openAddTxn(preset){
 }
 function editTxn(id){
   const t=byId(state.txns,id); if(!t)return;
+  if(!canSeeTxnDetail(t)){ toast("Это личная операция другого участника"); return; }
   let draft={...t};
   const render=()=>{
     const isExp = draft.type!=="income"; const _me=activeMember();
-    const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰'}));
-    const myC  = isExp ? allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id) : [];
-    const famC = isExp ? allCats.filter(c=>(c.scope||'shared')==='shared') : [];
-    const showCatTabs = isExp && (myC.length>0 || famC.length>0);
+    const allCats = isExp ? frequentCats() : state.incomeSources.map(s=>({id:s.id,name:s.name,icon:'💰',scope:s.scope||((s.ownerId)?'personal':'shared'),ownerId:s.ownerId}));
+    const myC  = allCats.filter(c=>c.scope==='personal' && _me && c.ownerId===_me.id);
+    const famC = allCats.filter(c=>(c.scope||'shared')==='shared');
+    const showCatTabs = (myC.length>0 || famC.length>0);
     if(showCatTabs && draft.catTab==null) draft.catTab= draft.categoryId ? (myC.some(c=>c.id===draft.categoryId)?'mine':'family') : (myC.length?'mine':'family');
     const cats = !isExp ? allCats : (showCatTabs ? (draft.catTab==='mine'?myC:famC) : allCats);
     const subs=draft.categoryId?subsOf(draft.categoryId):[];
@@ -3899,6 +3896,10 @@ function editTxn(id){
    ============================================================ */
 function render(){ render_current(); }
 function render_current(){
+  _pimPass=new Map();
+  try{ return _render_current_inner(); } finally { _pimPass=null; }
+}
+function _render_current_inner(){
   document.getElementById("mLbl").textContent=ymShort(curMonth);
   const mn=document.getElementById("monthNav"); if(mn) mn.style.visibility=(route==="forecast")?"hidden":"visible";
   if(typeof renderMe==="function") renderMe();
@@ -4049,7 +4050,9 @@ function pgToday(v){
   </div>`));
 
   // плановые к подтверждению на сегодня (доходы + расходы, разовые + повторяющиеся)
-  const duep = (k===realMonth()) ? duePlanned() : [];
+  // «Подтвердить плановые»: семейные (общие категории) — всем; личные — только свои
+  const _mid = (function(){ const me=activeMember(); return me?me.id:null; })();
+  const duep = (k===realMonth()) ? duePlanned().filter(x=> plannedIsShared(x.p) || plannedScopeOwner(x.p)===_mid || (x.p.memberId||null)===_mid) : [];
   const totalPlanned = plannedActive().length;
   const pcard=h(`<div class="card"><h3>Подтвердить плановые на сегодня ${duep.length?`<span class="tag">${duep.length}</span>`:''}<button class="btn sm ghost" id="planManage" style="margin-left:auto">Плановые</button></h3></div>`);
   pcard.querySelector("#planManage").onclick=openPlannedManager;
@@ -4091,16 +4094,17 @@ function dayPlan(k, memberId){
   const isCur=(k===rm), isFuture=(k>rm);
   const todayDay=isCur?new Date().getDate():(monthLen+1);
   const txM=txnsOfMonth(k).filter(t=>!memberId||(t.memberId||null)===memberId);
-  const plan=plannedForMonth(k).filter(p=>!memberId||(p.memberId||null)===memberId);
+  const plan=plannedForMonth(k).filter(p=>!memberId||(p.memberId||null)===memberId).filter(p=>memberId?true:(canSeePlannedDetail(p)||plannedScopeOwner(p)===null||true));
   const days=[]; let bal=start, firstGap=null, plannedRecurExp=0;
   for(let d=1; d<=monthLen; d++){
     const date=k+"-"+String(d).padStart(2,"0");
     const items=[]; let ins=0, outs=0;
     txM.filter(t=>+String(t.date).slice(8,10)===d).forEach(t=>{
       const amt=+t.amount||0;
+      const _tp=!canSeeTxnDetail(t); const _tl=_tp?("Личная трата · "+(((memberById(t.memberId)||{}).name)||"участник")):null;
       if(t.type==="income"){ ins+=amt; items.push({kind:"fact",type:"income",label:catName(t.categoryId),amount:amt}); }
-      else if(!reducesCash(t.categoryId,t.subId)){ items.push({kind:"fact",type:"expense",capital:true,label:(t.comment||catName(t.categoryId)),amount:amt}); } // в накопления/копилку — не уменьшает кэш
-      else { outs+=amt; items.push({kind:"fact",type:"expense",label:(t.comment||catName(t.categoryId)),amount:amt}); }
+      else if(!reducesCash(t.categoryId,t.subId)){ items.push({kind:"fact",type:"expense",capital:true,label:(_tl||t.comment||catName(t.categoryId)),amount:amt}); } // в накопления/копилку — не уменьшает кэш
+      else { outs+=amt; items.push({kind:"fact",type:"expense",label:(_tl||t.comment||catName(t.categoryId)),amount:amt}); }
     });
     // плановые: будущие — на свою дату; просроченные в этом месяце (ещё не проведены) — переносим на сегодня
     plan.forEach(p=>{
@@ -4110,10 +4114,11 @@ function dayPlan(k, memberId){
       else return; // прошлый месяц — план не показываем
       if(ed!==d) return;
       const amt=+p.amount||0;
+      const _pp=!canSeePlannedDetail(p); const _pl=_pp?("Личная плановая · "+(((memberById(p.memberId)||{}).name)||"участник")):p.label;
       if(p.type==="income"){ ins+=amt; items.push({kind:"plan",type:"income",label:p.label,amount:amt,overdue:isCur&&p.day<todayDay}); }
       else { plannedRecurExp+=amt;
-        if(!reducesCash(p.categoryId,p.subId)){ items.push({kind:"plan",type:"expense",capital:true,label:p.label,amount:amt,overdue:isCur&&p.day<todayDay}); }
-        else { outs+=amt; items.push({kind:"plan",type:"expense",label:p.label,amount:amt,overdue:isCur&&p.day<todayDay}); }
+        if(!reducesCash(p.categoryId,p.subId)){ items.push({kind:"plan",type:"expense",capital:true,label:_pl,amount:amt,overdue:isCur&&p.day<todayDay}); }
+        else { outs+=amt; items.push({kind:"plan",type:"expense",label:_pl,amount:amt,overdue:isCur&&p.day<todayDay}); }
       }
     });
     bal += ins-outs;
@@ -4188,8 +4193,46 @@ const DASH_INFO={
   cushion:{t:"Подушка безопасности",d:"На сколько месяцев жизни хватит ваших ликвидных средств (кэш, вклады), если доход исчезнет. Считается как «ликвидные активы ÷ нужные ежемесячные траты». Ориентир — 3–6 месяцев. Это фундамент: без подушки инвестировать рискованно."}
 };
 function showDashInfo(key){ const i=DASH_INFO[key]; if(!i)return; openSheet(`<h3>${i.t}</h3><p style="font-size:14px;line-height:1.65;color:var(--ink2)">${i.d}</p><button class="btn primary block" id="dic" style="margin-top:12px;padding:12px">Понятно</button>`, el=>{ el.querySelector('#dic').onclick=closeSheet; }); }
+/* ---------- Приватность личного ----------
+   Личные РАСХОДЫ участника видит только он сам: у остальных строка маскируется
+   («Личная трата · Имя», сумма видна — она входит в семейные итоги).
+   Личные ДОХОДЫ по договорённости показываются с источником (прозрачность семьи). */
+function myMemberId(){ const me=activeMember(); return me?me.id:null; }
+function txnOwner(t){
+  const c=byId(state.categories,t.categoryId);
+  if(c) return (c.scope||'shared')==='personal' ? (c.ownerId||null) : null;
+  const s2=incomeSrcById(t.categoryId);
+  if(s2) return (s2.scope==='personal'||s2.ownerId) ? (s2.ownerId||null) : null;
+  return null;
+}
+// можно ли показать детали операции (категория/подкатегория/комментарий)
+function canSeeTxnDetail(t){
+  if(t.type==='income') return true;              // доходы прозрачны для семьи
+  const own=txnOwner(t);
+  return own===null || own===myMemberId();
+}
+// можно ли показать детали плановой операции
+function canSeePlannedDetail(p){
+  if(p.type==='income') return true;
+  const own=plannedScopeOwner(p);
+  return own===null || own===myMemberId();
+}
+// показывать ли операцию в списке вообще (в личном виде — только свои и общие)
+function txnVisible(t){
+  if(famView()) return true;
+  const mid=myMemberId();
+  return (t.memberId||null)===mid || txnOwner(t)===mid || (txnOwner(t)===null && (t.memberId||null)===mid);
+}
 function txnRow(t){
   const inc=t.type==="income";
+  const priv=!canSeeTxnDetail(t);
+  if(priv){
+    const who=(memberById(t.memberId)||{}).name||'участник';
+    return h(`<div class="lrow" style="opacity:.75"><div class="ic" style="background:var(--panel2);color:var(--ink3)">🔒</div>
+      <div style="min-width:0"><div class="t1 dim">Личная трата</div>
+      <div class="t2">${esc(who)} · ${esc(fmtDate(t.date))}</div></div>
+      <div class="amt num exp">−${fmt(t.amount,{bare:true})}</div></div>`);
+  }
   const row=h(`<div class="lrow"><div class="ic" style="background:${tint(catColor(t.categoryId),13)};color:${catColor(t.categoryId)}">${catIcon(t.categoryId)}</div>
     <div style="min-width:0"><div class="t1">${esc(catName(t.categoryId))}${t.subId?' · '+esc(subName(t.subId)):''}</div>
     <div class="t2">${t.memberId?memberBadge(t.memberId)+' · ':''}${esc(fmtDate(t.date))}${t.comment?' · '+esc(t.comment):''}</div></div>
@@ -4229,7 +4272,17 @@ function plannedForMonth(k){
   return out;
 }
 // ВСЕ плановые операции месяца (включая уже подтверждённые) — для стабильных сумм ПЛАНА (бюджета)
+// Кэш живёт ТОЛЬКО внутри одного прохода рендера (данные в это время не меняются) —
+// это убирает сотни повторных пересчётов и не может устареть.
+let _pimPass=null;
+function clearPlanCache(){ _pimPass=null; }
 function planItemsForMonth(k){
+  if(!_pimPass) return _planItemsForMonthRaw(k);
+  const _ck=k+'|'+viewScope;
+  const _hit=_pimPass.get(_ck); if(_hit) return _hit;
+  const _res=_planItemsForMonthRaw(k); _pimPass.set(_ck,_res); return _res;
+}
+function _planItemsForMonthRaw(k){
   const out=[];
   plannedActive().forEach(p=>{
     if(p.repeat){ if(!plannedSkippedInMonth(p,k)) out.push({type:p.type,amount:+p.amount||0,categoryId:p.categoryId,subId:p.subId||null,memberId:p.memberId||null,day:Math.min(+p.day||1,mlenOf(k)),label:p.label||catName(p.categoryId),repeat:true,id:p.id}); }
@@ -4294,6 +4347,13 @@ function openPlannedManager(){
 }
 function editPlanned(id, preset){
   preset=preset||{};
+  try{
+    const _chk = id ? byId(state.planned,id) : preset;
+    if(_chk && _chk.categoryId && plannedIsShared(_chk) && !canPlanFamily()){
+      toast("Семейный план ведёт владелец. Свои плановые заводите в личных категориях.");
+      return;
+    }
+  }catch(e){}
   const p=id?byId(state.planned,id):{id:null,type:preset.type||"expense",amount:"",categoryId:(preset.categoryId||null),subId:(preset.subId||null),repeat:(preset.repeat!=null?preset.repeat:true),day:1,date:"",label:"",active:true};
   const draft={type:p.type||"expense",categoryId:p.categoryId,subId:p.subId||null,repeat:p.repeat!==false,day:p.day||1,date:p.date||todayISOdate(),amount:p.amount,label:p.label||""};
   const render=()=>{
@@ -4352,7 +4412,7 @@ let opsFilter={type:null,cat:null,sub:null,member:null,q:"",planned:false,capita
 function opsPeriodLabel(){ const p=opsFilter.period; if(p.mode==="year")return curMonth.slice(0,4)+" год"; if(p.mode==="all")return "всё время"; if(p.mode==="range")return (p.from?fmtDate(p.from):"…")+" – "+(p.to?fmtDate(p.to):"…"); return ymLabel(curMonth); }
 function opsBaseTxns(){
   const p=opsFilter.period||{mode:"month"};
-  let list=state.txns.slice();
+  let list=state.txns.filter(txnVisible);   // личный вид — только свои и общие
   if(p.mode==="month") list=list.filter(t=>t.date.slice(0,7)===curMonth);
   else if(p.mode==="year") list=list.filter(t=>t.date.slice(0,4)===curMonth.slice(0,4));
   else if(p.mode==="range"){ const f=p.from||"0000-01-01", to=p.to||"9999-12-31"; list=list.filter(t=>t.date>=f && t.date<=to); }
@@ -4398,7 +4458,7 @@ function pgOps(v){
   }
   // категории (с учётом типа)
   const baseForCats=all.filter(t=>!opsFilter.type||t.type===opsFilter.type);
-  const usedCats=[...new Set(baseForCats.map(t=>t.categoryId))];
+  const usedCats=[...new Set(baseForCats.filter(canSeeTxnDetail).map(t=>t.categoryId))];
   const catRow=h(`<div class="chiprow" style="margin-bottom:6px"><button class="chip ${!opsFilter.cat?'active':''}" data-c="">Все статьи</button>${usedCats.map(c=>`<button class="chip ${opsFilter.cat===c?'active':''}" data-c="${c}">${esc(catIcon(c))} ${esc(catName(c))}</button>`).join("")}</div>`);
   catRow.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{ opsFilter.cat=b.dataset.c||null; opsFilter.sub=null; render_current(); });
   fbox.appendChild(catRow);
@@ -4559,7 +4619,7 @@ function pgPlan(v){
   bindPlanRow(incCard.querySelector('.phead'), ()=>{ planOpen.has('inc')?planOpen.delete('inc'):planOpen.add('inc'); render_current(); }, null);
   const _incList=incForView();
   if(!_incList.length) incBody.appendChild(h(`<div class="empty" style="padding:12px">Источников дохода нет — нажмите ＋</div>`));
-  _incList.forEach(s=>{
+  const _renderSrc=(s)=>{
     const srcTotal=incomeSrcPlanned(k,s.id);
     const row=h(`<div class="prow psrc"><div class="ic" style="width:26px;height:26px;background:${tint('var(--grpI)',13)};color:var(--grpI)">${SVG_MONEY}</div>
       <span class="pname" style="font-weight:600">${esc(s.name)}<span class="pkind">${(s.kind||'labor')==='capital'?'Капитал':'Труд'}</span></span>
@@ -4573,7 +4633,18 @@ function pgPlan(v){
       const pr=h(`<div class="pop${done?' done':''}"><span class="opi">${p.repeat?SVG_REP:SVG_CAL}</span><span class="opl">${esc(p.label)} · ${String(p.day).padStart(2,'0')}.${k.slice(5,7)}</span><span class="num opa">+${fmt(p.amount,{bare:true})}</span></div>`);
       pr.onclick=e=>{ e.stopPropagation(); editPlanned(p.id); }; incBody.appendChild(pr);
     });
-  });
+  };
+  if(famView()){
+    const shared=_incList.filter(s=>!srcOwner(s));
+    if(shared.length){ incBody.appendChild(h(`<div class="pmeta" style="margin:6px 0 2px 6px;font-weight:600">Общие</div>`)); shared.forEach(_renderSrc); }
+    (state.members||[]).forEach(mm=>{
+      const own=_incList.filter(s=>srcOwner(s)===mm.id);
+      if(!own.length) return;
+      const t=memberPlannedIncome(k,mm.id);
+      incBody.appendChild(h(`<div class="pmeta" style="margin:10px 0 2px 6px;font-weight:600">Доходы ${esc(mm.name)}${t>0?` · ${fmt(t,{bare:true})}`:''}</div>`));
+      own.forEach(_renderSrc);
+    });
+  } else _incList.forEach(_renderSrc);
   v.appendChild(incCard);
 
   // ---------- РАСХОДЫ ----------
@@ -4588,10 +4659,11 @@ function pgPlan(v){
       ${gTot>0?`<div class="pbar sm"><i style="width:${Math.min(100,gDone/gTot*100)}%;background:${g.color}"></i></div>`:''}
       <div class="pbody"></div></div>`);
     const body=card.querySelector('.pbody');
+    const _renderCats = gOpen;   // ленивo: содержимое строим только у раскрытой группы
     card.querySelector('[data-addcat]').onclick=e=>{ e.stopPropagation(); const nm=prompt("Название новой "+(famView()?'общей':'вашей личной')+" категории в группе «"+g.name+"»:"); if(nm&&nm.trim()){ const em=(prompt("Эмодзи (по желанию):","🏷️")||"").trim()||"🏷️"; const c={id:uid(),groupId:g.id,name:nm.trim(),icon:em,scope:famView()?'shared':'personal'}; if(!famView()){ const me=activeMember(); if(me)c.ownerId=me.id; } state.categories.push(c); planOpen.add(g.id); save(); render_current(); } };
     bindPlanRow(card.querySelector('.phead'), ()=>{ planOpen.has(g.id)?planOpen.delete(g.id):planOpen.add(g.id); render_current(); }, null);
 
-    cats.forEach(c=>{
+    if(_renderCats) cats.forEach(c=>{
       const subs=subsOf(c.id);
       const cTot=planCat(k,c.id);
       const cOpen=planOpen.has(c.id);
@@ -4605,7 +4677,7 @@ function pgPlan(v){
       bindPlanRow(cel.querySelector('.chead'), ()=>{ planOpen.has(c.id)?planOpen.delete(c.id):planOpen.add(c.id); render_current(); }, ()=>openCatSheet(c));
 
       if(subs.length){
-        subs.forEach(su=>{
+        if(cOpen) subs.forEach(su=>{
           const locked=!!(su.liabId||su.goalId);
           const badge = su.liabId?' <span class="pill" style="padding:1px 6px;font-size:9px">пассив</span>':(su.goalId?' <span class="pill" style="padding:1px 6px;font-size:9px">цель</span>':'');
           const sTot=planSub(k,su.id), sDone=planDoneSub(k,su.id), spent=subSpend(k,su.id);
@@ -4635,7 +4707,7 @@ function pgPlan(v){
           if(!locked) bindPlanRow(srow, null, ()=>openSubSheet(su));
           cb.appendChild(w);
         });
-      } else {
+      } else if(cOpen) {
         const cTotD=planCatDirect(k,c.id);
         const w=h(`<div class="psubwrap"><div class="prow psub"><span class="pname dim" style="font-size:12px">без подкатегорий</span>
           <span class="num" style="font-weight:600">${cTotD>0?fmt(cTotD,{bare:true}):'—'}</span></div><div class="opsbox"></div></div>`);
@@ -4721,7 +4793,14 @@ function pgFact(v){
     ${kpiCard("Факт доходов",fmt(incFact),"по плану "+fmt(incFromPlan,{bare:true})+" · вне "+fmt(incUnplan,{bare:true}),"")}
     ${kpiCard("Остаток ожидаемых",fmt(incRest),incPlan?"из плана "+fmt(incPlan,{bare:true}):"плана нет","")}
   </div>`));
-  v.appendChild(h(`<div class="card" style="padding:12px 14px;margin-bottom:6px"><div class="linrow" style="font-size:13px"><span class="dim">Итого получено</span><span class="num" style="font-weight:700">${fmt(incFact)}</span></div><div class="linrow" style="font-size:11.5px;margin-top:4px"><span class="dim">плановые ${fmt(incFromPlan,{bare:true})} + внеплановые ${fmt(incUnplan,{bare:true})}</span>${incOver>0?`<span class="num" style="color:var(--green)">превышение плана +${fmt(incOver,{bare:true})}</span>`:''}</div></div>`));
+  const _incCard=h(`<div class="card" style="padding:12px 14px;margin-bottom:6px"><div class="linrow" style="font-size:13px"><span class="dim">Итого получено</span><span class="num" style="font-weight:700">${fmt(incFact)}</span></div><div class="linrow" style="font-size:11.5px;margin-top:4px"><span class="dim">плановые ${fmt(incFromPlan,{bare:true})} + внеплановые ${fmt(incUnplan,{bare:true})}</span>${incOver>0?`<span class="num" style="color:var(--green)">превышение плана +${fmt(incOver,{bare:true})}</span>`:''}</div></div>`);
+  if(famView() && (state.members||[]).length>=2){
+    const rowsI=(state.members||[]).map(mm=>({mm,f:memberFactIncome(k,mm.id),p:memberPlannedIncome(k,mm.id)})).filter(r=>r.f>0||r.p>0);
+    if(rowsI.length){
+      _incCard.appendChild(h(`<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><div class="dim" style="font-size:11px;margin-bottom:4px">Кто получил</div>${rowsI.map(r=>`<div class="linrow" style="font-size:12.5px;padding:3px 0"><span>${esc(r.mm.name)}</span><span class="num" style="font-weight:600;color:var(--green)">${fmt(r.f,{bare:true})}${r.p>0?` <span class="dim" style="font-weight:400">/ план ${fmt(r.p,{bare:true})}</span>`:''}</span></div>`).join('')}</div>`));
+    }
+  }
+  v.appendChild(_incCard);
   const incCard=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grpI);display:inline-block"></span>Доход по источникам</h3></div>`);
   const _incList=incForView();
   if(!_incList.length){ incCard.appendChild(h(`<div class="empty" style="padding:14px">Источников дохода нет — добавьте на «Плане».</div>`)); }
@@ -4766,8 +4845,13 @@ function pgFact(v){
     const rows=(state.members||[]).map(mm=>{ let t=0; pcatsOf(mm.id).forEach(c=>{ const subs=subsOf(c.id); if(subs.length)subs.forEach(su=>t+=subSpend(k,su.id)); else t+=catDirectSpend(k,c.id); }); return {mm,t}; }).filter(r=>r.t>0);
     if(rows.length){
       const pc=h(`<div class="card"><h3><span style="width:9px;height:9px;border-radius:3px;background:var(--grp3);display:inline-block"></span>Личные траты участников <span class="dim" style="font-weight:500;font-size:12px">итог</span></h3>
-        <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Личные расходы каждого — суммой; нажмите, чтобы раскрыть детализацию.</p></div>`);
+        <p class="muted" style="font-size:11.5px;margin:-2px 0 6px">Личные расходы каждого — суммой. Детализация доступна только владельцу.</p></div>`);
       rows.forEach(r=>{
+        const mine = r.mm.id===myMemberId();
+        if(!mine){
+          pc.appendChild(h(`<div class="lrow" style="padding:8px 2px"><span style="flex:1;font-weight:600">Расходы ${esc(r.mm.name)}</span><span class="num" style="font-weight:700">${fmt(r.t,{bare:true})}</span></div>`));
+          return;   // чужое личное — только сумма, без детализации
+        }
         const head=h(`<div class="lrow" style="cursor:pointer;padding:8px 2px"><span style="flex:1;font-weight:600">${esc(r.mm.emoji||'🙂')} ${esc(r.mm.name)}</span><span class="num" style="font-weight:700">${fmt(r.t,{bare:true})}</span><span class="dim" style="margin-left:6px" data-caret>▸</span></div>`);
         const body=h(`<div style="display:none;padding:0 2px 8px 12px"></div>`);
         pcatsOf(r.mm.id).forEach(c=>{ const subs=subsOf(c.id); let ct=0; if(subs.length)subs.forEach(su=>ct+=subSpend(k,su.id)); else ct=catDirectSpend(k,c.id); if(ct>0) body.appendChild(h(`<div class="linrow" style="font-size:12.5px;padding:4px 0"><span>${esc(c.icon||'•')} ${esc(c.name)}</span><span class="num dim">${fmt(ct,{bare:true})}</span></div>`)); });
@@ -5020,28 +5104,11 @@ function pgDash(v){
 /* ============================================================
    PAGE: ДЕНЕЖНЫЙ ПОТОК (Cash Flow)
    ============================================================ */
-function pgCashflow(v){
-  v.appendChild(h(`<div class="page-title">Денежный поток</div><div class="page-sub">Скользящие 12 месяцев · ${ymShort(horizonStart())} – ${ymShort(addMonths(horizonStart(),state.settings.horizon-1))}</div>`));
-  const months=[]; for(let i=0;i<state.settings.horizon;i++)months.push(addMonths(horizonStart(),i));
-  const rm=realMonth();
-  let cum=liquidAssets();
-  const card=h(`<div class="card" style="overflow-x:auto"><h3>Приход, отток и накопления по месяцам</h3><table class="tbl"><thead><tr><th>Месяц</th><th class="right">Приход</th><th class="right">Ушло из кэша</th><th class="right">В накопления</th><th class="right">Δ кэша</th><th class="right">Остаток кэша</th></tr></thead><tbody id="cfBody"></tbody></table></div>`);
-  const body=card.querySelector("#cfBody");
-  months.forEach(mm=>{
-    const inc=projIncome(mm)+(mm>rm?(typeof assetCashYieldForMonth==='function'?assetCashYieldForMonth(mm):0):0);
-    const cashOut=projCashOut(mm);
-    const toCapital=Math.max(0, projExpense(mm)-projCashOut(mm)); // накопления/инвестиции — остаются кэсом
-    const delta=inc-cashOut; cum+=delta;
-    body.appendChild(h(`<tr><td>${ymShort(mm)}</td><td class="right num" style="color:var(--green)">${inc?fmt(inc,{bare:true}):'—'}</td><td class="right num">${cashOut?fmt(cashOut,{bare:true}):'—'}</td><td class="right num" style="color:var(--gold)">${toCapital?fmt(toCapital,{bare:true}):'—'}</td><td class="right num" style="color:${delta<0?'var(--red)':'var(--ink)'}">${(inc||cashOut)?fmt(delta,{bare:true,plus:true}):'—'}</td><td class="right num" style="color:${cum<0?'var(--red)':'var(--ink2)'};font-weight:600">${fmt(cum,{bare:true})}</td></tr>`)); });
-  v.appendChild(card);
-  v.appendChild(h(`<div class="infobox">«Остаток кэша» стартует от текущего кэса ${fmt(liquidAssets())} и совпадает с «Прогнозом денег». <b>Δ кэша = приход − то, что уходит из кэша</b> (потребление, тело долга, десятина). Взносы <b>в накопления</b> кэс не покидают — показаны отдельной колонкой и не уменьшают остаток. Текущий месяц — факт по сегодня + остаток плана; будущие — план, а если плана нет — оценка.</div>`));
-}
-
 /* ============================================================
    PAGE: ПРОГНОЗ и кассовые разрывы
    ============================================================ */
 function planLinesForMonth(mm){
-  const items=planItemsForMonth(mm).filter(p=>p.type==='expense').sort((a,b)=>b.amount-a.amount).slice(0,4);
+  const items=planItemsForMonth(mm).filter(p=>p.type==='expense' && canSeePlannedDetail(p)).sort((a,b)=>b.amount-a.amount).slice(0,4);
   if(!items.length) return '';
   return '<div class="dim" style="font-size:11px;margin-top:4px">Плановые: '+items.map(p=>esc(p.label)+' '+fmt(p.amount,{bare:true})).join(' · ')+'</div>';
 }
@@ -5753,59 +5820,6 @@ function cloudCard(){
   c.querySelector("#clLogin").onclick=()=>showAuthGate('login');
   return c;
 }
-function apiField(){ return `<div class="field"><label>Адрес сервера (API)</label><input id="clBase" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="https://ваш-сервер" value="${esc(ACCT.base||PROD_API_URL||'')}"></div>`; }
-function openCloudRegister(){
-  openSheet(`<h3>Создать аккаунт</h3>
-    <p class="muted" style="font-size:12.5px;margin-top:-4px">Пароль станет ключом к вашим данным. Мы его не храним и не видим — поэтому его важно запомнить.</p>
-    ${apiField()}
-    <div class="field"><label>Email</label><input id="clEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="off" spellcheck="false" placeholder="you@mail.ru"></div>
-    <div class="field"><label>Пароль</label><input id="clPw" type="password" autocomplete="new-password" placeholder="не короче 8 символов"></div>
-    <div class="field"><label>Повторите пароль</label><input id="clPw2" type="password" autocomplete="new-password"></div>
-    <label class="row" style="gap:8px;margin:2px 2px 8px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="clConsent" style="margin-top:3px"><span style="font-size:12.5px">Я соглашаюсь на обработку персональных данных и принимаю <a href="#" id="clPolicy" style="color:var(--acc,#4a9)">политику конфиденциальности</a>.</span></label>
-    <div id="clMsg" class="gmsg" style="min-height:16px;color:var(--bad)"></div>
-    <button class="btn primary block" id="clGo" style="padding:13px">Создать аккаунт</button>
-    <button class="btn ghost block" id="clCancel" style="margin-top:8px">Отмена</button>`,
-  el=>{
-    el.querySelector("#clCancel").onclick=closeSheet;
-    el.querySelector("#clPolicy").onclick=(e)=>{ e.preventDefault(); openPrivacyPolicy(); };
-    el.querySelector("#clGo").onclick=async()=>{
-      const base=el.querySelector("#clBase").value.trim(), email=el.querySelector("#clEmail").value.trim();
-      const pw=el.querySelector("#clPw").value, pw2=el.querySelector("#clPw2").value, msg=el.querySelector("#clMsg");
-      msg.textContent="";
-      if(!base){ msg.textContent="Укажите адрес сервера"; return; }
-      if(!/^\S+@\S+\.\S+$/.test(email)){ msg.textContent="Проверьте email"; return; }
-      if(pw.length<8){ msg.textContent="Пароль не короче 8 символов"; return; }
-      if(pw!==pw2){ msg.textContent="Пароли не совпадают"; return; }
-      if(!el.querySelector("#clConsent").checked){ msg.textContent="Нужно согласие на обработку персональных данных"; return; }
-      const btn=el.querySelector("#clGo"); btn.disabled=true; btn.textContent="Создаю…";
-      try{ const rk=await ACCT.register(base,email,pw); showRecoveryKeyModal(rk,true); }
-      catch(e){ btn.disabled=false; btn.textContent="Создать аккаунт"; msg.textContent = e.message==="email_taken"?"Такой email уже зарегистрирован":"Не удалось создать аккаунт (проверьте адрес сервера)"; }
-    };
-  });
-}
-function openCloudLogin(){
-  openSheet(`<h3>Войти в аккаунт</h3>
-    <p class="muted" style="font-size:12.5px;margin-top:-4px">Введите тот же пароль, что и при регистрации — им расшифруются ваши данные на этом устройстве.</p>
-    ${apiField()}
-    <div class="field"><label>Email</label><input id="clEmail" type="email" inputmode="email" autocapitalize="off" autocomplete="off" spellcheck="false"></div>
-    <div class="field"><label>Пароль</label><input id="clPw" type="password" autocomplete="current-password"></div>
-    <div id="clMsg" class="gmsg" style="min-height:16px;color:var(--bad)"></div>
-    <button class="btn primary block" id="clGo" style="padding:13px">Войти</button>
-    <button class="btn ghost block" id="clForgot" style="margin-top:8px">Забыли пароль?</button>
-    <button class="btn ghost block" id="clCancel" style="margin-top:4px">Отмена</button>`,
-  el=>{
-    el.querySelector("#clCancel").onclick=closeSheet;
-    el.querySelector("#clForgot").onclick=()=>{ const base=el.querySelector("#clBase").value.trim(), email=el.querySelector("#clEmail").value.trim(); openForgotPassword(base,email); };
-    el.querySelector("#clGo").onclick=async()=>{
-      const base=el.querySelector("#clBase").value.trim(), email=el.querySelector("#clEmail").value.trim();
-      const pw=el.querySelector("#clPw").value, msg=el.querySelector("#clMsg"); msg.textContent="";
-      if(!base||!email||!pw){ msg.textContent="Заполните все поля"; return; }
-      const btn=el.querySelector("#clGo"); btn.disabled=true; btn.textContent="Вхожу…";
-      try{ await ACCT.login(base,email,pw); closeSheet(); toast("Вход выполнен — данные синхронизированы"); render_current(); }
-      catch(e){ btn.disabled=false; btn.textContent="Войти"; msg.textContent = e.message==="bad-pass"?"Неверный пароль (данные не расшифровать)":(e.message==="invalid_credentials"?"Неверный email или пароль":"Не удалось войти"); }
-    };
-  });
-}
 function recoverySheetText(rk){
   return "АВАРИЙНЫЙ ЛИСТ — ДомФин\n\n"+
     "Ключ восстановления:\n\n    "+rk+"\n\n"+
@@ -6008,6 +6022,7 @@ function pgSettings(v){
   if(joined){ const mc=participantModeCard(); if(mc) tabAppend("account", mc); }
   if(!joined) tabAppend("account", familyMembersCard());
   tabAppend("account", biometricCard());
+  tabAppend("account", storageDiagCard());
   if(!joined){
   tabAppend("account", h(`<div class="card"><h3>Почта и уведомления <span class="pill" style="margin-left:auto">скоро</span></h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Подтверждение регистрации и письма для сброса пароля. Подключим на следующем шаге.</p></div>`));
   tabAppend("account", h(`<div class="card"><h3>Оплата и подписка <span class="pill" style="margin-left:auto">скоро</span></h3><p class="muted" style="font-size:12.5px;margin-top:-4px">Тариф Pro, способы оплаты и история платежей появятся здесь (Фаза 2).</p></div>`));
@@ -6024,7 +6039,7 @@ function pgSettings(v){
       const ok=()=>String(inp.value||"").trim().toLowerCase()==="стереть все данные";
       inp.oninput=()=>{ btn.disabled=!ok(); btn.style.opacity=ok()?"1":".5"; };
       el.querySelector("#rcancel").onclick=closeSheet;
-      btn.onclick=()=>{ if(!ok())return; try{localStorage.removeItem(LS_KEY);localStorage.removeItem(LS_ENCFACE);}catch(e){} state=seedState(); __lastSaved=_clone(state); save(false); closeSheet(); toast("Все данные удалены"); render_current(); };
+      btn.onclick=()=>{ if(!ok())return; try{localStorage.removeItem(LS_KEY);durableRemove(LS_ENCFACE);}catch(e){} state=seedState(); __lastSaved=_clone(state); save(false); closeSheet(); toast("Все данные удалены"); render_current(); };
     });
   };
   if(!joined) v.appendChild(rc);
@@ -6168,23 +6183,8 @@ const CRYPT = {
   }
 };
 // расшифровать удалённые данные Dropbox (или вернуть как есть, если не зашифровано)
-async function decodeRemote(parsed){ return (parsed && parsed.__enc) ? await CRYPT.unwrap(parsed) : parsed; }
 // применить удалённое состояние с расшифровкой и обработкой ошибок
 function metaAhead(a,b){ a=a||{}; b=b||{}; for(const coll in a){ for(const t of ['u','d']){ const mo=a[coll][t]||{}, ro=(b[coll]||{})[t]||{}; for(const k in mo){ if(!(k in ro) || mo[k]>ro[k]) return true; } } } return false; }
-async function applyRemote(remote, manual){
-  try{
-    const obj=await decodeRemote(remote);
-    const rem=migrate(obj); if(!rem.__meta) buildMetaBaseline(rem);
-    const merged=mergeStates(state, rem);
-    const ahead=metaAhead(merged.__meta, rem.__meta);   // есть ли у нас данные, которых нет в облаке
-    state=merged; __lastSaved=_clone(state);
-    save(false);
-    setSync("ok"); if(!isTyping())render_current(); if(manual)toast("Синхронизировано"); return true;
-  }catch(err){
-    if(err && err.message==="no-pass"){ setSync("ok"); showEncGate(remote); return false; }
-    setSync("err"); if(manual)toast("Не удалось расшифровать данные из Dropbox — код не совпадает"); console.warn(err); return false;
-  }
-}
 /* ============================================================
    ОБЛАКО (аккаунт) — модель «один пароль» (E2E, нулевое знание).
    VaultCrypto: DEK шифрует сейф; DEK завёрнут под пароль и под ключ
@@ -6249,10 +6249,10 @@ const ACCT = {
     this.doRefresh().then(ok=>{ if(ok) SRV.syncNow(false); }).catch(()=>{});
   },
   remembered(){ try{ return localStorage.getItem(LS_REMEMBER)!=="0"; }catch(e){ return true; } },
-  setRemember(on){ try{ localStorage.setItem(LS_REMEMBER, on?"1":"0"); }catch(e){} if(on) this.cacheDEK(); else this.clearDEKCache(); },
-  persist(){ try{ localStorage.setItem(LS_ACCT,JSON.stringify({base:this.base,refresh:this.refresh,email:this.email,keybag:this.keybag,role:this.role,memberId:this.memberId})); }catch(e){} },
-  async cacheDEK(){ try{ if(this.dek && this.remembered()) localStorage.setItem(LS_DEK, _obf(await VaultCrypto.exportDEK(this.dek))); }catch(e){} },
-  clearDEKCache(){ try{ localStorage.removeItem(LS_DEK); }catch(e){} },
+  setRemember(on){ try{ durableSet(LS_REMEMBER, on?"1":"0"); }catch(e){} if(on) this.cacheDEK(); else this.clearDEKCache(); },
+  persist(){ try{ durableSet(LS_ACCT,JSON.stringify({base:this.base,refresh:this.refresh,email:this.email,keybag:this.keybag,role:this.role,memberId:this.memberId})); }catch(e){} },
+  async cacheDEK(){ try{ if(this.dek && this.remembered()) durableSet(LS_DEK, _obf(await VaultCrypto.exportDEK(this.dek))); }catch(e){} },
+  clearDEKCache(){ try{ durableRemove(LS_DEK); }catch(e){} },
   // ---- Биометрический вход (Face ID / Touch ID / отпечаток) на этом устройстве ----
   biometricOn(){ try{ return localStorage.getItem(LS_BIO)==="1" && !!localStorage.getItem(LS_FACEID) && !!localStorage.getItem(LS_BIODEK); }catch(e){ return false; } },
   async enableBiometric(){
@@ -6260,12 +6260,12 @@ const ACCT = {
     try{ await requestPersistentStorage(); }catch(e){}
     await faceIdRegister();                                   // создаёт passkey (бросит при отказе/недоступности)
     try{
-      localStorage.setItem(LS_BIODEK, _obf(await VaultCrypto.exportDEK(this.dek)));
-      localStorage.setItem(LS_BIO,"1");
+      durableSet(LS_BIODEK, _obf(await VaultCrypto.exportDEK(this.dek)));
+      durableSet(LS_BIO,"1");
     }catch(e){ throw new Error("store_failed"); }
     return true;
   },
-  disableBiometric(){ try{ localStorage.removeItem(LS_BIO); localStorage.removeItem(LS_BIODEK); localStorage.removeItem(LS_FACEID); }catch(e){} },
+  disableBiometric(){ try{ durableRemove(LS_BIO); durableRemove(LS_BIODEK); durableRemove(LS_FACEID); }catch(e){} },
   async unlockBiometric(){
     if(!this.biometricOn()) throw new Error("no-bio");
     await faceIdUnlock();                                     // требует Face ID/отпечаток (бросит при отказе)
@@ -6276,7 +6276,7 @@ const ACCT = {
   async raw(path,opts){ return fetch((this.base||"").replace(/\/$/,"")+path, opts); },
   async api(path,opts){ opts=opts||{}; opts.headers=Object.assign({},opts.headers,this.access?{Authorization:"Bearer "+this.access}:{}); let r=await this.raw(path,opts); if(r.status===401&&this.refresh){ if(await this.doRefresh()){ opts.headers.Authorization="Bearer "+this.access; r=await this.raw(path,opts);} } return r; },
   async doRefresh(){ try{ const r=await this.raw("/auth/refresh",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({refresh:this.refresh})}); if(!r.ok){ this.forget(); return false; } const d=await r.json(); this.access=d.access; this.refresh=d.refresh; this.email=d.user.email; this.persist(); return true; }catch(e){ return false; } },
-  forget(){ this.access=this.refresh=this.dek=this.keybag=null; this.linked=false; this.role='owner'; this.memberId=null; this.clearDEKCache(); try{localStorage.removeItem(LS_ACCT);}catch(e){} },
+  forget(){ this.access=this.refresh=this.dek=this.keybag=null; this.linked=false; this.role='owner'; this.memberId=null; this.clearDEKCache(); try{durableRemove(LS_ACCT);}catch(e){} },
   async register(base,email,password){
     this.base=base; const acc=await VaultCrypto.createAccount(password,email);
     const r=await this.raw("/auth/register",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({email,password:acc.authHash,keybag:acc.keybag})});
@@ -6648,24 +6648,6 @@ function showEncGate(env){
 }
 function _obf(s){ try{ return btoa(unescape(encodeURIComponent(String(s)))); }catch(e){ return ""; } }
 function _deobf(s){ try{ return decodeURIComponent(escape(atob(String(s)))); }catch(e){ return ""; } }
-function askEncPass(title, hint, onOk){
-  openSheet(`<h3>${esc(title)}</h3>${hint?`<p class="muted" style="font-size:12.5px">${esc(hint)}</p>`:''}
-    <div class="field"><label>Код</label><input id="ep1" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="-webkit-text-security:disc"></div>
-    <div class="field"><label>Повторите код</label><input id="ep2" type="text" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" style="-webkit-text-security:disc"></div>
-    <button class="btn primary block" id="epOk" style="padding:13px">Сохранить</button>
-    <button class="btn ghost block" id="epCancel" style="margin-top:8px">Отмена</button>`, el=>{
-    el.querySelector("#epCancel").onclick=closeSheet;
-    el.querySelector("#epOk").onclick=async()=>{
-      const a=normCode(el.querySelector("#ep1").value), b=normCode(el.querySelector("#ep2").value);
-      if(!a){ toast("Введите код"); return; }
-      if(a!==b){ toast("Коды не совпали"); return; }
-      el.querySelector("#epOk").disabled=true;
-      try{ await onOk(a); }catch(e){ toast("Ошибка"); console.warn(e); el.querySelector("#epOk").disabled=false; return; }
-      closeSheet();
-    };
-  });
-}
-
 /* ============================================================
    INIT
    ============================================================ */
@@ -6685,24 +6667,72 @@ window.addEventListener("keydown",e=>{ if(e.key==="Escape"&&sheetOpen)closeSheet
 /* ---------- защита входа: заглушка + опциональная блокировка + Face ID ---------- */
 function bufToB64(buf){ return btoa(String.fromCharCode.apply(null,new Uint8Array(buf))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,""); }
 function b64ToBuf(b){ b=b.replace(/-/g,"+").replace(/_/g,"/"); const s=atob(b); const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++)a[i]=s.charCodeAt(i); return a.buffer; }
+/* ---------- Durable storage: зеркало ключей входа в IndexedDB ----------
+   iOS чистит localStorage (ITP). IndexedDB в установленном PWA живёт дольше.
+   Пишем в оба, при старте — восстанавливаем localStorage из IndexedDB. */
+const DURABLE_KEYS=[LS_ACCT,LS_DEK,LS_REMEMBER,LS_BIO,LS_BIODEK,LS_FACEID,LS_ENCFACE];
+let _idb=null;
+function idbOpen(){
+  if(_idb) return _idb;
+  _idb=new Promise((res,rej)=>{
+    try{
+      const r=indexedDB.open("famfin-durable",1);
+      r.onupgradeneeded=()=>{ try{ r.result.createObjectStore("kv"); }catch(e){} };
+      r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+    }catch(e){ rej(e); }
+  }).catch(()=>null);
+  return _idb;
+}
+async function idbSet(k,v){
+  try{ const db=await idbOpen(); if(!db) return;
+    await new Promise((res,rej)=>{ const t=db.transaction("kv","readwrite"); t.objectStore("kv").put(v,k); t.oncomplete=res; t.onerror=()=>rej(t.error); });
+  }catch(e){}
+}
+async function idbGet(k){
+  try{ const db=await idbOpen(); if(!db) return null;
+    return await new Promise((res)=>{ const t=db.transaction("kv","readonly"); const q=t.objectStore("kv").get(k); q.onsuccess=()=>res(q.result==null?null:q.result); q.onerror=()=>res(null); });
+  }catch(e){ return null; }
+}
+async function idbDel(k){ try{ const db=await idbOpen(); if(!db) return; await new Promise(res=>{ const t=db.transaction("kv","readwrite"); t.objectStore("kv").delete(k); t.oncomplete=res; t.onerror=res; }); }catch(e){} }
+// перехват записи: всё, что кладём в важные ключи — дублируем в IndexedDB
+function durableSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){} idbSet(k,v); }
+function durableRemove(k){ try{ localStorage.removeItem(k); }catch(e){} idbDel(k); }
+// при старте: если localStorage пуст (iOS вычистил), а в IndexedDB данные есть — вернуть их
+async function restoreDurable(){
+  let restored=0;
+  for(const k of DURABLE_KEYS){
+    try{
+      const cur=localStorage.getItem(k);
+      if(cur!=null){ idbSet(k,cur); continue; }        // есть в LS → освежаем зеркало
+      const v=await idbGet(k);
+      if(v!=null){ localStorage.setItem(k,v); restored++; }   // нет в LS → восстанавливаем
+    }catch(e){}
+  }
+  return restored;
+}
+function isStandalonePWA(){
+  try{ return !!(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches)); }catch(e){ return false; }
+}
+function isIOS(){ try{ return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1); }catch(e){ return false; } }
 async function requestPersistentStorage(){ try{ if(navigator.storage&&navigator.storage.persist){ if(!(await navigator.storage.persisted())) return await navigator.storage.persist(); return true; } }catch(e){} return false; }
 async function faceIdAvailable(){ try{ return !!window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); }catch(e){ return false; } }
 async function faceIdRegister(){
   const cred=await navigator.credentials.create({publicKey:{
     challenge:crypto.getRandomValues(new Uint8Array(32)),
     rp:{name:"ДомФин",id:location.hostname},
-    user:{id:crypto.getRandomValues(new Uint8Array(16)),name:"u",displayName:"u"},
+    user:{id:new TextEncoder().encode((ACCT&&ACCT.email)||"famfin-user").slice(0,64),name:(ACCT&&ACCT.email)||"ДомФин",displayName:(ACCT&&ACCT.email)||"ДомФин"},
     pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
-    authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required",residentKey:"preferred"},
+    authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required",residentKey:"required",requireResidentKey:true},
     timeout:60000,attestation:"none"}});
-  localStorage.setItem(LS_FACEID,bufToB64(cred.rawId)); return true;
+  durableSet(LS_FACEID,bufToB64(cred.rawId)); return true;
 }
 async function faceIdUnlock(){
-  const id=localStorage.getItem(LS_FACEID); if(!id) throw new Error("no cred");
-  await navigator.credentials.get({publicKey:{
-    challenge:crypto.getRandomValues(new Uint8Array(32)),
-    allowCredentials:[{type:"public-key",id:b64ToBuf(id)}],
-    userVerification:"required",timeout:60000,rpId:location.hostname}});
+  let id=localStorage.getItem(LS_FACEID);
+  if(!id){ try{ id=await idbGet(LS_FACEID); if(id) localStorage.setItem(LS_FACEID,id); }catch(e){} }
+  const pk={ challenge:crypto.getRandomValues(new Uint8Array(32)), userVerification:"required", timeout:60000, rpId:location.hostname };
+  if(id) pk.allowCredentials=[{type:"public-key",id:b64ToBuf(id)}];   // иначе — обнаруживаемый ключ (iCloud Keychain)
+  const cred=await navigator.credentials.get({publicKey:pk});
+  if(cred && cred.rawId) durableSet(LS_FACEID, bufToB64(cred.rawId));
   return true;
 }
 async function maybeOfferBiometric(){
@@ -6724,6 +6754,29 @@ async function maybeOfferBiometric(){
       };
     });
   }catch(e){}
+}
+function storageDiagCard(){
+  const c=h(`<div class="card"><h3>Вход и хранилище</h3>
+    <p class="muted" style="font-size:12px;margin:-2px 0 8px">Если iPhone «забывает» вход — проверьте здесь.</p>
+    <div id="diagBody"><div class="dim" style="font-size:12.5px">Проверяю…</div></div></div>`);
+  const body=c.querySelector('#diagBody');
+  (async()=>{
+    const standalone=isStandalonePWA(), ios=isIOS();
+    let persisted=false; try{ persisted=!!(navigator.storage&&navigator.storage.persisted&&await navigator.storage.persisted()); }catch(e){}
+    const lsAcct=!!localStorage.getItem(LS_ACCT), lsBio=!!localStorage.getItem(LS_BIODEK);
+    const idbAcct=!!(await idbGet(LS_ACCT)), idbBio=!!(await idbGet(LS_BIODEK));
+    const ok=(b)=>b?'<span style="color:var(--green)">да</span>':'<span style="color:var(--red)">нет</span>';
+    body.innerHTML=`
+      <div class="linrow" style="font-size:12.5px"><span class="dim">Запущено как приложение (с «Домой»)</span><span>${ok(standalone)}</span></div>
+      <div class="linrow" style="font-size:12.5px"><span class="dim">Постоянное хранилище разрешено</span><span>${ok(persisted)}</span></div>
+      <div class="linrow" style="font-size:12.5px"><span class="dim">Аккаунт сохранён (localStorage)</span><span>${ok(lsAcct)}</span></div>
+      <div class="linrow" style="font-size:12.5px"><span class="dim">Аккаунт продублирован (IndexedDB)</span><span>${ok(idbAcct)}</span></div>
+      <div class="linrow" style="font-size:12.5px"><span class="dim">Ключ Face ID сохранён</span><span>${ok(lsBio)}</span></div>
+      <div class="linrow" style="font-size:12.5px"><span class="dim">Ключ Face ID продублирован</span><span>${ok(idbBio)}</span></div>`;
+    if(ios && !standalone) body.appendChild(h(`<div class="warnbox" style="margin-top:10px;font-size:12.5px"><b>Откройте приложение с экрана «Домой».</b> В обычной вкладке Safari iOS периодически очищает данные сайта — поэтому вход «забывается». Нажмите «Поделиться» → «На экран Домой» и заходите через иконку.</div>`));
+    else if(standalone) body.appendChild(h(`<div class="okbox" style="margin-top:10px;font-size:12.5px">Приложение запущено с экрана «Домой» — данные входа хранятся стабильно.</div>`));
+  })();
+  return c;
 }
 function biometricCard(){
   const on=ACCT.biometricOn();
@@ -6781,11 +6834,15 @@ __lastSaved=_clone(state);
 try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
-ACCT.boot().then(()=>{
+restoreDurable().then(n=>{
+  if(n) console.log("[famfin] восстановлено ключей входа из IndexedDB:", n);
+  try{ requestPersistentStorage(); }catch(e){}
+  return ACCT.boot();
+}).then(()=>{
   try{ setTimeout(function(){var b=document.getElementById("bootSplash"); if(b) b.remove();}, 8000); }catch(e){}
   if(__encEnv){ showEncGate(__encEnv); return; }  // устаревший путь: локальные данные под старым кодом
   startAuthFlow();
-});
+}).catch(()=>{ try{ startAuthFlow(); }catch(e){} });
 console.log("Готово.");
 </script>
 </body>
