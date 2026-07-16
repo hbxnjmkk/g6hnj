@@ -2773,7 +2773,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.19-design2";
+const APP_VERSION="v7.20-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
@@ -6767,27 +6767,39 @@ function showAuthGate(mode){
       };
     } else if(mode==='unlock'){
       const bio=ACCT.biometricOn();
-      box.innerHTML='<div style="font-size:14px;color:var(--ink3);text-align:center">Разблокировка данных</div>'+
-        '<div style="font-size:14px;text-align:center;margin:4px 0 10px"><b>'+esc(ACCT.email||'')+'</b></div>'+
-        (bio?'<button class="gbtn2" id="aFace" type="button" style="background:var(--gold);color:var(--on-accent);border:none;font-weight:600;padding:14px;font-size:16px"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:8px"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M9 10.5v1M15 10.5v1M12 10v3l-1 1"/><path d="M9.5 15.5s1 .8 2.5 .8 2.5-.8 2.5-.8"/></svg>Войти по Face ID</button><div style="text-align:center;font-size:12px;color:var(--ink3);margin:10px 0 6px">или войдите паролем</div>':'')+
-        '<input id="aPw" type="password" autocomplete="current-password" placeholder="пароль" style="width:100%">'+
+      box.innerHTML='<div style="font-size:15px;font-weight:700;text-align:center">С возвращением</div>'+
+        '<div style="font-size:13px;text-align:center;margin:3px 0 2px;color:var(--ink2)">'+esc(ACCT.email||'')+'</div>'+
+        '<div style="font-size:12px;text-align:center;color:var(--ink3);margin:0 0 12px">Введите пароль от аккаунта, чтобы открыть свои данные</div>'+
+        '<div id="aFaceSlot"></div>'+
+        '<input id="aPw" type="password" autocomplete="current-password" placeholder="Пароль от аккаунта" style="width:100%">'+
         '<div id="aMsg" class="gmsg"></div>'+
-        '<button class="gbtn2" id="aGo" type="button">Разблокировать</button>'+
-        '<button class="gbtn2" id="aOther" type="button" style="margin-top:8px;'+ghost+'">Войти другим аккаунтом</button>'+V;
+        '<button class="gbtn2" id="aGo" type="button" style="background:var(--gold);color:var(--on-accent);border:none;font-weight:600">Войти</button>'+
+        '<button type="button" id="aForgot" style="background:none;border:none;color:var(--ink3);font-size:12px;margin-top:10px;cursor:pointer;text-decoration:underline;display:block;width:100%;text-align:center">Забыли пароль?</button>'+
+        '<button class="gbtn2" id="aOther" type="button" style="margin-top:6px;'+ghost+'">Войти другим аккаунтом</button>'+V;
       const msg=box.querySelector('#aMsg');
-      box.querySelector('#aOther').onclick=()=>{ ACCT.forget(); mode='welcome'; render(); };
-      box.querySelector('#aGo').onclick=async()=>{
+      const doUnlock=async()=>{
         const pw=box.querySelector('#aPw').value; msg.textContent='';
         if(!pw){msg.textContent='Введите пароль';return;}
-        const btn=box.querySelector('#aGo'); btn.disabled=true; btn.textContent='…';
+        const btn=box.querySelector('#aGo'); btn.disabled=true; btn.textContent='Вхожу…';
         try{ await ACCT.unlock(pw); g.classList.remove('show'); bootApp(); }
-        catch(e){ btn.disabled=false; btn.textContent='Разблокировать'; msg.textContent='Неверный пароль'; }
+        catch(e){ btn.disabled=false; btn.textContent='Войти'; msg.textContent='Неверный пароль'; }
       };
+      box.querySelector('#aGo').onclick=doUnlock;
+      box.querySelector('#aPw').addEventListener('keydown',e=>{ if(e.key==='Enter') doUnlock(); });
+      setTimeout(()=>{ try{ box.querySelector('#aPw').focus(); }catch(e){} }, 80);
+      box.querySelector('#aOther').onclick=()=>{ ACCT.forget(); mode='welcome'; render(); };
+      box.querySelector('#aForgot').onclick=()=>{ openForgotPassword(PROD_API_URL, ACCT.email||''); };
+      // Face ID показываем ТОЛЬКО если он реально включён и на этом устройстве есть встроенная биометрия
       if(bio){
-        const faceBtn=box.querySelector('#aFace');
-        const runBio=async(auto)=>{ if(faceBtn) faceBtn.disabled=true; try{ await ACCT.unlockBiometric(); g.classList.remove('show'); bootApp(); }catch(e){ if(faceBtn) faceBtn.disabled=false; const nm=e&&e.name; if(nm==='NotAllowedError'||nm==='AbortError'){ if(!auto) msg.textContent='Отменено — нажмите ещё раз или войдите паролем'; } else { msg.textContent='Face ID недоступен — войдите паролем'; } } };
-        if(faceBtn) faceBtn.onclick=()=>runBio(false);
-        setTimeout(()=>runBio(true), 60);
+        faceIdAvailable().then(ok=>{
+          if(!ok) return;   // на этом устройстве (напр. Mac без Touch ID) — не предлагаем, чтобы не всплывал QR
+          const slot=box.querySelector('#aFaceSlot'); if(!slot) return;
+          slot.innerHTML='<button class="gbtn2" id="aFace" type="button" style="background:transparent;border:1px solid var(--gold);color:var(--gold);font-weight:600;padding:13px;font-size:15px;margin-bottom:6px"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-4px;margin-right:8px"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><path d="M9 10.5v1M15 10.5v1M12 10v3l-1 1"/><path d="M9.5 15.5s1 .8 2.5 .8 2.5-.8 2.5-.8"/></svg>Войти по Face ID</button><div style="text-align:center;font-size:12px;color:var(--ink3);margin:2px 0 8px">или введите пароль ниже</div>';
+          const faceBtn=slot.querySelector('#aFace');
+          const runBio=async(auto)=>{ faceBtn.disabled=true; try{ await ACCT.unlockBiometric(); g.classList.remove('show'); bootApp(); }catch(e){ faceBtn.disabled=false; const nm=e&&e.name; if(nm==='NotAllowedError'||nm==='AbortError'){ if(!auto) msg.textContent='Отменено — нажмите Face ID ещё раз или введите пароль'; } else { msg.textContent='Face ID сейчас недоступен — введите пароль'; } } };
+          faceBtn.onclick=()=>runBio(false);
+          setTimeout(()=>runBio(true), 60);   // авто-попытка только там, где Face ID реально есть
+        });
       }
     } else if(mode==='join'){
       box.innerHTML='<div style="font-size:15px;font-weight:700;text-align:center;margin-bottom:4px">Вас пригласили в семейный бюджет</div>'+
