@@ -258,7 +258,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .ssum{min-width:76px;text-align:right;font-size:13.5px;font-weight:600;color:var(--ink)}
 .ssum.empty{color:var(--ink3);font-weight:400}
 .pop{display:flex;align-items:center;gap:6px;padding:5px 6px 5px 40px;font-size:12px;color:var(--ink2);border-radius:8px;cursor:pointer}
-.psub{min-height:40px}
+.prow.psub{min-height:32px;padding-top:5px;padding-bottom:5px}
 .pop:hover{background:var(--panel2)}
 .pop.done{opacity:.5}
 .pop.done .opl{text-decoration:line-through}
@@ -277,10 +277,8 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .p3-cell{cursor:pointer;font-variant-numeric:tabular-nums;border-radius:6px}
 .p3-cell:hover{background:color-mix(in srgb,var(--gold) 12%,transparent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--gold) 40%,transparent)}
 .p3-cell.zero{color:var(--ink3)}
-.p3-cell.rep{color:var(--ink3);font-style:italic}
 .p3-tot td{border-top:2px solid var(--line2);font-weight:800;font-size:14px}
 .p3-tot td.cur{color:var(--gold)}
-.p3-inp{width:96px;text-align:right;padding:6px 8px;font-size:13.5px;border:1px solid var(--gold);border-radius:7px;background:var(--panel);color:var(--ink);font-variant-numeric:tabular-nums}
 .p3head{display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
 .p3seg{display:inline-flex;border:1px solid var(--line2);border-radius:10px;overflow:hidden}
 .p3seg button{padding:7px 14px;font-size:13px;font-weight:600;background:transparent;border:none;color:var(--ink2);cursor:pointer}
@@ -2823,7 +2821,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.28-design2";
+const APP_VERSION="v7.29-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
@@ -4803,52 +4801,33 @@ function plan3Months(){ return [curMonth, addMonths(curMonth,1), addMonths(curMo
 function planSubRepeat(k,subId){ return planItemsForMonth(k).filter(p=>p.type==='expense'&&p.subId===subId&&p.repeat).reduce((a,p)=>a+p.amount,0); }
 function planCatDirectRepeat(k,catId){ return planItemsForMonth(k).filter(p=>p.type==='expense'&&p.categoryId===catId&&!p.subId&&p.repeat).reduce((a,p)=>a+p.amount,0); }
 
-// правка ячейки: задаём суммарный план подкатегории за конкретный месяц как разовую операцию (Вариант 2).
-// повторяющаяся база остаётся; разовая надбавка = целевая сумма минус база.
-function plan3SetCell(months_k, subId, catId, targetSum){
-  const k=months_k;
-  const base = subId ? planSubRepeat(k,subId) : planCatDirectRepeat(k,catId);
-  const delta = Math.round(targetSum) - base;
-  // удалим прежние разовые не-повторяющиеся плановые расходы этого месяца для этой строки
-  state.planned = (state.planned||[]).filter(p=>{
-    if(p.type!=='expense'||p.repeat) return true;
-    if(!p.date || ym(p.date)!==k) return true;
-    const match = subId ? (p.subId===subId) : (p.categoryId===catId && !p.subId);
-    return !match || p.__p3!==true;   // удаляем только созданные этим редактором
-  });
-  if(delta>0){
-    const mlen=mlenOf(k); const date=k+"-"+String(Math.min(25,mlen)).padStart(2,"0");
-    const op={id:uid(),type:'expense',amount:delta,categoryId:catId,subId:subId||null,date,repeat:false,label:(subId?subName(subId):catName(catId)),active:true,__p3:true};
-    state.planned.push(op);
-  }
-  save();
-}
-
 function pgPlan3(v){
   const family=state.members.length>=2;
   if(family && canFamilyView()) v.appendChild(viewToggle());
   const months=plan3Months();
-  v.appendChild(h(`<div class="page-title">План · 3 месяца</div><div class="page-sub">${ymShort(months[0])} — ${ymShort(months[2])}${family?(famView()?' · общий бюджет семьи':' · мой личный бюджет'):''} · клик по сумме — изменить</div>`));
+  v.appendChild(h(`<div class="page-title">План · 3 месяца <span class="pill" style="vertical-align:middle;font-size:10px">просмотр</span></div><div class="page-sub">${ymShort(months[0])} — ${ymShort(months[2])}${family?(famView()?' · общий бюджет семьи':' · мой личный бюджет'):''} · нажмите на месяц, чтобы открыть и редактировать его</div>`));
 
   const head=h(`<div class="p3head"><div class="p3seg"><button data-p3="0">1 месяц</button><button class="on" data-p3="1">3 месяца</button></div>
-    <span class="dim" style="font-size:12px">Разовые правки применяются к выбранному месяцу. Повторяющиеся суммы показаны серым.</span></div>`);
+    <span class="dim" style="font-size:12px">Обзор трёх месяцев. Чтобы изменить суммы — откройте нужный месяц.</span></div>`);
   head.querySelector('[data-p3="0"]').onclick=()=>{ state.settings.plan3=false; save(false); render_current(); };
   v.appendChild(head);
 
   const wrap=h(`<div class="p3wrap"><table class="p3tbl"></table></div>`);
   const tbl=wrap.querySelector("table");
-  // заголовок
-  const thead=h(`<thead><tr><th>Категория</th>${months.map((m,i)=>`<th class="${i===0?'cur':''}">${ymShort(m)}</th>`).join("")}</tr></thead>`);
+  const thead=h(`<thead><tr><th>Категория</th>${months.map((m,i)=>`<th class="p3-mh ${i===0?'cur':''}" data-gm="${m}" style="cursor:pointer">${ymShort(m)} ›</th>`).join("")}</tr></thead>`);
   tbl.appendChild(thead);
   const tb=h(`<tbody></tbody>`); tbl.appendChild(tb);
+
+  // доход — сверху
+  const incTot=months.map(k=>plannedIncomeView(k));
+  tb.appendChild(h(`<tr class="p3-grp"><td colspan="4" style="color:var(--grpI)">Доходы</td></tr>`));
+  tb.appendChild(h(`<tr class="p3-cat"><td>План дохода</td>${incTot.map((t,i)=>`<td class="p3-cell" data-gm="${months[i]}" style="color:var(--grpI);font-weight:700">${groupNum(t)}</td>`).join("")}</tr>`));
 
   const monthTot=[0,0,0];
   const cellHTML=(k,subId,catId,i)=>{
     const val = subId ? planSub(k,subId) : planCatDirect(k,catId);
-    const rep = subId ? planSubRepeat(k,subId) : planCatDirectRepeat(k,catId);
     monthTot[i]+=val;
-    const cls = val===0 ? 'zero' : (val===rep && rep>0 ? 'rep' : '');
-    return `<td class="p3-cell ${cls}" data-k="${k}" data-sub="${subId||''}" data-cat="${catId}">${val>0?groupNum(val):'—'}</td>`;
+    return `<td class="p3-cell ${val===0?'zero':''}" data-gm="${k}">${val>0?groupNum(val):'—'}</td>`;
   };
 
   expenseGroups().forEach(g=>{
@@ -4856,41 +4835,20 @@ function pgPlan3(v){
     tb.appendChild(h(`<tr class="p3-grp"><td colspan="4" style="color:${g.color}">${esc(g.name)}</td></tr>`));
     cats.forEach(c=>{
       const subs=subsOf(c.id);
-      // строка категории: показывает суммарный план по категории (только чтение, агрегат)
-      const catCells=months.map((k,i)=>{ const val=planCat(k,c.id); return `<td class="num" style="font-weight:700">${val>0?groupNum(val):'—'}</td>`; }).join("");
+      const catCells=months.map((k,i)=>{ const val=planCat(k,c.id); return `<td class="p3-cell num" data-gm="${k}" style="font-weight:700">${val>0?groupNum(val):'—'}</td>`; }).join("");
       tb.appendChild(h(`<tr class="p3-cat"><td>${esc(c.icon||'')} ${esc(c.name)}</td>${catCells}</tr>`));
       if(subs.length){
-        subs.forEach(su=>{
-          const row=h(`<tr class="p3-sub"><td>${esc(su.name)}</td>${months.map((k,i)=>cellHTML(k,su.id,c.id,i)).join("")}</tr>`);
-          tb.appendChild(row);
-        });
+        subs.forEach(su=>{ tb.appendChild(h(`<tr class="p3-sub"><td>${esc(su.name)}</td>${months.map((k,i)=>cellHTML(k,su.id,c.id,i)).join("")}</tr>`)); });
       } else {
-        // категория без подкатегорий — правим напрямую
-        const row=h(`<tr class="p3-sub"><td><span class="dim">(без подкатегорий)</span></td>${months.map((k,i)=>cellHTML(k,null,c.id,i)).join("")}</tr>`);
-        tb.appendChild(row);
+        tb.appendChild(h(`<tr class="p3-sub"><td><span class="dim">(без подкатегорий)</span></td>${months.map((k,i)=>cellHTML(k,null,c.id,i)).join("")}</tr>`));
       }
     });
   });
-  // итоги
-  tb.appendChild(h(`<tr class="p3-tot"><td>Итого расходы</td>${monthTot.map((t,i)=>`<td class="${i===0?'cur':''}">${groupNum(t)}</td>`).join("")}</tr>`));
-  // доходы
-  const incTot=months.map(k=>plannedIncomeView(k));
-  tb.appendChild(h(`<tr class="p3-tot"><td style="color:var(--grpI)">План дохода</td>${incTot.map(t=>`<td style="color:var(--grpI)">${groupNum(t)}</td>`).join("")}</tr>`));
-  tb.appendChild(h(`<tr class="p3-tot"><td>Остаток (доход − план)</td>${months.map((k,i)=>{ const r=incTot[i]-monthTot[i]; return `<td style="color:${r>=0?'var(--green)':'var(--red)'}">${fmt(r,{plus:true,bare:true})}</td>`; }).join("")}</tr>`));
+  tb.appendChild(h(`<tr class="p3-tot"><td>Итого расходы</td>${monthTot.map((t,i)=>`<td class="p3-cell ${i===0?'cur':''}" data-gm="${months[i]}">${groupNum(t)}</td>`).join("")}</tr>`));
+  tb.appendChild(h(`<tr class="p3-tot"><td>Остаток (доход − план)</td>${months.map((k,i)=>{ const r=incTot[i]-monthTot[i]; return `<td class="p3-cell" data-gm="${k}" style="color:${r>=0?'var(--green)':'var(--red)'}">${fmt(r,{plus:true,bare:true})}</td>`; }).join("")}</tr>`));
 
-  // редактирование ячеек
-  tb.querySelectorAll(".p3-cell").forEach(td=>{
-    td.onclick=()=>{
-      if(td.querySelector("input")) return;
-      const k=td.dataset.k, subId=td.dataset.sub||null, catId=td.dataset.cat;
-      const cur = subId ? planSub(k,subId) : planCatDirect(k,catId);
-      td.innerHTML=`<input class="p3-inp" inputmode="numeric" value="${cur||''}" placeholder="0">`;
-      const inp=td.querySelector("input"); inp.focus(); inp.select(); attachNum(inp);
-      const commit=()=>{ const val=parseFloat(String(inp.value).replace(/\s/g,""))||0; plan3SetCell(k,subId,catId,val); render_current(); };
-      inp.onblur=commit;
-      inp.onkeydown=(e)=>{ if(e.key==='Enter'){ e.preventDefault(); commit(); } else if(e.key==='Escape'){ render_current(); } };
-    };
-  });
+  // клик по ячейке или заголовку месяца → открыть обычный План этого месяца
+  wrap.querySelectorAll("[data-gm]").forEach(el=>{ el.style.cursor="pointer"; el.onclick=()=>{ curMonth=el.dataset.gm; state.settings.plan3=false; save(false); render_current(); }; });
 
   v.appendChild(wrap);
 }
@@ -5089,7 +5047,7 @@ function pgFact3(v){
   const family=state.members.length>=2;
   if(family && canFamilyView()) v.appendChild(viewToggle());
   const months=plan3Months();
-  v.appendChild(h(`<div class="page-title">Факт · 3 месяца</div><div class="page-sub">${ymShort(months[0])} — ${ymShort(months[2])}${family?(famView()?' · семья':' · я'):''} · факт и план по месяцам</div>`));
+  v.appendChild(h(`<div class="page-title">Факт · 3 месяца <span class="pill" style="vertical-align:middle;font-size:10px">просмотр</span></div><div class="page-sub">${ymShort(months[0])} — ${ymShort(months[2])}${family?(famView()?' · семья':' · я'):''} · нажмите на месяц, чтобы открыть его</div>`));
   const head=h(`<div class="p3head"><div class="p3seg"><button data-p3="0">1 месяц</button><button class="on" data-p3="1">3 месяца</button></div>
     <span class="dim" style="font-size:12px">В каждой ячейке: потрачено · план.</span></div>`);
   head.querySelector('[data-p3="0"]').onclick=()=>{ state.settings.plan3=false; save(false); render_current(); };
@@ -5097,31 +5055,37 @@ function pgFact3(v){
 
   const wrap=h(`<div class="p3wrap"><table class="p3tbl"></table></div>`);
   const tbl=wrap.querySelector("table");
-  tbl.appendChild(h(`<thead><tr><th>Категория</th>${months.map((m,i)=>`<th class="${i===0?'cur':''}">${ymShort(m)}</th>`).join("")}</tr></thead>`));
+  tbl.appendChild(h(`<thead><tr><th>Категория</th>${months.map((m,i)=>`<th class="${i===0?'cur':''}" data-gm="${m}" style="cursor:pointer">${ymShort(m)} ›</th>`).join("")}</tr></thead>`));
   const tb=h(`<tbody></tbody>`); tbl.appendChild(tb);
 
-  const fTot=[0,0,0], pTot=[0,0,0];
-  const cell=(k,fact,plan,i)=>{
+  const cell=(k,fact,plan)=>{
     const over = plan>0 && fact>plan;
     const col = fact===0 ? 'var(--ink3)' : (over?'var(--red)':'var(--ink)');
-    return `<td><span style="color:${col};font-weight:600">${fact>0?groupNum(fact):'—'}</span><span class="dim" style="font-size:11px"> · ${plan>0?groupNum(plan):'—'}</span></td>`;
+    return `<td class="p3-cell" data-gm="${k}"><span style="color:${col};font-weight:600">${fact>0?groupNum(fact):'—'}</span><span class="dim" style="font-size:11px"> · ${plan>0?groupNum(plan):'—'}</span></td>`;
   };
+
+  // доход — сверху
+  const incF=months.map(k=>factIncomeView(k)), incP=months.map(k=>plannedIncomeView(k));
+  tb.appendChild(h(`<tr class="p3-grp"><td colspan="4" style="color:var(--grpI)">Доходы</td></tr>`));
+  tb.appendChild(h(`<tr class="p3-cat"><td>Доход факт · план</td>${months.map((k,i)=>`<td class="p3-cell" data-gm="${k}" style="color:var(--grpI);font-weight:700">${groupNum(incF[i])} <span class="dim" style="font-size:11px;font-weight:400">· ${groupNum(incP[i])}</span></td>`).join("")}</tr>`));
+
+  const fTot=[0,0,0], pTot=[0,0,0];
   expenseGroups().forEach(g=>{
     const cats=catsOfView(g.id); if(!cats.length) return;
     tb.appendChild(h(`<tr class="p3-grp"><td colspan="4" style="color:${g.color}">${esc(g.name)}</td></tr>`));
     cats.forEach(c=>{
-      const catCells=months.map((k,i)=>{ const f=catSpend(k,c.id), p=planCat(k,c.id); return cell(k,f,p,i); }).join("");
+      const catCells=months.map((k,i)=>{ const f=catSpend(k,c.id), p=planCat(k,c.id); return cell(k,f,p); }).join("");
       tb.appendChild(h(`<tr class="p3-cat"><td>${esc(c.icon||'')} ${esc(c.name)}</td>${catCells}</tr>`));
       subsOf(c.id).forEach(su=>{
-        const cells=months.map((k,i)=>{ const f=subSpend(k,su.id), p=planSub(k,su.id); fTot[i]+=f; pTot[i]+=p; return cell(k,f,p,i); }).join("");
+        const cells=months.map((k,i)=>{ const f=subSpend(k,su.id), p=planSub(k,su.id); fTot[i]+=f; pTot[i]+=p; return cell(k,f,p); }).join("");
         tb.appendChild(h(`<tr class="p3-sub"><td>${esc(su.name)}</td>${cells}</tr>`));
       });
     });
   });
-  tb.appendChild(h(`<tr class="p3-tot"><td>Итого расходы</td>${months.map((k,i)=>`<td class="${i===0?'cur':''}">${groupNum(fTot[i])} <span class="dim" style="font-size:11px;font-weight:400">· ${groupNum(pTot[i])}</span></td>`).join("")}</tr>`));
-  const incF=months.map(k=>factIncomeView(k)), incP=months.map(k=>plannedIncomeView(k));
-  tb.appendChild(h(`<tr class="p3-tot"><td style="color:var(--grpI)">Доход факт · план</td>${months.map((k,i)=>`<td style="color:var(--grpI)">${groupNum(incF[i])} <span class="dim" style="font-size:11px;font-weight:400">· ${groupNum(incP[i])}</span></td>`).join("")}</tr>`));
-  tb.appendChild(h(`<tr class="p3-tot"><td>Сальдо факт (доход − расход)</td>${months.map((k,i)=>{ const s=incF[i]-fTot[i]; return `<td style="color:${s>=0?'var(--green)':'var(--red)'}">${fmt(s,{plus:true,bare:true})}</td>`; }).join("")}</tr>`));
+  tb.appendChild(h(`<tr class="p3-tot"><td>Итого расходы</td>${months.map((k,i)=>`<td class="p3-cell ${i===0?'cur':''}" data-gm="${k}">${groupNum(fTot[i])} <span class="dim" style="font-size:11px;font-weight:400">· ${groupNum(pTot[i])}</span></td>`).join("")}</tr>`));
+  tb.appendChild(h(`<tr class="p3-tot"><td>Сальдо факт (доход − расход)</td>${months.map((k,i)=>{ const s=incF[i]-fTot[i]; return `<td class="p3-cell" data-gm="${k}" style="color:${s>=0?'var(--green)':'var(--red)'}">${fmt(s,{plus:true,bare:true})}</td>`; }).join("")}</tr>`));
+
+  wrap.querySelectorAll("[data-gm]").forEach(el=>{ el.style.cursor="pointer"; el.onclick=()=>{ curMonth=el.dataset.gm; state.settings.plan3=false; save(false); render_current(); }; });
   v.appendChild(wrap);
 }
 
@@ -7699,7 +7663,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; window.addLedger=addLedger; window.setAssetValue=setAssetValue; window.assetDeprForMonth=assetDeprForMonth; window.assetLiveValue=assetLiveValue; window.assetContribSince=assetContribSince; window.assetLinkedSubs=assetLinkedSubs; window.reserveCapital=reserveCapital; window.personalCapital=personalCapital; window.workingCapital=workingCapital; window.startOnboarding=startOnboarding; window.finishOnboarding=finishOnboarding; window.onbRenderStep=onbRenderStep; window.maybeCapitalBridge=maybeCapitalBridge; window.isDesktopWide=isDesktopWide; window.plan3on=plan3on; window.plan3SetCell=plan3SetCell; window.planSubRepeat=planSubRepeat; window.planCatDirectRepeat=planCatDirectRepeat; window.plan3Months=plan3Months; Object.defineProperty(window,"onbDraft",{get:()=>onbDraft,set:v=>{onbDraft=v;},configurable:true}); Object.defineProperty(window,"onbIdx",{get:()=>onbIdx,set:v=>{onbIdx=v;},configurable:true}); Object.defineProperty(window,"onbMode",{get:()=>onbMode,set:v=>{onbMode=v;},configurable:true}); Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; window.addLedger=addLedger; window.setAssetValue=setAssetValue; window.assetDeprForMonth=assetDeprForMonth; window.assetLiveValue=assetLiveValue; window.assetContribSince=assetContribSince; window.assetLinkedSubs=assetLinkedSubs; window.reserveCapital=reserveCapital; window.personalCapital=personalCapital; window.workingCapital=workingCapital; window.startOnboarding=startOnboarding; window.finishOnboarding=finishOnboarding; window.onbRenderStep=onbRenderStep; window.maybeCapitalBridge=maybeCapitalBridge; window.isDesktopWide=isDesktopWide; window.plan3on=plan3on; window.planSubRepeat=planSubRepeat; window.planCatDirectRepeat=planCatDirectRepeat; window.plan3Months=plan3Months; Object.defineProperty(window,"onbDraft",{get:()=>onbDraft,set:v=>{onbDraft=v;},configurable:true}); Object.defineProperty(window,"onbIdx",{get:()=>onbIdx,set:v=>{onbIdx=v;},configurable:true}); Object.defineProperty(window,"onbMode",{get:()=>onbMode,set:v=>{onbMode=v;},configurable:true}); Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 restoreDurable().then(n=>{
