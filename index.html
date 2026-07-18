@@ -403,8 +403,29 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 .helpBody b{color:var(--ink)}
 .helpBody p{margin:0 0 10px}
 .helpBody p:last-child{margin-bottom:0}
-@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
-</style>
+/* ---- Онбординг (полноэкранный мастер) ---- */
+#onb{position:fixed;inset:0;z-index:210;background:var(--bg);display:none;flex-direction:column;padding:0}
+#onb.show{display:flex}
+.onb-top{padding:calc(env(safe-area-inset-top) + 14px) 18px 10px;flex:none}
+.onb-bar{height:5px;border-radius:999px;background:var(--panel2);overflow:hidden}
+.onb-bar i{display:block;height:100%;background:var(--gold);border-radius:999px;transition:width .35s cubic-bezier(.34,1.3,.5,1)}
+.onb-step{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--ink3);font-weight:700;margin-top:10px;display:flex;align-items:center}
+.onb-step .skip{margin-left:auto;color:var(--ink3);text-decoration:underline;font-size:11px;letter-spacing:0;text-transform:none;cursor:pointer;background:none;border:none}
+.onb-body{flex:1;overflow-y:auto;padding:6px 18px 18px;-webkit-overflow-scrolling:touch}
+.onb-ico{font-size:40px;line-height:1;margin:6px 0 10px}
+.onb-h{font-size:23px;font-weight:800;letter-spacing:-.3px;margin:0 0 6px}
+.onb-p{font-size:14px;line-height:1.55;color:var(--ink2);margin:0 0 16px}
+.onb-nav{flex:none;padding:12px 18px calc(env(safe-area-inset-bottom) + 16px);display:flex;gap:10px;border-top:1px solid var(--line);background:var(--bg2)}
+.onb-nav .btn{flex:1;padding:15px;font-size:15px}
+.onb-rowlist{display:flex;flex-direction:column;gap:8px;margin-bottom:12px}
+.onb-item{display:flex;align-items:center;gap:10px;padding:11px 12px;border:1px solid var(--line2);border-radius:12px;background:var(--panel2)}
+.onb-item .nm{flex:1;min-width:0;font-weight:600;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.onb-item .am{font-weight:700;font-size:14px;white-space:nowrap}
+.onb-item .x{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;color:var(--ink3);background:transparent;border:none;cursor:pointer;flex:none}
+.onb-pick{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.onb-chip{padding:9px 13px;border-radius:999px;border:1px dashed var(--line2);background:transparent;font-size:13px;font-weight:600;color:var(--ink2);cursor:pointer}
+.onb-chip:hover{border-color:var(--gold);color:var(--gold);border-style:solid}
+
 </head>
 <body>
 <div id="bootSplash" style="position:fixed;inset:0;z-index:99999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#F7F4EC;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','Inter',sans-serif">
@@ -433,6 +454,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 <div class="sheet" id="sheet"></div>
 <div class="toast" id="toast"></div>
 <div id="gate"><div class="gbox" id="gbox"></div></div>
+<div id="onb"><div class="onb-top"><div class="onb-bar"><i id="onbBar"></i></div><div class="onb-step"><span id="onbStepLbl"></span><button class="skip" id="onbSkip">Пропустить всё</button></div></div><div class="onb-body" id="onbBody"></div><div class="onb-nav" id="onbNav"></div></div>
 <script>
 /* QR Code Generator (Kazuhiko Arase, MIT) — офлайн, без внешних запросов */
 //---------------------------------------------------------------------
@@ -2738,7 +2760,7 @@ window.qrcode = qrcode;
 <script>
 /* ============================================================
    Семейная финансовая ERP — single-file app (vanilla JS)
-   Данные: localStorage (автосохранение) + Экспорт/Импорт + Dropbox sync (PKCE)
+   Данные: аккаунт (E2E-шифрование) + облачная синхронизация + локальный кеш + Экспорт/Импорт
    ============================================================ */
 "use strict";
 /* --- ранняя диагностика: маркер загрузки + вывод ошибок на экран --- */
@@ -2773,7 +2795,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.20-design2";
+const APP_VERSION="v7.26-design2";
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
 const uid = () => Math.random().toString(36).slice(2,9)+Date.now().toString(36).slice(-4);
@@ -2888,7 +2910,7 @@ function migrate(s){ s.freq=s.freq||{}; s.members=s.members||[]; s.lock=s.lock||
   if(Array.isArray(s.groups) && !s.groups.some(g=>g.id==="g6")){ const idx=s.groups.findIndex(g=>g.id==="gi"); const g6={id:"g6",name:"Пожертвования",kind:"expense",color:"#C77DA6",note:"Giving — отдаём, не копим (это расход)"}; if(idx>=0)s.groups.splice(idx,0,g6); else s.groups.push(g6); }
   if(Array.isArray(s.categories)){ const cc=s.categories.find(c=>c.id==="c_char"); if(cc && cc.groupId==="g5") cc.groupId="g6"; }
   if(Array.isArray(s.categories)){ const cf=s.categories.find(c=>c.id==="c_cafe"); if(cf && cf.groupId==="g2") cf.groupId="g4"; }
-  if(Array.isArray(s.assets)) s.assets.forEach(a=>{ if(!a.class) a.class=a.liquid?'reserve':'personal'; });
+  if(Array.isArray(s.assets)) s.assets.forEach(a=>{ if(!a.class) a.class=a.liquid?'reserve':'personal'; if(!Array.isArray(a.ledger)) a.ledger=[]; if(a.depr==null) a.depr=false; if(a.deprYears==null) a.deprYears=0; });
   if(Array.isArray(s.incomeSources)) s.incomeSources.forEach(x=>{ if(!x.kind) x.kind='labor'; });
   // Гибрид «личное+общее»: поля по умолчанию сохраняют прежнее поведение (всё общее)
   if(Array.isArray(s.members)) s.members.forEach((m,i)=>{ if(!m.accountType) m.accountType=(m.role==='owner'||i===0?'owner':'simple'); if(m.familyAllowed==null) m.familyAllowed=(m.accountType==='full'||m.accountType==='owner'); if(m.startCash==null) m.startCash=0; if(!m.startCashDate) m.startCashDate='1970-01-01'; });
@@ -3117,8 +3139,8 @@ function essentialSpend(k){ return groupSpend(k,"g1")+groupSpend(k,"g2")+groupSp
 // стабильная оценка «нужных» трат за месяц (для подушки): план на месяц, иначе среднее по прошлым месяцам, иначе текущий
 function essentialMonthlyEstimate(){ const pl=plannedEssentialMonthly(); if(pl>0) return pl; const ms=[...new Set(state.txns.map(t=>ym(t.date)))].filter(m=>m<realMonth()); if(ms.length) return Math.round(ms.reduce((a,m)=>a+essentialSpend(m),0)/ms.length); return essentialSpend(realMonth()); }
 
-const totalAssets=()=>state.assets.reduce((a,x)=>a+(+x.value||0),0)+familyCash();
-const liquidAssets=()=>familyCash()+state.assets.filter(a=>a.liquid).reduce((a,x)=>a+(+x.value||0),0);
+const totalAssets=()=>state.assets.reduce((a,x)=>a+assetLiveValue(x),0)+familyCash();
+const liquidAssets=()=>familyCash()+state.assets.filter(a=>a.liquid).reduce((a,x)=>a+assetLiveValue(x),0);
 // Семейный кэш = сумма личных остатков всех участников (вариант «снизу вверх»)
 function familyCash(){ return (state.members||[]).reduce((a,m)=>a+memberBalance(m),0); }
 function familyCashAsOf(dateExcl){ return (state.members||[]).reduce((a,m)=>a+memberBalanceAsOf(m,dateExcl),0) + state.assets.filter(a=>a.liquid).reduce((a,x)=>a+(+x.value||0),0); }
@@ -3303,6 +3325,17 @@ function celebrateTxn(amount, type){
     setTimeout(()=>{ glow.remove(); fly.remove(); }, 1150);
   }catch(e){}
 }
+// «Мост»: при первой трате в капитал — объяснить, что деньги не потеряны, а стали капиталом
+function maybeCapitalBridge(categoryId){
+  try{
+    if(!isCapCat(categoryId)) return;
+    if(categoryId==="c_debt") return; // тело долга — отдельная механика
+    state.settings=state.settings||{};
+    if(state.settings.capBridgeShown) return;
+    state.settings.capBridgeShown=true; save(false);
+    setTimeout(()=>{ try{ toast("Эти деньги не потрачены — они превратились в ваш капитал 📈"); }catch(e){} }, 1200);
+  }catch(e){}
+}
 
 /* ============================================================
    СОВЕТ ДНЯ — 50 мыслей признанных мэтров о деньгах
@@ -3458,22 +3491,22 @@ sheetEl.addEventListener("touchcancel",_shEnd);
 const ICON_ME='<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;margin-right:5px"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg>';
 const ICON_FAM='<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:5px"><circle cx="9" cy="8" r="3"/><path d="M2.5 19a6.5 6.5 0 0 1 13 0"/><path d="M16 6.2a3 3 0 0 1 0 5.6M21.5 19a6.2 6.2 0 0 0-4-5.8"/></svg>';
 const NAV=[
-  {id:"today",name:"Сегодня",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',grp:"Каждый день"},
-  {id:"ops",name:"Операции",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',grp:"Каждый день"},
-  {id:"plan",name:"План",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M2 15h4M10 8h4M18 17h4"/></svg>',grp:"Каждый день"},
-  {id:"calendar",name:"Календарь",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>',grp:"Каждый день"},
-  {id:"fact",name:"Факт",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',grp:"Каждый день"},
-  {id:"dash",name:"Дашборд",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',grp:"Управление"},
-  {id:"forecast",name:"Прогноз",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>',grp:"Управление"},
-  {id:"history",name:"История",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',grp:"Управление"},
-  {id:"balance",name:"Баланс / Капитал",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M5 20h14"/><path d="M12 6 4.5 8.2M12 6l7.5 2.2"/><path d="M2 13a2.5 2.5 0 0 0 5 0L4.5 8 2 13zM17 13a2.5 2.5 0 0 0 5 0l-2.5-5L17 13z"/></svg>',grp:"Капитал"},
-  {id:"debts",name:"Долги",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M21 13v4h-4"/></svg>',grp:"Капитал"},
-  {id:"goals",name:"Цели 5 лет",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.6"/></svg>',grp:"Капитал"},
-  {id:"capital",name:"Путь к капиталу",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.9 6.3.7-4.7 4.3 1.3 6.2L12 17.9 6.1 20.4l1.3-6.2L2.7 9.6l6.3-.7z"/></svg>',grp:"Капитал"},
+  {id:"today",name:"Сегодня",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',grp:"Сейчас — сколько у меня денег"},
+  {id:"ops",name:"Операции",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2.5"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',grp:"Сейчас — сколько у меня денег"},
+  {id:"calendar",name:"Календарь",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 9h18M8 3v4M16 3v4"/></svg>',grp:"Сейчас — сколько у меня денег"},
+  {id:"plan",name:"План",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3"/><path d="M2 15h4M10 8h4M18 17h4"/></svg>',grp:"Поток — куда всё движется"},
+  {id:"fact",name:"Факт",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12l3 3 5-6"/></svg>',grp:"Поток — куда всё движется"},
+  {id:"forecast",name:"Прогноз",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M17 7h4v4"/></svg>',grp:"Поток — куда всё движется"},
+  {id:"dash",name:"Дашборд",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg>',grp:"Поток — куда всё движется"},
+  {id:"balance",name:"Баланс",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M5 20h14"/><path d="M12 6 4.5 8.2M12 6l7.5 2.2"/><path d="M2 13a2.5 2.5 0 0 0 5 0L4.5 8 2 13zM17 13a2.5 2.5 0 0 0 5 0l-2.5-5L17 13z"/></svg>',grp:"Капитал — богатею я или беднею"},
+  {id:"debts",name:"Долги",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7l6 6 4-4 8 8"/><path d="M21 13v4h-4"/></svg>',grp:"Капитал — богатею я или беднею"},
+  {id:"capital",name:"Путь к капиталу",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.7 5.9 6.3.7-4.7 4.3 1.3 6.2L12 17.9 6.1 20.4l1.3-6.2L2.7 9.6l6.3-.7z"/></svg>',grp:"Капитал — богатею я или беднею"},
+  {id:"history",name:"История",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>',grp:"Капитал — богатею я или беднею"},
+  {id:"goals",name:"Цели 5 лет",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.6"/></svg>',grp:"Цели — к чему иду"},
   {id:"help",name:"Помощь",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 0 1 4.6 1.3c0 1.6-2.2 2-2.2 3.6"/><path d="M12 17.2h.01"/></svg>',grp:"Система"},
   {id:"settings",name:"Настройка",icon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M4.4 4.4l2.1 2.1M17.5 17.5l2.1 2.1M2.5 12h3M18.5 12h3M4.4 19.6l2.1-2.1M17.5 6.5l2.1-2.1"/></svg>',grp:"Система"},
 ];
-const BOTTOM=["today","ops","dash","goals"]; // + more
+const BOTTOM=["today","plan","balance","goals"]; // 4 смысловых якоря + Ещё
 let route="today";
 let curMonth = ym(new Date());
 function horizonStart(){ return ym(new Date()); }
@@ -3597,8 +3630,9 @@ function renderNav(){
   const sb=document.getElementById("sidebar"); sb.innerHTML="";
   sb.appendChild(h('<button class="btn primary block desk-add" id="deskAdd">＋ Добавить операцию</button>'));
   let lastGrp="";
+  const shortGrp=(g)=>({"Сейчас — сколько у меня денег":"Сейчас","Поток — куда всё движется":"Поток","Капитал — богатею я или беднею":"Капитал","Цели — к чему иду":"Цели"}[g]||g);
   NAV.filter(n=>!simple || SIMPLE_NAV.indexOf(n.id)>=0).forEach(n=>{
-    if(n.grp!==lastGrp){ sb.appendChild(h('<div class="sgroup">'+esc(n.grp)+'</div>')); lastGrp=n.grp; }
+    if(n.grp!==lastGrp){ sb.appendChild(h('<div class="sgroup">'+esc(shortGrp(n.grp))+'</div>')); lastGrp=n.grp; }
     const b=h('<button class="navi'+(route===n.id?' active':'')+'"><span class="ic">'+n.icon+'</span><span>'+esc(n.name)+'</span></button>');
     b.onclick=()=>go(n.id); sb.appendChild(b);
   });
@@ -3617,11 +3651,11 @@ function renderNav(){
 }
 function openMore(){
   const items=NAV.filter(n=>BOTTOM.indexOf(n.id)<0);
-  const colorOf=(id)=>({plan:'var(--grp2)',calendar:'#3B82F6',fact:'var(--green)',forecast:'#8B5CF6',history:'#0EA5E9',balance:'var(--gold)',debts:'var(--red)',capital:'var(--gold)',help:'var(--ink3)',settings:'var(--ink3)'}[id]||'var(--gold)');
+  const colorOf=(id)=>({today:'var(--gold)',ops:'var(--grp2)',plan:'var(--grp2)',calendar:'#3B82F6',fact:'var(--green)',forecast:'#8B5CF6',dash:'var(--grp1)',history:'#0EA5E9',balance:'var(--gold)',debts:'var(--red)',goals:'var(--grp4)',capital:'var(--gold)',help:'var(--ink3)',settings:'var(--ink3)'}[id]||'var(--gold)');
   const groups={}; items.forEach(n=>{ const g=n.grp||'Разделы'; (groups[g]=groups[g]||[]).push(n); });
-  let html='<h3 style="margin:0 0 2px">Разделы</h3>';
+  let html='<h3 style="margin:0 0 2px">Все разделы</h3><p class="muted" style="font-size:12px;margin:2px 0 0">Приложение отвечает на четыре вопроса о ваших деньгах.</p>';
   Object.keys(groups).forEach(g=>{
-    html+=`<div class="eyebrow" style="margin:14px 0 9px">${esc(g)}</div><div class="tilegrid">`;
+    html+=`<div class="eyebrow" style="margin:16px 0 9px">${esc(g)}</div><div class="tilegrid">`;
     groups[g].forEach(n=>{ const c=colorOf(n.id);
       html+=`<button class="tile" data-go="${n.id}"><span class="tileic" style="background:${tint(c,13)};color:${c}">${n.icon}</span><span class="tilename">${esc(n.name)}</span></button>`; });
     html+='</div>';
@@ -3733,6 +3767,10 @@ function openMonthClose(k){
       <div id="clReval">${caps.map(a=>{const g=assetCapitalizeForMonth(a); const nv=Math.round((+a.value||0)+g); return `<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">было ${fmt(a.value,{bare:true})} · +${fmt(g,{bare:true})} за месяц (${a.yield}%)</div></div>
         <input class="num" data-rv="${a.id}" inputmode="numeric" value="${nv}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`;}).join("")}</div>
       <small class="hint">За месяц капитал предположительно вырос по вашей ставке. Подтвердите или впишите фактическую стоимость по выписке — это не кэш на счёте, а рост стоимости актива.</small></div>`; })()}
+    ${(()=>{ const deps=assetRows.filter(a=>a.depr && (a.class||'')!=='working'); if(!deps.length)return ''; return `<div class="field"><label>📉 Плановое снижение стоимости (амортизация)</label>
+      <div id="clDepr">${deps.map(a=>{const g=assetDeprForMonth(a); const nv=Math.round((+a.value||0)+g); return `<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">было ${fmt(a.value,{bare:true})} · ${fmt(g,{bare:true})} за месяц (дешевеет ${a.deprYears||5} лет)</div></div>
+        <input class="num" data-dv="${a.id}" inputmode="numeric" value="${nv}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`;}).join("")}</div>
+      <small class="hint">Машина, техника и подобное со временем дешевеют. Это не трата денег, а переоценка стоимости — она снижает чистый капитал. Подтвердите сумму или впишите реальную стоимость.</small></div>`; })()}
     <div class="field"><button class="btn ghost block" id="clAssetsToggle" style="text-align:left">▸ Обновить стоимость других активов (по желанию)</button>
       <div id="clAssets" style="display:none;margin-top:10px">${assetRows.length?assetRows.map(a=>`<div class="lrow" style="align-items:center"><div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">сейчас ${fmt(a.value,{bare:true})}</div></div>
         <input class="num" data-av="${a.id}" inputmode="numeric" value="${Math.round(+a.value||0)}" style="width:132px;text-align:right;padding:9px 10px;font-size:14px"></div>`).join(""):'<div class="empty">Активов нет</div>'}</div></div>
@@ -3744,8 +3782,9 @@ function openMonthClose(k){
       el.querySelectorAll("[data-lb]").forEach(inp=>{ const x=byId(state.liabilities,inp.dataset.lb); if(x){ const v=parseFloat(String(inp.value).replace(/\s/g,""))||0; x.balance=Math.max(0,v); x.anchorDate=todayISOdate(); } });
       let cashSum=0, anyCash=false;
       el.querySelectorAll("[data-mc]").forEach(inp=>{ const m=memberById(inp.dataset.mc); if(m){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)){ m.startCash=Math.max(0,v); m.startCashDate=addMonths(k,1)+"-01"; cashSum+=Math.max(0,v); anyCash=true; } } });
-      el.querySelectorAll("[data-rv]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.rv); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
-      if(ab.style.display!=="none") el.querySelectorAll("[data-av]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.av); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) a.value=v; } });
+      el.querySelectorAll("[data-rv]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.rv); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) setAssetValue(a,v,"рост стоимости за "+ymShort(k)); } });
+      el.querySelectorAll("[data-dv]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.dv); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) setAssetValue(a,v,"снижение стоимости за "+ymShort(k)); } });
+      if(ab.style.display!=="none") el.querySelectorAll("[data-av]").forEach(inp=>{ const a=byId(state.assets,inp.dataset.av); if(a){ const v=parseFloat(String(inp.value).replace(/\s/g,"")); if(!isNaN(v)) setAssetValue(a,v,"переоценка вручную"); } });
       performClose(k);
       if(anyCash && state.snapshots[k]){ const ess=essentialSpend(k); state.snapshots[k].liquid=cashSum; state.snapshots[k].cushionMonths= ess>0? cashSum/ess : (cashSum>0?99:0); save(); }
       closeSheet(); render_current(); toast("Месяц "+ymShort(k)+" закрыт");
@@ -3873,7 +3912,7 @@ function openAddTxn(preset){
           if(date<=today){ // сегодняшний/прошлый экземпляр — сразу факт
             state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:mid,createdAt:nowISO(),fromPlanned:pid});
             state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
-            save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId);
+            save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId); if(draft.type==="expense") maybeCapitalBridge(draft.categoryId);
           } else { save(); closeSheet(); render_current(); toast("Плановый повторяющийся добавлен"); }
         } else if(!part && date>today){
           // разовый плановый (дата в будущем) — в факт не идёт
@@ -3883,7 +3922,7 @@ function openAddTxn(preset){
           // обычный факт (участник всегда сюда)
           state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:mid,createdAt:nowISO()});
           state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
-          save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId);
+          save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId); if(draft.type==="expense") maybeCapitalBridge(draft.categoryId);
         }
       };
       el.querySelector("#cancelTxn").onclick=closeSheet;
@@ -5363,6 +5402,28 @@ function pgHistory(v){
 /* ============================================================
    PAGE: БАЛАНС / NET WORTH
    ============================================================ */
+// Динамика чистого капитала за месяц (для слоя 1): сравниваем с последним закрытым снимком
+function netWorthDelta(){
+  const snaps=state.snapshots||{};
+  const keys=Object.keys(snaps).sort();
+  if(!keys.length) return null;
+  const last=snaps[keys[keys.length-1]];
+  const prevNet=(last && (last.net!=null?last.net:last.netWorth));
+  if(prevNet==null) return null;
+  return netWorth()-prevNet;
+}
+// Метка денежного потока актива (ось Кийосаки, человеческим языком)
+function assetFlowTag(a){
+  if((a.class||'')==='working' && (+a.yield||0)>0){
+    const m=Math.round((+assetLiveValue(a)||0)*(+a.yield||0)/100/12);
+    return {ico:'💵', txt:'приносит ~'+fmt(m,{bare:true})+'/мес', pos:true};
+  }
+  if(a.depr && (a.class||'')!=='working'){
+    const m=assetDeprForMonth(a);
+    return {ico:'💸', txt:'дешевеет ~'+fmt(Math.abs(m),{bare:true})+'/мес', pos:false};
+  }
+  return null;
+}
 function pgBalance(v){
   const k=curMonth; const snap=(state.snapshots||{})[k]; const closed=!!snap;
   const hasList=closed && snap.assetsList && snap.liabList;
@@ -5370,10 +5431,13 @@ function pgBalance(v){
   const assetsArr=hasList?snap.assetsList:state.assets, liabArr=hasList?snap.liabList:state.liabilities;
   const editable=!closed;
   v.appendChild(h(`<div><div class="page-title">Баланс семьи</div><div class="page-sub">${ymLabel(k)}${closed?' · <span style="color:var(--gold);font-weight:600">зафиксировано на конец месяца</span>':' · Активы − Пассивы = Чистый капитал'}</div></div>`));
+  const nwd=editable?netWorthDelta():null;
+  const nwdLine = nwd!=null ? `<div style="font-size:13px;margin-top:6px;color:${nwd>=0?'var(--green)':'var(--red)'};font-weight:600">${nwd>=0?'▲':'▼'} ${fmt(nwd,{plus:true,bare:true})} ${CUR} за месяц · ${nwd>=0?'вы богатеете':'капитал снизился'}</div>` : '';
   const nw=h(`<div class="card" style="background:linear-gradient(160deg,color-mix(in srgb,var(--grp5) 12%,transparent),var(--panel));border-color:color-mix(in srgb,var(--grp5) 30%,transparent)">
-    <div class="eyebrow" style="margin:0">Чистый капитал${closed?' (на конец '+ymShort(k)+')':' семьи'}</div>
-    <div class="num" style="font-size:32px;font-weight:800;letter-spacing:-1px;margin:6px 0;color:var(--gold)">${fmt(N)}</div>
-    <div class="row" style="gap:10px"><span class="pill g">Активы ${fmtK(A)}</span><span class="pill r">Пассивы ${fmtK(L)}</span></div>
+    <div class="eyebrow" style="margin:0">Чистыми${closed?' (на конец '+ymShort(k)+')':''}</div>
+    <div class="num" style="font-size:32px;font-weight:800;letter-spacing:-1px;margin:6px 0 0;color:var(--gold)">${fmt(N)}</div>
+    ${nwdLine}
+    <div class="row" style="gap:10px;margin-top:10px"><span class="pill g">Моё ${fmtK(A)}</span><span class="pill r">Должен ${fmtK(L)}</span></div>
     ${editable?`<button class="btn sm block" id="fixNW" style="margin-top:12px">📌 ${monthToClose()?('Закрыть месяц '+ymShort(monthToClose())):'Пересчитать прошлый месяц'}</button>`:`<div class="muted" style="font-size:12px;margin-top:10px">Исторические данные закрытого месяца. Текущие значения — на месяце «${ymShort(realMonth())}».</div>`}
   </div>`);
   if(editable) nw.querySelector("#fixNW").onclick=()=>openMonthClose(monthToClose()||addMonths(realMonth(),-1));
@@ -5389,23 +5453,46 @@ function pgBalance(v){
     if(!(state.members||[]).length) cc.appendChild(h(`<div class="dim" style="font-size:12px;padding:4px 2px">Добавьте участника, чтобы вести кэш.</div>`));
     v.appendChild(cc);
   }
-  const ac=h(`<div class="card"><h3>Активы<span class="tag num">${fmt(A)}</span></h3></div>`);
+  const ac=h(`<div class="card"><h3>Моё <span class="dim" style="font-weight:500;font-size:12px">активы</span><span class="tag num">${fmt(A)}</span></h3></div>`);
   assetsArr.forEach(a=>{
-    const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--green) 13%,transparent);color:var(--green)">${a.liquid?'💵':'🏛'}</div>
-      <div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div><div class="t2">${esc(a.kind||'')}${a.liquid?' · ликвидный':''}</div></div>
-      <div class="amt num">${fmt(a.value,{bare:true})}</div></div>`);
-    if(editable){ row.style.cursor="pointer"; row.onclick=()=>editAsset(a.id); }
-    ac.appendChild(row);
+    const val=editable?assetLiveValue(a):(+a.value||0);
+    const flow=editable?assetFlowTag(a):null;
+    const roleIco = (a.class||'')==='working'?'⚙️':(a.class==='reserve'||a.liquid?'💵':'🏠');
+    const row=h(`<div class="lrow" style="${editable?'cursor:pointer':''}"><div class="ic" style="background:color-mix(in srgb,var(--green) 13%,transparent);color:var(--green)">${roleIco}</div>
+      <div style="flex:1;min-width:0"><div class="t1">${esc(a.name)}</div>
+        <div class="t2">${esc(a.kind||'')}${flow?` · <span style="color:${flow.pos?'var(--green)':'var(--ink3)'}">${flow.ico} ${esc(flow.txt)}</span>`:''}</div></div>
+      <div class="amt num">${fmt(val,{bare:true})}</div>${editable?'<span class="dim" style="margin-left:6px;font-size:11px" data-c>▸</span>':''}</div>`);
+    if(editable){
+      // слой 3: биография стоимости (ledger + взносы по привязанным подкатегориям)
+      const det=h(`<div style="display:none;padding:2px 2px 10px 50px"></div>`);
+      const build=()=>{
+        det.innerHTML='';
+        const rows=[];
+        (a.ledger||[]).forEach(l=>rows.push({date:l.date,delta:l.delta,label:l.reason||'изменение'}));
+        assetLinkedSubs(a.id).forEach(su=>{
+          const from=a.linkAnchor||'1970-01-01';
+          state.txns.filter(t=>t.type==='expense'&&t.subId===su.id&&String(t.date)>=from).forEach(t=>rows.push({date:t.date,delta:+t.amount||0,label:'из операции · '+(t.comment||subName(su.id))}));
+        });
+        rows.sort((x,y)=>String(x.date).localeCompare(String(y.date)));
+        if(!rows.length){ det.appendChild(h(`<div class="dim" style="font-size:12px">История стоимости пуста.</div>`)); }
+        else rows.forEach(r=>det.appendChild(h(`<div class="linrow" style="font-size:12px;padding:3px 0"><span class="dim">${esc(fmtDate(r.date))} · ${esc(r.label)}</span><span class="num" style="color:${r.delta>=0?'var(--green)':'var(--red)'}">${fmt(r.delta,{plus:true,bare:true})}</span></div>`)));
+        det.appendChild(h(`<button class="btn sm ghost" style="margin-top:8px" data-ed>Изменить актив</button>`));
+        det.querySelector('[data-ed]').onclick=(e)=>{ e.stopPropagation(); editAsset(a.id); };
+      };
+      row.onclick=()=>{ const open=det.style.display!=='none'; if(open){det.style.display='none';row.querySelector('[data-c]').textContent='▸';} else {build();det.style.display='block';row.querySelector('[data-c]').textContent='▾';} };
+      ac.appendChild(row); ac.appendChild(det);
+    } else ac.appendChild(row);
   });
   if(!assetsArr.length) ac.appendChild(h(`<div class="empty" style="padding:14px">Активов нет</div>`));
   if(editable) ac.appendChild(h(`<button class="chipadd" style="margin:8px 0 2px 2px" data-open="asset">${SVG_PLUS} актив</button>`));
   v.appendChild(ac);
 
-  const lc=h(`<div class="card"><h3>Пассивы<span class="tag num">${fmt(L)}</span></h3></div>`);
+  const lc=h(`<div class="card"><h3>Должен <span class="dim" style="font-weight:500;font-size:12px">долги</span><span class="tag num">${fmt(L)}</span></h3></div>`);
   const lbal=(x)=>editable?liabBalance(x):(+x.balance||0);
   liabArr.slice().sort((a,b)=>lbal(b)-lbal(a)).forEach(x=>{
+    const mInt=editable?Math.round(lbal(x)*(+x.rate||0)/12):0;
     const row=h(`<div class="lrow"><div class="ic" style="background:color-mix(in srgb,var(--red) 13%,transparent);color:var(--red)">🔻</div>
-      <div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">${esc(x.kind||'')}${x.rate?' · '+pct(x.rate)+' годовых':''}${x.minPayment?' · '+fmt(x.minPayment,{bare:true})+'/мес':''}</div></div>
+      <div style="flex:1;min-width:0"><div class="t1">${esc(x.name)}</div><div class="t2">${esc(x.kind||'')}${x.rate?' · '+pct(x.rate)+' годовых':''}${mInt>0?' · <span style="color:var(--ink3)">💸 проценты ~'+fmt(mInt,{bare:true})+'/мес</span>':''}</div></div>
       <div class="amt num">${fmt(lbal(x),{bare:true})}</div></div>`);
     if(editable){ row.style.cursor="pointer"; row.onclick=()=>editLiab(x.id); }
     lc.appendChild(row);
@@ -5446,14 +5533,37 @@ function editAsset(id){
         </div></div>
       <small class="hint">«В кэш» — выплаты падают в «Прогноз денег» как приток; факт заводите операцией-доходом от источника «Капитал». «Капитализируется» — доход не приходит на счёт, а растит стоимость актива; фиксируется переоценкой при закрытии месяца. <b>Важно:</b> если этот же доход вы уже задали как источник дохода с месячной суммой — не задавайте доходность здесь ещё раз, иначе прогноз посчитает дважды.</small>
     </div>
+    <div id="deprBlock" style="display:${cls!=='working'?'block':'none'};background:color-mix(in srgb,var(--ink3) 6%,transparent);border-radius:12px;padding:12px;margin-bottom:12px">
+      <label class="row" style="gap:8px;cursor:pointer;margin:0"><input type="checkbox" id="adepr" style="width:auto" ${a.depr?'checked':''}> 📉 Дешевеет со временем (амортизация)</label>
+      <div id="deprYearsWrap" style="margin-top:8px;${a.depr?'':'display:none'}"><label style="font-size:12px;color:var(--ink2);display:block;margin-bottom:4px">За сколько лет заметно потеряет цену</label><input type="number" id="adyears" min="1" max="30" value="${a.deprYears||5}" style="width:120px"></div>
+      <small class="hint">Для машины, техники, мебели. Раз в месяц при закрытии месяца стоимость плавно снижается — это не трата денег, а переоценка, она уменьшает чистый капитал.</small>
+    </div>
     <div class="field"><label class="row" style="gap:8px"><input type="checkbox" id="al" style="width:auto" ${a.liquid?'checked':''}> Ликвидный (кэш/вклад — идёт в подушку)</label></div>
+    ${id?`<div class="field" style="margin-bottom:12px"><label>Что пополняет этот актив</label>
+      <div id="linkSubs" class="opts" style="flex-direction:column;gap:6px">${(function(){
+        const capGroups=new Set((state.groups||[]).filter(g=>g.kind==='capital').map(g=>g.id));
+        const subs=state.subcategories.filter(s=>!s.deleted && !s.goalId && !s.liabId && capGroups.has((byId(state.categories,s.categoryId)||{}).groupId));
+        if(!subs.length) return '<div class="dim" style="font-size:12px">Нет капитальных подкатегорий. Создайте их в «Плане» → группа «Капитал».</div>';
+        return subs.map(s=>{ const linkedElse=s.linkedAssetId && s.linkedAssetId!==id; return `<label class="opt ${s.linkedAssetId===id?'active':''}" style="justify-content:flex-start;gap:8px;${linkedElse?'opacity:.5':''}"><input type="checkbox" data-lsub="${s.id}" ${s.linkedAssetId===id?'checked':''} ${linkedElse?'disabled':''} style="width:auto">${esc(catName(s.categoryId))} · ${esc(s.name)}${linkedElse?' <span class="dim" style="font-size:10px">(привязана к другому)</span>':''}</label>`; }).join('');
+      })()}</div>
+      <small class="hint">Отметьте подкатегории, взносы в которые автоматически увеличивают стоимость этого актива. Например, «Инвестиции → Брокерский счёт» → привяжите к активу «Брокерский счёт».</small></div>`:''}
     <button class="btn primary block" id="save" style="padding:13px">Сохранить</button>
     ${id?'<button class="btn danger block" id="del" style="margin-top:8px">Удалить</button>':''}`,el=>{
     let curCls=cls, curYt=yt, curPf=pf;
-    el.querySelectorAll("#aclass [data-cl]").forEach(b=>b.onclick=()=>{ curCls=b.dataset.cl; el.querySelectorAll("#aclass .chip").forEach(x=>x.classList.toggle("active",x===b)); if(curCls==='reserve')el.querySelector("#al").checked=true; el.querySelector("#yieldBlock").style.display=curCls==='working'?'block':'none'; });
+    el.querySelectorAll("#aclass [data-cl]").forEach(b=>b.onclick=()=>{ curCls=b.dataset.cl; el.querySelectorAll("#aclass .chip").forEach(x=>x.classList.toggle("active",x===b)); if(curCls==='reserve')el.querySelector("#al").checked=true; el.querySelector("#yieldBlock").style.display=curCls==='working'?'block':'none'; el.querySelector("#deprBlock").style.display=curCls!=='working'?'block':'none'; });
+    const deprChk=el.querySelector("#adepr"); if(deprChk) deprChk.onchange=()=>{ el.querySelector("#deprYearsWrap").style.display=deprChk.checked?'':'none'; };
     el.querySelectorAll("#aytype [data-yt]").forEach(b=>b.onclick=()=>{ curYt=b.dataset.yt; el.querySelectorAll("#aytype .chip").forEach(x=>x.classList.toggle("active",x===b)); el.querySelector("#freqField").style.display=curYt==='cash'?'block':'none'; });
     el.querySelectorAll("#ayfreq [data-pf]").forEach(b=>b.onclick=()=>{ curPf=b.dataset.pf; el.querySelectorAll("#ayfreq .chip").forEach(x=>x.classList.toggle("active",x===b)); });
-    el.querySelector("#save").onclick=()=>{ const o={name:el.querySelector("#an").value.trim(),kind:el.querySelector("#ak").value.trim(),value:parseFloat(String(el.querySelector("#av").value).replace(/\s/g,""))||0,liquid:el.querySelector("#al").checked,class:curCls,yield:parseFloat(String(el.querySelector("#ay").value).replace(/\s/g,"").replace(",","."))||0,yieldType:curCls==='working'?curYt:'none',payFreq:curPf}; if(!o.name){toast("Введите название");return;} if(id)Object.assign(a,o); else state.assets.push({id:uid(),...o}); save(); closeSheet(); render_current(); };
+    el.querySelector("#save").onclick=()=>{ const newVal=parseFloat(String(el.querySelector("#av").value).replace(/\s/g,""))||0; const _depr=(curCls!=='working')&&el.querySelector("#adepr").checked; const _dy=Math.max(1,parseInt(el.querySelector("#adyears").value,10)||5); const o={name:el.querySelector("#an").value.trim(),kind:el.querySelector("#ak").value.trim(),liquid:el.querySelector("#al").checked,class:curCls,yield:parseFloat(String(el.querySelector("#ay").value).replace(/\s/g,"").replace(",","."))||0,yieldType:curCls==='working'?curYt:'none',payFreq:curPf,depr:_depr,deprYears:_dy}; if(!o.name){toast("Введите название");return;}
+      if(id){ Object.assign(a,o); setAssetValue(a,newVal,"переоценка вручную");
+        // применить привязки капитальных подкатегорий
+        const hadLink=assetLinkedSubs(a.id).length>0;
+        el.querySelectorAll("[data-lsub]").forEach(chk=>{ const su=byId(state.subcategories,chk.dataset.lsub); if(!su||chk.disabled)return; if(chk.checked) su.linkedAssetId=a.id; else if(su.linkedAssetId===a.id) delete su.linkedAssetId; });
+        // при первой привязке — якорь «с сегодня», чтобы прошлые операции не влетели в стоимость задним числом
+        if(!hadLink && assetLinkedSubs(a.id).length>0 && !a.linkAnchor) a.linkAnchor=todayISOdate();
+      }
+      else { const na={id:uid(),value:Math.round(newVal),ledger:[{date:todayISOdate(),delta:Math.round(newVal),reason:'начальная стоимость'}],...o}; state.assets.push(na); }
+      save(); closeSheet(); render_current(); };
     if(id)el.querySelector("#del").onclick=()=>{
       const asset=byId(state.assets,id);
       const liq=state.assets.filter(x=>x.liquid);
@@ -5461,7 +5571,7 @@ function editAsset(id){
         toast("Нельзя удалить последний кэш-счёт: он хранит остаток кэша. Снимите «ликвидный» или добавьте другой счёт.");
         return;
       }
-      if(confirm("Удалить актив?")){state.assets=state.assets.filter(x=>x.id!==id);save();closeSheet();render_current();}
+      if(confirm("Удалить актив?")){state.subcategories.forEach(s=>{ if(s.linkedAssetId===id) delete s.linkedAssetId; });state.assets=state.assets.filter(x=>x.id!==id);save();closeSheet();render_current();}
     };
   });
 }
@@ -5694,9 +5804,49 @@ function suggestPlanFromGoals(){
 /* ============================================================
    ПУТЬ К КАПИТАЛУ — «капитал, который работает» (только чтение)
    ============================================================ */
-function workingCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='working').reduce((s,x)=>s+(+x.value||0),0); }
-function reserveCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='reserve').reduce((s,x)=>s+(+x.value||0),0); }
-function personalCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='personal').reduce((s,x)=>s+(+x.value||0),0); }
+/* ---- Биография стоимости актива (ledger) + амортизация ----
+   value — текущая стоимость (как и раньше). ledger — прозрачная история изменений:
+   каждая строка {date, delta, reason, opId?}. Любое изменение value идёт через addLedger,
+   чтобы у каждой цифры была видимая причина. */
+function addLedger(a, delta, reason, opId){
+  if(!a) return;
+  if(!Array.isArray(a.ledger)) a.ledger=[];
+  delta=Math.round(+delta||0);
+  if(delta===0) return;
+  a.value=Math.round((+a.value||0)+delta);
+  a.ledger.push({date:todayISOdate(), delta, reason:reason||'', opId:opId||null});
+}
+// установить стоимость вручную → строка «переоценка вручную» на разницу
+function setAssetValue(a, newVal, reason){
+  if(!a) return;
+  const cur=+a.value||0, nv=Math.round(+newVal||0), d=nv-cur;
+  if(d!==0) addLedger(a, d, reason||'переоценка вручную');
+}
+// личный дешевеющий актив: помесячная амортизация по убывающему остатку.
+// Годовая ставка выводится из срока «полезной жизни»: за deprYears стоимость падает до ~10% —
+// это привычно для авто/техники и даёт плавную кривую, а не обнуление.
+function assetDeprForMonth(a){
+  if(!a || !a.depr) return 0;
+  if((a.class||'')==='working') return 0;         // работающие дорожают, не амортизируем
+  const years=Math.max(1,+a.deprYears||5);
+  const annualKeep=Math.pow(0.1, 1/years);        // за years лет остаётся 10%
+  const monthly=1-Math.pow(annualKeep, 1/12);     // доля, теряемая за месяц
+  return -Math.round((+a.value||0)*monthly);
+}
+// Привязка «капитальная подкатегория → актив»: операции в такую подкатегорию
+// автоматически растят стоимость актива (производная величина — как liabBalance).
+function assetLinkedSubs(assetId){ return state.subcategories.filter(s=>s.linkedAssetId===assetId && !s.deleted); }
+function assetContribSince(a){
+  const subs=assetLinkedSubs(a.id); if(!subs.length) return 0;
+  const from=a.linkAnchor||'1970-01-01';
+  const ids=new Set(subs.map(s=>s.id));
+  return state.txns.filter(t=>t.type==='expense' && ids.has(t.subId) && String(t.date)>=from).reduce((s,t)=>s+(+t.amount||0),0);
+}
+// «Живая» стоимость актива = базовая value (ledger: вручную + амортизация) + взносы по привязанным подкатегориям
+function assetLiveValue(a){ return Math.round((+a.value||0) + assetContribSince(a)); }
+function workingCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='working').reduce((s,x)=>s+assetLiveValue(x),0); }
+function reserveCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='reserve').reduce((s,x)=>s+assetLiveValue(x),0); }
+function personalCapital(){ return state.assets.filter(a=>(a.class||(a.liquid?'reserve':'personal'))==='personal').reduce((s,x)=>s+assetLiveValue(x),0); }
 function capitalSourceIds(){ return state.incomeSources.filter(s=>s.kind==='capital').map(s=>s.id); }
 function passiveIncomeMonth(k){ const ids=capitalSourceIds(); if(!ids.length)return 0;
   const actual=txnsOfMonth(k).filter(t=>t.type==='income'&&ids.includes(t.categoryId)).reduce((a,t)=>a+ +t.amount,0);
@@ -6205,6 +6355,13 @@ function pgSettings(v){
     <button class="btn ${simpleOn?'':'primary'} block" id="simpleToggle" style="padding:12px">${simpleOn?'Вернуть полный режим':'Включить простой режим'}</button></div>`);
   simpleCard.querySelector("#simpleToggle").onclick=()=>{ try{ if(isSimpleMode())localStorage.removeItem(LS_SIMPLE); else localStorage.setItem(LS_SIMPLE,"1"); }catch(e){} renderNav(); render_current(); };
   if(!part) tabAppend("general", simpleCard);
+  if(!part && !isJoinedMember()){
+    const oc=h(`<div class="card"><h3>Мастер настройки</h3>
+      <p class="muted" style="font-size:12.5px;margin-top:-6px">Пошагово завести или дополнить данные: участник, доходы, регулярные расходы, активы и долги, цель. Уже заведённое не удаляется — мастер только добавляет.</p>
+      <button class="btn primary block" id="runOnb" style="padding:12px">▶ Пройти настройку заново</button></div>`);
+    oc.querySelector("#runOnb").onclick=()=>startOnboarding();
+    tabAppend("general", oc);
+  }
   // --- автозакрытие месяца ---
   if(!part){
     const on = (state.settings||{}).autoCloseMonth !== false;
@@ -6411,8 +6568,7 @@ const CRYPT = {
    
   }
 };
-// расшифровать удалённые данные Dropbox (или вернуть как есть, если не зашифровано)
-// применить удалённое состояние с расшифровкой и обработкой ошибок
+// metaAhead: есть ли в метаданных A изменения новее, чем в B (для движка слияния)
 function metaAhead(a,b){ a=a||{}; b=b||{}; for(const coll in a){ for(const t of ['u','d']){ const mo=a[coll][t]||{}, ro=(b[coll]||{})[t]||{}; for(const k in mo){ if(!(k in ro) || mo[k]>ro[k]) return true; } } } return false; }
 /* ============================================================
    ОБЛАКО (аккаунт) — модель «один пароль» (E2E, нулевое знание).
@@ -6847,7 +7003,7 @@ function showAuthGate(mode){
     box.querySelector('#rkDl').onclick=()=>downloadRecoverySheet(rk);
     const chk=box.querySelector('#rkChk'), done=box.querySelector('#rkDone');
     chk.onchange=()=>{ done.disabled=!chk.checked; done.style.opacity=chk.checked?'1':'.5'; };
-    done.onclick=()=>{ g.classList.remove('show'); bootApp(); maybeOfferBiometric(); };
+    done.onclick=()=>{ g.classList.remove('show'); if(mode==='join'){ bootApp(); maybeOfferBiometric(); } else { startOnboarding(); } };
   }
   render();
 }
@@ -6893,6 +7049,7 @@ function _deobf(s){ try{ return decodeURIComponent(escape(atob(String(s)))); }ca
    INIT
    ============================================================ */
 document.getElementById("fab").onclick=()=>openAddTxn();
+(function(){ const s=document.getElementById("onbSkip"); if(s) s.onclick=onbSkipAll; })();
 document.getElementById("view").addEventListener("click",e=>{
   const nv=e.target.closest("[data-nav]"); if(nv){ go(nv.dataset.nav); return; }
   const op=e.target.closest("[data-open]"); if(op){ ({asset:editAsset,liab:editLiab,goal:editGoal}[op.dataset.open]||(()=>{}))(); return; }
@@ -7040,6 +7197,235 @@ function biometricCard(){
   }).catch(()=>{ body.innerHTML='<div class="dim" style="font-size:12px">Не удалось проверить поддержку биометрии.</div>'; });
   return card;
 }
+/* ============================================================
+   ОНБОРДИНГ — мастер первичной настройки (полноэкранный)
+   Ведёт по шагам, реально заводит данные: участник, старт-кэш,
+   доходы, регулярные расходы, активы/долги, цель. Всё можно пропустить.
+   ============================================================ */
+const ONB_INCOME=[{n:"Зарплата",i:"💼"},{n:"Вторая зарплата",i:"💼"},{n:"Подработка",i:"🔧"},{n:"Аренда/дивиденды",i:"📈",kind:"capital"}];
+const ONB_EXPENSE=[
+  {n:"Жильё",cat:"c_home",i:"🏠"},{n:"Коммунальные",cat:"c_util",i:"💡"},{n:"Связь",cat:"c_comm",i:"📶"},
+  {n:"Продукты",cat:"c_food",i:"🛒"},{n:"Транспорт",cat:"c_trans",i:"🚗"},{n:"Бензин",cat:"c_fuel",i:"⛽"},
+  {n:"Кафе",cat:"c_cafe",i:"☕"},{n:"Дети",cat:"c_kids",i:"🧒"},{n:"Здоровье",cat:"c_health",i:"➕"}
+];
+const ONB_GOALS=[{n:"Подушка безопасности",i:"🛟"},{n:"Отпуск",i:"🏖"},{n:"Закрыть кредиты",i:"⚡"},{n:"Крупная покупка",i:"🎁"},{n:"Первый взнос на жильё",i:"🏠"}];
+let onbDraft=null, onbIdx=0;
+
+function onbInput(val){ const n=parseFloat(String(val||"").replace(/\s/g,"").replace(",",".")); return isNaN(n)?0:n; }
+function onbFmt(n){ return groupNum(Math.round(n||0)); }
+
+const ONB_STEPS=[
+  { // 0 приветствие
+    lbl:"Знакомство", noskip:true,
+    render:(b)=>{ b.innerHTML=`<div class="onb-ico">👋</div><h2 class="onb-h">Настроим ваш финансовый штаб</h2>
+      <p class="onb-p">За несколько минут заведём основу: доходы, регулярные расходы, что у вас есть и к чему идёте. Любой шаг можно пропустить и заполнить позже — приложение будет полезным сразу.</p>
+      <div class="okbox" style="margin:0">Все данные остаются у вас и шифруются вашим паролем. Мы их не видим.</div>`; },
+    next:"Начать"
+  },
+  { // 1 участники
+    lbl:"Кто ведёт бюджет",
+    render:(b)=>{ b.innerHTML=`<div class="onb-ico">🙂</div><h2 class="onb-h">Как вас записать?</h2>
+      <p class="onb-p">Имя-метка нужна, чтобы отмечать, кто внёс операцию, и видеть личный и семейный бюджет. Позже можно пригласить близких.</p>
+      <div class="field"><label>Ваше имя</label><input id="onbMe" value="${esc(onbDraft.meName)}" placeholder="Напр. Я, Муж, Жена"></div>
+      <div class="field"><label>Значок</label><input id="onbEmoji" value="${esc(onbDraft.meEmoji)}" maxlength="2" style="width:80px;text-align:center;font-size:22px"></div>`;
+    },
+    save:(b)=>{ onbDraft.meName=b.querySelector("#onbMe").value.trim()||onbDraft.meName; onbDraft.meEmoji=b.querySelector("#onbEmoji").value.trim()||"🙂"; }
+  },
+  { // 2 старт-кэш
+    lbl:"Сколько сейчас денег",
+    render:(b)=>{ b.innerHTML=`<div class="onb-ico">💵</div><h2 class="onb-h">Сколько у вас сейчас денег?</h2>
+      <p class="onb-p">Наличные плюс деньги на счетах — сегодня, одной суммой. Это точка отсчёта: дальше приложение само считает остаток от ваших доходов и расходов.</p>
+      <div class="field"><label>Остаток на сегодня, ${CUR}</label><input id="onbCash" class="num" inputmode="numeric" value="${onbDraft.startCash?onbFmt(onbDraft.startCash):''}" placeholder="0"></div>`;
+      attachNum(b.querySelector("#onbCash"));
+    },
+    save:(b)=>{ onbDraft.startCash=onbInput(b.querySelector("#onbCash").value); }
+  },
+  { // 3 доходы
+    lbl:"Доходы",
+    render:(b)=>{ onbRenderIncome(b); },
+    save:(b)=>{ /* правки сумм подхватываются в onbRenderIncome */ }
+  },
+  { // 4 регулярные расходы
+    lbl:"Регулярные расходы",
+    render:(b)=>{ onbRenderExpense(b); },
+    save:(b)=>{}
+  },
+  { // 5 активы и долги
+    lbl:"Что есть и что должны",
+    render:(b)=>{ onbRenderBalance(b); },
+    save:(b)=>{}
+  },
+  { // 6 цель
+    lbl:"К чему идёте",
+    render:(b)=>{ onbRenderGoal(b); },
+    save:(b)=>{}
+  },
+  { // 7 финал + «мост»
+    lbl:"Готово", noskip:true,
+    render:(b)=>{ b.innerHTML=`<div class="onb-ico">🎉</div><h2 class="onb-h">Штаб настроен</h2>
+      <p class="onb-p">Приложение отвечает на четыре вопроса — они внизу экрана:</p>
+      <div class="onb-rowlist">
+        <div class="onb-item"><span style="font-size:18px">🏠</span><div class="nm" style="white-space:normal">Сегодня — сколько у меня денег сейчас</div></div>
+        <div class="onb-item"><span style="font-size:18px">🎚️</span><div class="nm" style="white-space:normal">План — куда всё движется, хватит ли</div></div>
+        <div class="onb-item"><span style="font-size:18px">⚖️</span><div class="nm" style="white-space:normal">Баланс — богатею я или беднею</div></div>
+        <div class="onb-item"><span style="font-size:18px">🎯</span><div class="nm" style="white-space:normal">Цели — к чему иду</div></div>
+      </div>
+      <div class="infobox" style="margin:0">Важная идея: когда вы откладываете в накопления, инвестиции или гасите долг — <b>деньги не тратятся, а превращаются в ваш капитал</b>. Поэтому такие взносы не считаются расходом и растят «Чистыми» на экране Баланс.</div>`;
+    },
+    next:"Начать пользоваться"
+  }
+];
+
+// --- шаг доходов: список с суммами ---
+function onbRenderIncome(b){
+  b.innerHTML=`<div class="onb-ico">💰</div><h2 class="onb-h">Откуда приходят деньги?</h2>
+    <p class="onb-p">Добавьте источники и примерную сумму в месяц. Это станет вашим планом дохода.</p>
+    <div class="onb-rowlist" id="onbIncList"></div>
+    <div class="onb-pick" id="onbIncPick">${ONB_INCOME.map((s,i)=>`<button class="onb-chip" data-inc="${i}">＋ ${s.i} ${esc(s.n)}</button>`).join("")}<button class="onb-chip" data-inc="new">＋ Другое</button></div>`;
+  const list=b.querySelector("#onbIncList");
+  const draw=()=>{ list.innerHTML=""; onbDraft.income.forEach((s,idx)=>{
+    const row=h(`<div class="onb-item"><span style="font-size:18px">${esc(s.i||'💰')}</span><div class="nm">${esc(s.n)}</div>
+      <input class="num" inputmode="numeric" data-amt="${idx}" value="${s.amount?onbFmt(s.amount):''}" placeholder="0" style="width:110px;text-align:right;padding:8px 10px">
+      <button class="x" data-del="${idx}">✕</button></div>`);
+    attachNum(row.querySelector("[data-amt]"));
+    row.querySelector("[data-amt]").oninput=(e)=>{ onbDraft.income[idx].amount=onbInput(e.target.value); };
+    row.querySelector("[data-del]").onclick=()=>{ onbDraft.income.splice(idx,1); draw(); };
+    list.appendChild(row);
+  }); if(!onbDraft.income.length) list.appendChild(h(`<div class="dim" style="font-size:12.5px;padding:4px 2px">Пока пусто — выберите источник ниже.</div>`)); };
+  b.querySelectorAll("[data-inc]").forEach(btn=>btn.onclick=()=>{
+    if(btn.dataset.inc==="new"){ const nm=prompt("Название источника:"); if(nm&&nm.trim()) onbDraft.income.push({n:nm.trim(),i:"💰",amount:0}); }
+    else { const t=ONB_INCOME[+btn.dataset.inc]; onbDraft.income.push({n:t.n,i:t.i,kind:t.kind||'labor',amount:0}); }
+    draw();
+  });
+  draw();
+}
+// --- шаг расходов ---
+function onbRenderExpense(b){
+  b.innerHTML=`<div class="onb-ico">🧾</div><h2 class="onb-h">Регулярные расходы</h2>
+    <p class="onb-p">Отметьте, на что уходят деньги каждый месяц, и впишите примерные суммы. Это создаст ваш план расходов — потом легко поправить.</p>
+    <div class="onb-rowlist" id="onbExpList"></div>
+    <div class="onb-pick" id="onbExpPick">${ONB_EXPENSE.map((s,i)=>`<button class="onb-chip" data-exp="${i}">＋ ${s.i} ${esc(s.n)}</button>`).join("")}</div>`;
+  const list=b.querySelector("#onbExpList");
+  const draw=()=>{ list.innerHTML=""; onbDraft.expense.forEach((s,idx)=>{
+    const row=h(`<div class="onb-item"><span style="font-size:18px">${esc(s.i)}</span><div class="nm">${esc(s.n)}</div>
+      <input class="num" inputmode="numeric" data-amt="${idx}" value="${s.amount?onbFmt(s.amount):''}" placeholder="0" style="width:110px;text-align:right;padding:8px 10px">
+      <button class="x" data-del="${idx}">✕</button></div>`);
+    attachNum(row.querySelector("[data-amt]"));
+    row.querySelector("[data-amt]").oninput=(e)=>{ onbDraft.expense[idx].amount=onbInput(e.target.value); };
+    row.querySelector("[data-del]").onclick=()=>{ onbDraft.expense.splice(idx,1); draw(); };
+    list.appendChild(row);
+  }); if(!onbDraft.expense.length) list.appendChild(h(`<div class="dim" style="font-size:12.5px;padding:4px 2px">Выберите статьи ниже — можно несколько.</div>`)); };
+  b.querySelectorAll("[data-exp]").forEach(btn=>btn.onclick=()=>{ const t=ONB_EXPENSE[+btn.dataset.exp]; if(onbDraft.expense.some(x=>x.cat===t.cat)){ toast(t.n+" уже добавлено"); return; } onbDraft.expense.push({n:t.n,cat:t.cat,i:t.i,amount:0}); draw(); });
+  draw();
+}
+// --- шаг активов/долгов ---
+function onbRenderBalance(b){
+  b.innerHTML=`<div class="onb-ico">⚖️</div><h2 class="onb-h">Что у вас есть и что должны</h2>
+    <p class="onb-p">По желанию: недвижимость, машина, вклад — и кредиты. Это покажет ваш чистый капитал. Машину и технику можно отметить как «дешевеющие».</p>
+    <div class="eyebrow" style="margin:2px 0 8px">Есть (активы)</div>
+    <div class="onb-rowlist" id="onbAssetList"></div>
+    <div class="onb-pick"><button class="onb-chip" data-asset="Квартира|🏠|personal">＋ Квартира/дом</button><button class="onb-chip" data-asset="Машина|🚗|personal|depr">＋ Машина</button><button class="onb-chip" data-asset="Вклад|🏦|reserve">＋ Вклад</button><button class="onb-chip" data-asset="Инвестиции|📈|working">＋ Инвестиции</button></div>
+    <div class="eyebrow" style="margin:8px 0 8px">Должны (долги)</div>
+    <div class="onb-rowlist" id="onbLiabList"></div>
+    <div class="onb-pick"><button class="onb-chip" data-liab="Ипотека">＋ Ипотека</button><button class="onb-chip" data-liab="Кредит">＋ Кредит</button><button class="onb-chip" data-liab="Кредитка">＋ Кредитная карта</button></div>`;
+  const aList=b.querySelector("#onbAssetList"), lList=b.querySelector("#onbLiabList");
+  const drawA=()=>{ aList.innerHTML=""; onbDraft.assets.forEach((a,idx)=>{
+    const row=h(`<div class="onb-item"><span style="font-size:18px">${esc(a.i)}</span><div class="nm">${esc(a.n)}${a.depr?' <span class="dim" style="font-size:10px">дешевеет</span>':''}</div>
+      <input class="num" inputmode="numeric" data-amt="${idx}" value="${a.value?onbFmt(a.value):''}" placeholder="стоимость" style="width:120px;text-align:right;padding:8px 10px">
+      <button class="x" data-del="${idx}">✕</button></div>`);
+    attachNum(row.querySelector("[data-amt]")); row.querySelector("[data-amt]").oninput=(e)=>{ onbDraft.assets[idx].value=onbInput(e.target.value); };
+    row.querySelector("[data-del]").onclick=()=>{ onbDraft.assets.splice(idx,1); drawA(); };
+    aList.appendChild(row);
+  }); if(!onbDraft.assets.length) aList.appendChild(h(`<div class="dim" style="font-size:12px;padding:2px">Необязательно.</div>`)); };
+  const drawL=()=>{ lList.innerHTML=""; onbDraft.liab.forEach((x,idx)=>{
+    const row=h(`<div class="onb-item"><span style="font-size:18px">🔻</span><div class="nm">${esc(x.n)}</div>
+      <input class="num" inputmode="numeric" data-amt="${idx}" value="${x.balance?onbFmt(x.balance):''}" placeholder="остаток" style="width:120px;text-align:right;padding:8px 10px">
+      <button class="x" data-del="${idx}">✕</button></div>`);
+    attachNum(row.querySelector("[data-amt]")); row.querySelector("[data-amt]").oninput=(e)=>{ onbDraft.liab[idx].balance=onbInput(e.target.value); };
+    row.querySelector("[data-del]").onclick=()=>{ onbDraft.liab.splice(idx,1); drawL(); };
+    lList.appendChild(row);
+  }); if(!onbDraft.liab.length) lList.appendChild(h(`<div class="dim" style="font-size:12px;padding:2px">Необязательно.</div>`)); };
+  b.querySelectorAll("[data-asset]").forEach(btn=>btn.onclick=()=>{ const[n,i,cls,depr]=btn.dataset.asset.split("|"); onbDraft.assets.push({n,i,class:cls,depr:!!depr,deprYears:5,value:0,liquid:cls==='reserve'}); drawA(); });
+  b.querySelectorAll("[data-liab]").forEach(btn=>btn.onclick=()=>{ onbDraft.liab.push({n:btn.dataset.liab,balance:0}); drawL(); });
+  drawA(); drawL();
+}
+// --- шаг цели ---
+function onbRenderGoal(b){
+  b.innerHTML=`<div class="onb-ico">🎯</div><h2 class="onb-h">Первая цель</h2>
+    <p class="onb-p">Выберите цель — приложение посчитает, сколько откладывать в месяц. Можно пропустить и завести позже.</p>
+    <div class="onb-pick" id="onbGoalPick">${ONB_GOALS.map((g,i)=>`<button class="onb-chip ${onbDraft.goal&&onbDraft.goal.n===g.n?'':''}" data-goal="${i}">${g.i} ${esc(g.n)}</button>`).join("")}</div>
+    <div id="onbGoalForm"></div>`;
+  const form=b.querySelector("#onbGoalForm");
+  const drawForm=()=>{ if(!onbDraft.goal){ form.innerHTML=""; return; }
+    form.innerHTML=`<div class="onb-item" style="margin-bottom:10px"><span style="font-size:18px">${esc(onbDraft.goal.i)}</span><div class="nm">${esc(onbDraft.goal.n)}</div><button class="x" id="goalClr">✕</button></div>
+      <div class="field"><label>Сколько нужно накопить, ${CUR}</label><input id="onbGoalT" class="num" inputmode="numeric" value="${onbDraft.goal.target?onbFmt(onbDraft.goal.target):''}" placeholder="напр. 500 000"></div>
+      <div class="field"><label>К какому сроку</label><input id="onbGoalD" type="date" value="${onbDraft.goal.date||''}"></div>`;
+    attachNum(form.querySelector("#onbGoalT"));
+    form.querySelector("#onbGoalT").oninput=(e)=>{ onbDraft.goal.target=onbInput(e.target.value); };
+    form.querySelector("#onbGoalD").onchange=(e)=>{ onbDraft.goal.date=e.target.value; };
+    form.querySelector("#goalClr").onclick=()=>{ onbDraft.goal=null; onbRenderGoal(b); };
+  };
+  b.querySelectorAll("[data-goal]").forEach(btn=>btn.onclick=()=>{ const g=ONB_GOALS[+btn.dataset.goal]; onbDraft.goal={n:g.n,i:g.i,target:0,date:""}; onbRenderGoal(b); });
+  drawForm();
+}
+
+function startOnboarding(){
+  onbDraft={ meName:(ACCT.email?String(ACCT.email).split('@')[0]:'Я'), meEmoji:'🙂', startCash:0, income:[], expense:[], assets:[], liab:[], goal:null };
+  // если участник уже есть — возьмём его имя
+  const ow=(state.members||[]).find(m=>m.accountType==='owner')||state.members[0];
+  if(ow){ onbDraft.meName=ow.name; onbDraft.meEmoji=ow.emoji||'🙂'; onbDraft.startCash=+ow.startCash||0; }
+  onbIdx=0;
+  document.getElementById("onb").classList.add("show");
+  onbRenderStep();
+}
+function onbRenderStep(){
+  const step=ONB_STEPS[onbIdx];
+  const bar=document.getElementById("onbBar"); if(bar) bar.style.width=((onbIdx)/(ONB_STEPS.length-1)*100)+"%";
+  document.getElementById("onbStepLbl").textContent="Шаг "+(onbIdx+1)+" из "+ONB_STEPS.length+" · "+step.lbl;
+  const skip=document.getElementById("onbSkip"); skip.style.display=onbIdx>0&&onbIdx<ONB_STEPS.length-1?"":"none";
+  const body=document.getElementById("onbBody"); body.scrollTop=0; step.render(body);
+  const nav=document.getElementById("onbNav"); nav.innerHTML="";
+  if(onbIdx>0 && onbIdx<ONB_STEPS.length){ const back=h(`<button class="btn ghost">‹ Назад</button>`); back.onclick=()=>{ onbStepSave(); onbIdx--; onbRenderStep(); }; nav.appendChild(back); }
+  const isLast=onbIdx===ONB_STEPS.length-1;
+  const nextBtn=h(`<button class="btn primary">${esc(step.next||(isLast?'Готово':(step.noskip?'Далее':'Далее ›')))}</button>`);
+  nextBtn.onclick=()=>{ onbStepSave(); if(isLast){ finishOnboarding(); } else { onbIdx++; onbRenderStep(); } };
+  nav.appendChild(nextBtn);
+}
+function onbStepSave(){ const step=ONB_STEPS[onbIdx]; if(step.save){ try{ step.save(document.getElementById("onbBody")); }catch(e){} } }
+function onbSkipAll(){ if(confirm("Пропустить настройку? Можно пройти её позже в «Настройка → Пройти настройку заново».")){ document.getElementById("onb").classList.remove("show"); state.settings=state.settings||{}; state.settings.onboarded=true; save(); bootApp(); } }
+
+function finishOnboarding(){
+  try{
+    const lastDay=(k)=>k+"-"+String(mlenOf(k)).padStart(2,"0");
+    const k=realMonth();
+    // 1. участник-владелец
+    let ow=(state.members||[]).find(m=>m.accountType==='owner')||state.members[0];
+    if(!ow){ ow={id:uid(),name:onbDraft.meName,emoji:onbDraft.meEmoji,color:MEMBER_COLORS[0],accountType:'owner',familyAllowed:true,startCash:0,startCashDate:todayISOdate()}; state.members.push(ow); setCurMember(ow.id); }
+    else { ow.name=onbDraft.meName; ow.emoji=onbDraft.meEmoji; }
+    // 2. старт-кэш
+    ow.startCash=onbDraft.startCash||0; ow.startCashDate=todayISOdate();
+    // 3. доходы → источники + плановый доход (повторяющийся)
+    onbDraft.income.forEach(s=>{ if(!s.n) return; const src={id:uid(),name:s.n,icon:s.i,kind:s.kind||'labor',amount:s.amount||0}; state.incomeSources.push(src);
+      if(s.amount>0) state.planned.push({id:uid(),type:'income',amount:Math.round(s.amount),categoryId:src.id,repeat:true,day:5,label:s.n,active:true}); });
+    // 4. расходы → плановые повторяющиеся операции в подкатегорию (первая доступная)
+    onbDraft.expense.forEach(e=>{ if(!(e.amount>0)) return; const subs=subsOf(e.cat); const subId=subs.length?subs[0].id:null; const day=25;
+      state.planned.push({id:uid(),type:'expense',amount:Math.round(e.amount),categoryId:e.cat,subId,repeat:true,day,label:e.n,active:true}); });
+    // 5. активы
+    onbDraft.assets.forEach(a=>{ if(!(a.value>0)) return; state.assets.push({id:uid(),name:a.n,kind:'',value:Math.round(a.value),liquid:!!a.liquid,class:a.class||'personal',yield:0,yieldType:'none',payFreq:'monthly',depr:!!a.depr,deprYears:a.deprYears||5,ledger:[{date:todayISOdate(),delta:Math.round(a.value),reason:'начальная стоимость'}]}); });
+    // 6. долги
+    onbDraft.liab.forEach(x=>{ if(!(x.balance>0)) return; state.liabilities.push({id:uid(),name:x.n,kind:x.n,balance:Math.round(x.balance),rate:0,minPayment:0,anchorDate:todayISOdate()}); });
+    if(onbDraft.liab.some(x=>x.balance>0)){ try{ syncLiabSubcats(); }catch(e){} }
+    // 7. цель
+    if(onbDraft.goal && onbDraft.goal.target>0){ const g={id:uid(),name:onbDraft.goal.n,target:Math.round(onbDraft.goal.target),current:0,targetDate:onbDraft.goal.date||'',priority:2,cycleStart:todayISOdate(),ownerId:undefined}; state.goals.push(g); try{ syncGoalSubcats(); }catch(e){} }
+    state.settings=state.settings||{}; state.settings.onboarded=true;
+    __lastSaved=_clone(state); save();
+  }catch(e){ console.warn("onboarding finalize error", e); }
+  document.getElementById("onb").classList.remove("show");
+  bootApp();
+  try{ maybeOfferBiometric(); }catch(e){}
+  toast("Готово! Настройку можно повторить в «Настройка».");
+}
+
 let booted=false;
 function bootApp(){
   try{ requestPersistentStorage(); }catch(e){}
@@ -7072,7 +7458,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.liabInterestSub=liabInterestSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.duePlanned=duePlanned; window.addLedger=addLedger; window.setAssetValue=setAssetValue; window.assetDeprForMonth=assetDeprForMonth; window.assetLiveValue=assetLiveValue; window.assetContribSince=assetContribSince; window.assetLinkedSubs=assetLinkedSubs; window.reserveCapital=reserveCapital; window.personalCapital=personalCapital; window.workingCapital=workingCapital; window.startOnboarding=startOnboarding; window.finishOnboarding=finishOnboarding; window.onbRenderStep=onbRenderStep; window.maybeCapitalBridge=maybeCapitalBridge; Object.defineProperty(window,"onbDraft",{get:()=>onbDraft,set:v=>{onbDraft=v;},configurable:true}); Object.defineProperty(window,"onbIdx",{get:()=>onbIdx,set:v=>{onbIdx=v;},configurable:true}); Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 restoreDurable().then(n=>{
