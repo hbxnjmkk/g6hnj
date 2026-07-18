@@ -1,8 +1,7 @@
 {
-  "name": "ДомФин — семейные финансы",
+  "name": "ДомФин",
   "short_name": "ДомФин",
-  "description": "Семейный бюджет, планирование расходов и капитал",
-  "lang": "ru",
+  "description": "Семейное управление финансами",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
@@ -12,6 +11,6 @@
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
-    { "src": "icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
