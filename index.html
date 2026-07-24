@@ -2826,7 +2826,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.37-design2";
+const APP_VERSION="v7.39-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -7072,7 +7072,30 @@ const SRV = {
     if(!ACCT.linked){ if(manual)go("settings"); return; }
     if(!ACCT.dek){ if(manual)toast("Войдите в аккаунт, чтобы синхронизировать"); return; }
     try{ setSync("dirty");
-      const r=await ACCT.api("/vault",{method:"GET"});
+      // Дешёвая проверка версии: /vault/meta отдаёт ~100 байт и не читает шифротекст.
+      // Если версия совпала — весь сейф не качаем.
+      if(SRV.baseUpdatedAt){
+        try{
+          const rm=await ACCT.api("/vault/meta",{method:"GET"});
+          if(rm.status===200){
+            const meta=await rm.json();
+            if(meta && String(meta.updatedAt)===String(SRV.baseUpdatedAt)){
+              // на сервере ничего нового — отправим только свои изменения, если они есть
+              if((state.updatedAt||"") > (SRV.baseUpdatedAt||"")) { await SRV.push(manual); }
+              else { setSync("ok"); if(manual)toast("Синхронизировано"); }
+              return;
+            }
+          }
+        }catch(e){ /* эндпоинт недоступен — идём обычным путём */ }
+      }
+      // условный запрос (если сервер научится отдавать 304 — тоже сработает)
+      const hdrs = SRV.baseUpdatedAt ? {"If-None-Match":'"'+SRV.baseUpdatedAt+'"'} : undefined;
+      const r=await ACCT.api("/vault",{method:"GET", headers:hdrs});
+      if(r.status===304){
+        if((state.updatedAt||"") > (SRV.baseUpdatedAt||"")) { await SRV.push(manual); }
+        else { setSync("ok"); if(manual)toast("Синхронизировано"); }
+        return;
+      }
       if(r.status===204){
         if(ACCT.role==='member'){ handleRemovedFromFamily(); return; }   // участника отвязали
         SRV.baseUpdatedAt=null; await SRV.push(manual); return;
