@@ -2826,7 +2826,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.45-design2";
+const APP_VERSION="v7.47-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -6826,78 +6826,135 @@ function planOwnerId(p){
 function buildPlanTemplateSheets(){
   const months=planTemplateMonths();
   const scope=planTemplateScope();
-  const HEAD=["ID","Тип","Бюджет","Категория","Подкатегория","Название","Повтор",...months.map(ymHeader)];
+  // столбцы: 0 Тип строки, 1 Название, 2 ID, 3 Повтор, затем на каждый месяц: Сумма, День
+  const HEAD=["Тип строки","Название","ID","Повтор"];
+  months.forEach(k=>{ HEAD.push(ymHeader(k)); HEAD.push("День"); });
   const rows=[HEAD];
-  const NM=7; // служебных колонок перед месяцами (добавили «Бюджет»)
+  const NM=4;                       // служебных колонок перед месяцами
+  const stepCols=2;                 // на месяц: сумма + день
   const colLetter=(ci)=>colRef(ci);
+  const sumCol=(mi)=>NM+mi*stepCols;   // индекс колонки суммы месяца mi
+  const dayCol=(mi)=>NM+mi*stepCols+1; // индекс колонки дня месяца mi
+  const width=NM+months.length*stepCols;
+  const emptyTail=()=>Array(width-NM).fill("");
 
-  const keyOf=(p)=> p.type+"|"+p.categoryId+"|"+(p.subId||"")+"|"+(p.repeat?"R":"O:"+(p.label||""));
-  const rowTemplate=(p)=>{
-    const cat = p.type==='income' ? (byId(state.incomeSources,p.categoryId)||{}).name||p.label||"" : catName(p.categoryId);
-    const sub = (p.type!=='income'&&p.subId)?subName(p.subId):"";
-    return ["", p.type==='income'?"Доход":"Расход", scope.ownerLabel(p), cat, sub, p.label||"", p.repeat?"да":"нет", ...months.map(()=>"")];
-  };
-  const rowIds=new Map();   // ключ строки → Set реальных id операций (для колонки ID)
+  // операции пользователя в scope, разложенные по подкатегориям/категориям/источникам
+  const opsBy=(pred)=> (state.planned||[]).filter(p=>scope.includes(p) && pred(p));
+  // day операции: у повтора p.day, у разовой — число из даты
+  const opDay=(p)=> p.repeat ? (p.day||"") : (p.date? +p.date.slice(8,10) : "");
 
-  const incMap=new Map(), expMap=new Map();
-  const seenOps=new Set();
-  months.forEach((k,mi)=>{
-    planItemsForMonth(k).forEach(p=>{
-      if(!scope.includes(p)) return;         // фильтр по владельцу
-      const store = p.type==='income'?incMap:expMap;
-      const key=keyOf(p);
-      if(!store.has(key)) store.set(key, rowTemplate(p));
-      const r=store.get(key); const col=NM+mi;
-      r[col] = (Number(r[col])||0) + Math.round(+p.amount||0);
-      // копим реальные id (каждую операцию учитываем один раз)
-      if(!rowIds.has(key)) rowIds.set(key, new Set());
-      if(!seenOps.has(p.id)){ rowIds.get(key).add(p.id); seenOps.add(p.id); }
+  // строка операции: суммы и дни по месяцам
+  const opRow=(p, typeLabel)=>{
+    const r=[typeLabel, p.label||"", p.id, p.repeat?"да":"нет", ...emptyTail()];
+    const day=opDay(p);
+    months.forEach((k,mi)=>{
+      let amt=0;
+      if(p.repeat){ if(planItemsForMonth(k).some(x=>x.id===p.id)) amt=Math.round(+p.amount||0); }
+      else { if(p.date && ym(p.date)===k) amt=Math.round(+p.amount||0); }
+      if(amt){ r[sumCol(mi)]=amt; r[dayCol(mi)]=day; }
     });
+    return r;
+  };
+
+  // формула суммы диапазона строк по колонке месяца
+  const sumFormula=(colIdx, fromRow, toRow)=> (toRow>=fromRow) ? {f:`SUM(${colLetter(colIdx)}${fromRow}:${colLetter(colIdx)}${toRow})`} : 0;
+  // заголовочная строка уровня с итогами-формулами по вложенному диапазону операций
+  const headerRow=(typeLabel, name, id, opRowNums)=>{
+    const r=[typeLabel, name, id||"", "", ...emptyTail()];
+    if(opRowNums.length){
+      const from=Math.min(...opRowNums), to=Math.max(...opRowNums);
+      months.forEach((k,mi)=>{ r[sumCol(mi)]=sumFormula(sumCol(mi), from, to); });
+    }
+    return r;
+  };
+
+  // ------- ДОХОДЫ -------
+  rows.push(["РАЗДЕЛ","ДОХОДЫ","","",...emptyTail()]);
+  const incOpRowNums=[];
+  (state.incomeSources||[]).forEach(s=>{
+    if(scope.joined){ if(srcOwner(s)!==scope.meId) return; }
+    else { const own=srcOwner(s); if(!(own===null || own===scope.meId)) return; }
+    const ops=opsBy(p=>p.type==='income' && p.categoryId===s.id);
+    if(!ops.length) { // источник без операций — всё равно показываем как заголовок
+      rows.push(["ДОХОД-ИСТОЧНИК", s.name, s.id, "", ...emptyTail()]);
+      return;
+    }
+    const srcHeaderIdx=rows.length; // запомним место, вставим после операций
+    rows.push(null); // placeholder
+    const myOpNums=[];
+    ops.forEach(p=>{ rows.push(opRow(p,"ДОХОД-ОПЕРАЦИЯ")); const rn=rows.length; myOpNums.push(rn); incOpRowNums.push(rn); });
+    rows[srcHeaderIdx]=headerRow("ДОХОД-ИСТОЧНИК", s.name, s.id, myOpNums);
   });
-  // проставляем id в колонку 0
-  for(const [key,r] of incMap) r[0]=[...(rowIds.get(key)||[])].join(",");
-  for(const [key,r] of expMap) r[0]=[...(rowIds.get(key)||[])].join(",");
+  const incFrom=incOpRowNums.length?Math.min(...incOpRowNums):0, incTo=incOpRowNums.length?Math.max(...incOpRowNums):0;
+  const incTotalRow=rows.length+1;
+  { const r=["ИТОГО","ИТОГО ДОХОД","","",...emptyTail()]; months.forEach((k,mi)=>{ r[sumCol(mi)]=incOpRowNums.length?sumFormula(sumCol(mi),incFrom,incTo):0; }); rows.push(r); }
 
-  const incRows=[...incMap.values()];
-  const expRows=[...expMap.values()];
-  const blank=()=>["","","","","","","",...months.map(()=> "")];
+  rows.push(["","","","",...emptyTail()]); // разделитель
 
-  const incStart = rows.length+1;
-  incRows.forEach(r=>rows.push(r));
-  const incEnd = rows.length;
-  const incTotal=["","","","ИТОГО ДОХОД","","","",...months.map((k,mi)=>{ const L=colLetter(NM+mi); return incRows.length?{f:`SUM(${L}${incStart}:${L}${incEnd})`}:0; })];
-  const incTotalRow = rows.length+1; rows.push(incTotal);
-  rows.push(blank());
+  // ------- РАСХОДЫ -------
+  rows.push(["РАЗДЕЛ","РАСХОДЫ","","",...emptyTail()]);
+  const expOpRowNums=[];
+  expenseGroups().forEach(g=>{
+    const cats=catsOf(g.id).filter(c=>{
+      if(scope.joined) return c.scope==='personal' && c.ownerId===scope.meId;
+      return (c.scope||'shared')==='shared' || (c.scope==='personal' && c.ownerId===scope.meId);
+    });
+    if(!cats.length) return;
+    const grpHeaderIdx=rows.length; rows.push(null);
+    const grpOpNums=[];
+    cats.forEach(c=>{
+      const catHeaderIdx=rows.length; rows.push(null);
+      const catOpNums=[];
+      const subs=subsOf(c.id);
+      subs.forEach(su=>{
+        const ops=opsBy(p=>p.type==='expense' && p.subId===su.id);
+        const subHeaderIdx=rows.length; rows.push(null);
+        const subOpNums=[];
+        ops.forEach(p=>{ rows.push(opRow(p,"ОПЕРАЦИЯ")); const rn=rows.length; subOpNums.push(rn); catOpNums.push(rn); grpOpNums.push(rn); expOpRowNums.push(rn); });
+        rows[subHeaderIdx]=headerRow("ПОДКАТЕГОРИЯ", su.name, su.id, subOpNums);
+      });
+      // операции прямо на категории (без подкатегории)
+      const directOps=opsBy(p=>p.type==='expense' && p.categoryId===c.id && !p.subId);
+      directOps.forEach(p=>{ rows.push(opRow(p,"ОПЕРАЦИЯ")); const rn=rows.length; catOpNums.push(rn); grpOpNums.push(rn); expOpRowNums.push(rn); });
+      rows[catHeaderIdx]=headerRow("КАТЕГОРИЯ", (c.icon?c.icon+" ":"")+c.name, c.id, catOpNums);
+    });
+    rows[grpHeaderIdx]=headerRow("ГРУППА", g.name, g.id, grpOpNums);
+  });
+  const expFrom=expOpRowNums.length?Math.min(...expOpRowNums):0, expTo=expOpRowNums.length?Math.max(...expOpRowNums):0;
+  const expTotalRow=rows.length+1;
+  { const r=["ИТОГО","ИТОГО РАСХОД","","",...emptyTail()]; months.forEach((k,mi)=>{ r[sumCol(mi)]=expOpRowNums.length?sumFormula(sumCol(mi),expFrom,expTo):0; }); rows.push(r); }
 
-  const expStart = rows.length+1;
-  expRows.forEach(r=>rows.push(r));
-  const expEnd = rows.length;
-  const expTotal=["","","","ИТОГО РАСХОД","","","",...months.map((k,mi)=>{ const L=colLetter(NM+mi); return expRows.length?{f:`SUM(${L}${expStart}:${L}${expEnd})`}:0; })];
-  const expTotalRow = rows.length+1; rows.push(expTotal);
-  rows.push(blank());
+  rows.push(["","","","",...emptyTail()]);
+  // БАЛАНС
+  { const r=["ИТОГО","БАЛАНС (доход − расход)","","",...emptyTail()]; months.forEach((k,mi)=>{ const L=colLetter(sumCol(mi)); r[sumCol(mi)]={f:`${L}${incTotalRow}-${L}${expTotalRow}`}; }); rows.push(r); }
 
-  const balRow=["","","","БАЛАНС (доход − расход)","","","",...months.map((k,mi)=>{ const L=colLetter(NM+mi); return {f:`${L}${incTotalRow}-${L}${expTotalRow}`}; })];
-  rows.push(balRow);
-
+  // ----- Справочник -----
   const who = scope.joined ? "личный бюджет" : "общий и личный бюджет";
-  const dict=[["Справочник категорий — для добавления новых строк в лист «План»"],["Шаблон содержит: "+who],[],
-    ["ID категории","Группа","Категория","ID подкатегории","Подкатегория"]];
+  const dict=[["Справочник — структура категорий приложения"],["Шаблон содержит: "+who],[],
+    ["Группа","ID категории","Категория","ID подкатегории","Подкатегория"]];
   expenseGroups().forEach(g=>{ catsOf(g.id).forEach(c=>{
     const subs=subsOf(c.id);
-    if(subs.length) subs.forEach(su=>dict.push([c.id,g.name,c.name,su.id,su.name]));
-    else dict.push([c.id,g.name,c.name,"",""]);
+    if(subs.length) subs.forEach(su=>dict.push([g.name,c.id,c.name,su.id,su.name]));
+    else dict.push([g.name,c.id,c.name,"",""]);
   }); });
   dict.push([]); dict.push(["Источники дохода:"]);
-  (state.incomeSources||[]).forEach(s=>dict.push([s.id,"Доход",s.name,"",""]));
+  (state.incomeSources||[]).forEach(s=>dict.push([s.id,"",s.name,"",""]));
 
   const help=[["Как пользоваться шаблоном"],[],
-    ["1. Впишите суммы в столбцы месяцев на листе «План». Итоги и баланс пересчитаются сами."],
-    ["2. Колонка «Бюджет» показывает, чья это статья: Общий или чьё-то личное. Менять её не нужно."],
-    ["3. Существующие строки менять можно: сумму, название. Не удаляйте столбец «ID» — по нему приложение узнаёт строку."],
-    ["4. Новая строка: добавляйте ВНУТРИ блока доходов или расходов (до строки ИТОГО), «ID» оставьте пустым."],
-    ["5. «Повтор» = да — сумма повторяется каждый месяц. = нет — только в указанном месяце."],
-    ["6. Удаление строки, которая была в приложении, при загрузке потребует подтверждения."],
-    ["7. Загрузка: План → Загрузить. Перед применением покажем предпросмотр."]];
+    ["Структура повторяет приложение: ГРУППА → КАТЕГОРИЯ → ПОДКАТЕГОРИЯ → ОПЕРАЦИЯ (и ДОХОД-ИСТОЧНИК → ДОХОД-ОПЕРАЦИЯ)."],
+    [""],
+    ["Суммы и «День» вписываются ТОЛЬКО в строках ОПЕРАЦИЯ / ДОХОД-ОПЕРАЦИЯ."],
+    ["Строки-заголовки (ГРУППА, КАТЕГОРИЯ, ПОДКАТЕГОРИЯ, ИСТОЧНИК) показывают итоги — их суммы считаются формулами, менять не нужно."],
+    [""],
+    ["Добавить операцию: вставьте строку ОПЕРАЦИЯ под нужной ПОДКАТЕГОРИЕЙ (или ДОХОД-ОПЕРАЦИЯ под ИСТОЧНИКОМ). ID оставьте пустым."],
+    ["Добавить подкатегорию: вставьте строку ПОДКАТЕГОРИЯ под нужной КАТЕГОРИЕЙ, ID пустой, впишите название. Под ней добавьте строки ОПЕРАЦИЯ."],
+    ["Добавить категорию: вставьте строку КАТЕГОРИЯ под ГРУППОЙ, ID пустой."],
+    [""],
+    ["«Повтор» = да — операция повторяется каждый месяц (день один и тот же). = нет — только в тех месяцах, где стоит сумма."],
+    ["«День» — число месяца, когда происходит операция (для прогноза денег). Если не знаете — оставьте пусто, поставим 25."],
+    ["НЕ удаляйте и НЕ меняйте столбец «ID» у существующих строк — по нему приложение узнаёт операцию."],
+    ["Удаление строки ОПЕРАЦИЯ, которая была в приложении, при загрузке потребует подтверждения."],
+    ["Загрузка: План → Загрузить. Перед применением покажем предпросмотр."]];
 
   return [{name:"План",rows}, {name:"Справочник",rows:dict}, {name:"Инструкция",rows:help}];
 }
@@ -6918,9 +6975,11 @@ async function importPlanTemplate(e){
   const months=planTemplateMonths();
   const monthSet=new Set(months);
   const scope=planTemplateScope();
+  const NM=4, stepCols=2;
+  const sumCol=(mi)=>NM+mi*stepCols, dayCol=(mi)=>NM+mi*stepCols+1;
 
   // все плановые операции пользователя в окне 6 месяцев — по их реальному id
-  const inScopeOps=new Map();  // id → операция
+  const inScopeOps=new Map();
   (state.planned||[]).forEach(p=>{
     if(!scope.includes(p)) return;
     let inWindow=false;
@@ -6929,67 +6988,126 @@ async function importPlanTemplate(e){
     if(inWindow) inScopeOps.set(p.id, p);
   });
 
-  const findCat=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.categories.find(c=>!c.deleted && String(c.name).trim().toLowerCase()===nm); };
+  const plan=[];               // намерения по строкам-операциям
+  const willCreateCats=[];
+  const referencedIds=new Set();
+  const structErrors=[];
+
+  // текущий контекст родителя при проходе по дереву
+  let curSection=null;         // 'income' | 'expense'
+  let curCatId=null, curCatName="", curCatNew=false;
+  let curSubId=null, curSubName="", curSubNew=false;
+  let curSrcId=null, curSrcName="", curSrcNew=false;
+
+  const findCat=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.categories.find(c=>!c.deleted && String(c.name).replace(/^[^\p{L}\d]+/u,'').trim().toLowerCase()===nm.replace(/^[^\p{L}\d]+/u,'').trim()); };
   const findSub=(catId,name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.subcategories.find(s=>!s.deleted && s.categoryId===catId && String(s.name).trim().toLowerCase()===nm); };
   const findSrc=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return (state.incomeSources||[]).find(s=>String(s.name).trim().toLowerCase()===nm); };
-
-  const plan=[];               // намерения по строкам файла
-  const willCreateCats=[];
-  const referencedIds=new Set(); // какие существующие операции упомянуты в файле (по ID)
+  const catById=(id)=>state.categories.find(c=>c.id===id&&!c.deleted);
+  const subById=(id)=>state.subcategories.find(s=>s.id===id&&!s.deleted);
+  const srcById=(id)=>(state.incomeSources||[]).find(s=>s.id===id);
 
   for(let ri=1;ri<rows.length;ri++){
     const r=rows[ri]; if(!r) continue;
-    // колонки: 0 ID,1 Тип,2 Бюджет,3 Категория,4 Подкатегория,5 Название,6 Повтор,7.. месяцы
-    const cat=String(r[3]||"").trim();
-    if(/^(ПЛАН |ИТОГО|БАЛАНС)/i.test(cat) || (!cat && !String(r[1]||"").trim())) continue;
-    const idRaw=String(r[0]||"").trim();
-    const ids=idRaw?idRaw.split(",").map(s=>s.trim()).filter(Boolean):[];
-    const isIncome=/доход/i.test(String(r[1]||""));
-    const sub=String(r[4]||"").trim();
-    const label=String(r[5]||"").trim();
-    const repeat=/да|yes|true|1/i.test(String(r[6]||""));
-    const amounts=months.map((k,mi)=>{ const v=r[7+mi]; const n=typeof v==="number"?v:parseFloat(String(v).replace(/\s/g,"").replace(",",".")); return isFinite(n)?Math.round(n):0; });
+    const rowType=String(r[0]||"").trim().toUpperCase();
+    const name=String(r[1]||"").trim();
+    const id=String(r[2]||"").trim();
+    const repeat=/да|yes|true|1/i.test(String(r[3]||""));
+    if(!rowType && !name) continue;
 
-    // существующие id этой строки, реально живущие в базе и в scope
-    const liveIds=ids.filter(id=>inScopeOps.has(id));
-    liveIds.forEach(id=>referencedIds.add(id));
+    if(rowType==="РАЗДЕЛ"){ curSection = /доход/i.test(name)?'income':'expense'; curCatId=curSubId=curSrcId=null; continue; }
+    if(rowType==="ИТОГО") continue;
 
-    // резолвим категорию/подкатегорию/источник (нужно только для НОВЫХ строк)
-    let categoryId=null, subId=null, needCat=null, needSub=null;
-    if(liveIds.length){
-      // берём привязку из первой существующей операции — категория/подкатегория не меняются через файл
-      const p0=inScopeOps.get(liveIds[0]);
-      categoryId=p0.categoryId; subId=p0.subId||null;
-    } else {
-      if(isIncome){ let s=findSrc(cat); if(!s){ needCat={kind:'src', name:cat}; } else categoryId=s.id; }
-      else { let c=findCat(cat); if(!c){ needCat={kind:'cat', name:cat}; }
-        else { categoryId=c.id; if(sub){ let su=findSub(c.id,sub); if(!su){ needSub={kind:'sub', cat:c.id, name:sub}; } else subId=su.id; } } }
-      if(needCat) willCreateCats.push(cat+(isIncome?" (доход)":""));
-      if(needSub) willCreateCats.push(sub+" (в «"+cat+"»)");
+    if(rowType==="ДОХОД-ИСТОЧНИК"){
+      curSection='income';
+      let s = id?srcById(id):null; if(!s) s=findSrc(name);
+      if(s){ curSrcId=s.id; curSrcName=s.name; curSrcNew=false; }
+      else { curSrcId=null; curSrcName=name; curSrcNew=true; if(name) willCreateCats.push(name+" (доход)"); }
+      continue;
+    }
+    if(rowType==="ГРУППА"){ curSection='expense'; continue; }
+    if(rowType==="КАТЕГОРИЯ"){
+      let c = id?catById(id):null; if(!c) c=findCat(name);
+      if(c){ curCatId=c.id; curCatName=c.name; curCatNew=false; }
+      else { curCatId=null; curCatName=name.replace(/^[^\p{L}\d]+/u,'').trim(); curCatNew=true; if(curCatName) willCreateCats.push(curCatName); }
+      curSubId=null; curSubName=""; curSubNew=false;
+      continue;
+    }
+    if(rowType==="ПОДКАТЕГОРИЯ"){
+      let su = id?subById(id):null;
+      if(su){ curSubId=su.id; curSubName=su.name; curSubNew=false; curCatId=su.categoryId; }
+      else if(!curCatNew && curCatId){ su=findSub(curCatId,name); if(su){ curSubId=su.id; curSubName=su.name; curSubNew=false; } else { curSubId=null; curSubName=name; curSubNew=true; if(name) willCreateCats.push(name+(curCatName?(" (в «"+curCatName+"»)"):"")); } }
+      else { curSubId=null; curSubName=name; curSubNew=true; if(name) willCreateCats.push(name+(curCatName?(" (в «"+curCatName+"»)"):"")); }
+      continue;
     }
 
-    plan.push({ids:liveIds, isIncome, categoryId, subId, label, repeat, amounts, needCat, needSub, cat, sub});
+    if(rowType==="ОПЕРАЦИЯ" || rowType==="ДОХОД-ОПЕРАЦИЯ"){
+      const isIncome = rowType==="ДОХОД-ОПЕРАЦИЯ" || curSection==='income';
+      const amounts=months.map((k,mi)=>{ const v=r[sumCol(mi)]; const n=typeof v==="number"?v:parseFloat(String(v).replace(/\s/g,"").replace(",",".")); return isFinite(n)?Math.round(n):0; });
+      const days=months.map((k,mi)=>{ const v=r[dayCol(mi)]; const n=parseInt(String(v).replace(/\D/g,""),10); return (n>=1&&n<=31)?n:null; });
+      const liveId = id && inScopeOps.has(id) ? id : null;
+      if(liveId) referencedIds.add(liveId);
+
+      // определяем привязку
+      let categoryId=null, subId=null, needCat=null, needSub=null, srcId=null, needSrc=null;
+      if(liveId){
+        const p0=inScopeOps.get(liveId);
+        categoryId=p0.categoryId; subId=p0.subId||null;
+      } else if(isIncome){
+        if(curSrcNew){ needSrc={name:curSrcName}; }
+        else if(curSrcId){ srcId=curSrcId; categoryId=curSrcId; }
+        else { structErrors.push(`строка ${ri+1}: доход-операция «${name}» без источника`); continue; }
+      } else {
+        if(curCatNew){ needCat={name:curCatName}; if(curSubNew) needSub={name:curSubName}; }
+        else if(curCatId){
+          categoryId=curCatId;
+          if(curSubNew){ needSub={name:curSubName, cat:curCatId}; }
+          else subId=curSubId||null;
+        } else { structErrors.push(`строка ${ri+1}: операция «${name}» без категории`); continue; }
+      }
+
+      if(amounts.every(a=>!a) && !liveId) continue;  // пустая новая строка — пропускаем
+
+      plan.push({ id:liveId, isIncome, categoryId, subId, srcId, label:name, repeat, amounts, days,
+                  needCat, needSub, needSrc, catName:curCatName, subName:curSubName, srcName:curSrcName });
+    }
   }
 
   // классификация
   let cntNew=0, cntUpd=0, cntSame=0;
   plan.forEach(item=>{
-    if(!item.ids.length){ cntNew++; return; }
-    // сравниваем сумму файла с текущей суммой этих операций по месяцам
-    const curByMonth=months.map((k,mi)=>{
-      return item.ids.reduce((a,id)=>{ const p=inScopeOps.get(id); if(!p)return a;
-        if(p.repeat) return a+Math.round(+p.amount||0);
-        return a+((p.date&&ym(p.date)===k)?Math.round(+p.amount||0):0);
-      },0);
-    });
-    const same=item.amounts.every((a,mi)=>a===curByMonth[mi]);
-    if(same) cntSame++; else cntUpd++;
+    if(!item.id){ cntNew++; return; }
+    const p=inScopeOps.get(item.id);
+    // смена флага повтор/разовый — всегда изменение
+    if(!!item.repeat!==!!p.repeat){ cntUpd++; return; }
+    if(p.repeat){
+      const curByMonth=months.map((k,mi)=>planItemsForMonth(k).some(x=>x.id===p.id)?Math.round(+p.amount||0):0);
+      const sameAmt=item.amounts.every((a,mi)=>Math.abs(Math.round(a))===curByMonth[mi]);
+      const curDay=p.day||null; const fileDay=item.days.find(d=>d!=null)||null;
+      const sameDay = fileDay==null || fileDay===curDay;
+      const sameLabel = !item.label || item.label===(p.label||"");
+      if(sameAmt && sameDay && sameLabel) cntSame++; else cntUpd++;
+    } else {
+      // разовая: сравниваем по месяцу+сумме+дню
+      const curMi=months.findIndex(k=>p.date&&ym(p.date)===k);
+      const fileMi=item.amounts.findIndex(a=>Math.abs(Math.round(a))>0);
+      const curAmt=Math.round(+p.amount||0);
+      const fileAmt=fileMi>=0?Math.abs(Math.round(item.amounts[fileMi])):0;
+      const curDay=p.date?+p.date.slice(8,10):null; const fileDay=fileMi>=0?(item.days[fileMi]||null):null;
+      const same = curMi===fileMi && curAmt===fileAmt && (fileDay==null||fileDay===curDay) && (!item.label||item.label===(p.label||""));
+      if(same) cntSame++; else cntUpd++;
+    }
   });
 
-  // удалённые: операции в scope+окне, чей ID не встретился ни в одной строке файла
   const removedIds=[...inScopeOps.keys()].filter(id=>!referencedIds.has(id));
-  const removed=[];
-  removedIds.forEach(id=>{ const p=inScopeOps.get(id); removed.push({id, ops:[p]}); });
+  const removed=removedIds.map(id=>({id, ops:[inScopeOps.get(id)]}));
+
+  if(structErrors.length){
+    openSheet(`<div><h3 style="margin:0 0 8px">Структура файла нарушена</h3>
+      <p class="muted" style="font-size:12.5px">Исправьте эти строки и загрузите снова:</p>
+      <ul style="font-size:12.5px;padding-left:18px">${structErrors.slice(0,8).map(e=>`<li>${esc(e)}</li>`).join("")}</ul>
+      <button class="btn block" id="ce" style="margin-top:10px">Понятно</button></div>`, el=>{ el.querySelector("#ce").onclick=closeSheet; });
+    return;
+  }
 
   showImportPreview({plan, months, willCreateCats:[...new Set(willCreateCats)], cntNew, cntUpd, cntSame, removed, inScopeOps});
 }
@@ -7118,64 +7236,94 @@ function applyPlanImport(d){
   (removed||[]).forEach(rd=>rd.ops.forEach(p=>delIds.add(p.id)));
   if(delIds.size){ state.planned=(state.planned||[]).filter(p=>!delIds.has(p.id)); deleted=delIds.size; }
 
-  // 2. создаём недостающие категории/подкатегории/источники для новых строк
-  const catByName={}, subByKey={}, srcByName={};
+  // 2. создаём недостающие источники/категории/подкатегории
+  const srcByName={}, catByName={}, subByKey={};
   plan.forEach(item=>{
+    if(item.needSrc){
+      const nm=item.needSrc.name;
+      if(!srcByName[nm]){ const s={id:uid(),name:nm,kind:'labor'}; if(scope0Personal()) s.scope='personal', s.ownerId=curOwnerId(); state.incomeSources.push(s); srcByName[nm]=s.id; }
+      item.srcId=srcByName[nm]; item.categoryId=srcByName[nm];
+    }
     if(item.needCat){
-      if(item.isIncome){
-        if(!srcByName[item.cat]){ const s={id:uid(),name:item.cat,kind:'labor'}; state.incomeSources.push(s); srcByName[item.cat]=s.id; }
-        item.categoryId=srcByName[item.cat];
-      } else {
-        if(!catByName[item.cat]){ const grp=expenseGroups()[1]||expenseGroups()[0]; const c={id:uid(),name:item.cat,groupId:grp.id,icon:'•',scope:'shared'}; state.categories.push(c); catByName[item.cat]=c.id; }
-        item.categoryId=catByName[item.cat];
-      }
+      const nm=item.needCat.name;
+      if(!catByName[nm]){ const grp=expenseGroups()[1]||expenseGroups()[0]; const c={id:uid(),name:nm,groupId:grp.id,icon:'•',scope:'shared'}; state.categories.push(c); catByName[nm]=c.id; }
+      item.categoryId=catByName[nm];
     }
     if(item.needSub){
-      const key=item.categoryId+"|"+item.sub;
-      if(!subByKey[key]){ const su={id:uid(),categoryId:item.categoryId,name:item.sub,scope:'shared'}; state.subcategories.push(su); subByKey[key]=su.id; }
+      const parentCat = item.categoryId || catByName[item.catName];
+      const key=parentCat+"|"+item.needSub.name;
+      if(!subByKey[key]){ const su={id:uid(),categoryId:parentCat,name:item.needSub.name,scope:'shared'}; state.subcategories.push(su); subByKey[key]=su.id; }
       item.subId=subByKey[key];
     }
   });
 
-  // 3. применяем суммы
+  // 3. применяем суммы и дни
+  const defDay=(mi,k)=>{ const mlen=mlenOf(k); return Math.min(25,mlen); };
+  const clampAmt=(a)=> Math.abs(Math.round(a));   // отрицательные → модуль
   plan.forEach(item=>{
     const type=item.isIncome?'income':'expense';
 
-    // --- существующая строка (есть привязка по id) ---
-    if(item.ids && item.ids.length){
-      // повторяющаяся: одна операция, обновляем сумму
-      const ops=item.ids.map(id=>inScopeOps.get(id)).filter(Boolean);
-      const repOp=ops.find(p=>p.repeat);
-      if(repOp){
-        const amt=item.amounts.find(a=>a>0)||0;
-        if(Math.round(+repOp.amount||0)!==amt){ repOp.amount=amt; updated++; }
-        if(item.label && repOp.label!==item.label){ repOp.label=item.label; }
+    // существующая операция
+    if(item.id && inScopeOps.has(item.id)){
+      const p=inScopeOps.get(item.id);
+      const fileDay=item.days.find(x=>x!=null);
+      const fileRepeat=item.repeat;
+
+      // --- смена флага повтор/разовый ---
+      if(fileRepeat!==!!p.repeat){
+        if(fileRepeat){
+          // разовая → повтор: сумма = ненулевая, день = из файла или из старой даты
+          const amt=clampAmt(item.amounts.find(a=>Math.abs(a)>0)||0);
+          if(amt>0){ p.repeat=true; p.amount=amt; p.day=fileDay||(p.date?+p.date.slice(8,10):25); delete p.date; updated++; }
+          else { state.planned=state.planned.filter(x=>x.id!==p.id); deleted++; }
+        } else {
+          // повтор → разовые: превращаем в разовые по месяцам с суммами
+          state.planned=state.planned.filter(x=>x.id!==p.id);
+          months.forEach((k,mi)=>{ const amt=clampAmt(item.amounts[mi]); if(amt<=0) return;
+            const dy=item.days[mi]||fileDay||defDay(mi,k);
+            state.planned.push({id:uid(),type,amount:amt,categoryId:p.categoryId,subId:p.subId||null,repeat:false,date:k+"-"+String(dy).padStart(2,"0"),label:item.label||p.label,active:true,memberId:p.memberId||actingMemberId()});
+          });
+          updated++;
+        }
+        return;
+      }
+
+      if(p.repeat){
+        const amt=clampAmt(item.amounts.find(a=>Math.abs(a)>0)||0);
+        if(amt<=0){ state.planned=state.planned.filter(x=>x.id!==p.id); deleted++; return; }
+        if(Math.round(+p.amount||0)!==amt){ p.amount=amt; updated++; }
+        if(fileDay && p.day!==fileDay){ p.day=fileDay; updated++; }
+        if(item.label && p.label!==item.label) p.label=item.label;
       } else {
-        // разовые по месяцам: сопоставляем существующие по месяцу, меняем/создаём/зануляем
-        months.forEach((k,mi)=>{
-          const amt=item.amounts[mi];
-          const ex=ops.find(p=>p.date&&ym(p.date)===k);
-          if(ex){
-            if(amt<=0){ state.planned=state.planned.filter(p=>p.id!==ex.id); deleted++; }
-            else if(Math.round(+ex.amount||0)!==amt){ ex.amount=amt; updated++; }
-          } else if(amt>0){
-            const mlen=mlenOf(k); const date=k+"-"+String(Math.min(25,mlen)).padStart(2,"0");
-            state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:false,date,label:item.label||(item.sub||item.cat),active:true,memberId:actingMemberId()});
-            created++;
-          }
+        // разовая: сумма может переехать в другой месяц
+        const filledMi = item.amounts.findIndex(a=>Math.abs(a)>0);
+        if(filledMi<0){ state.planned=state.planned.filter(x=>x.id!==p.id); deleted++; return; }
+        const amt=clampAmt(item.amounts[filledMi]);
+        const k=months[filledMi];
+        const dy=item.days[filledMi]||(p.date?+p.date.slice(8,10):defDay(filledMi,k));
+        const newDate=k+"-"+String(dy).padStart(2,"0");
+        if(p.date!==newDate){ p.date=newDate; updated++; }
+        if(Math.round(+p.amount||0)!==amt){ p.amount=amt; updated++; }
+        if(item.label && p.label!==item.label) p.label=item.label;
+        // если в файле сумма стоит более чем в одном месяце у разовой — создаём доп. операции
+        item.amounts.forEach((a,mi)=>{ if(mi===filledMi||clampAmt(a)<=0) return;
+          const dy2=item.days[mi]||defDay(mi,months[mi]);
+          state.planned.push({id:uid(),type,amount:clampAmt(a),categoryId:p.categoryId,subId:p.subId||null,repeat:false,date:months[mi]+"-"+String(dy2).padStart(2,"0"),label:item.label||p.label,active:true,memberId:p.memberId||actingMemberId()});
+          created++;
         });
       }
       return;
     }
 
-    // --- новая строка (id нет) ---
+    // новая операция
     if(item.repeat){
-      const amt=item.amounts.find(a=>a>0)||0;
-      if(amt>0){ state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:true,day:25,label:item.label||(item.isIncome?item.cat:(item.sub||item.cat)),active:true,memberId:actingMemberId()}); created++; }
+      const amt=clampAmt(item.amounts.find(a=>Math.abs(a)>0)||0);
+      const day=item.days.find(x=>x!=null)||25;
+      if(amt>0){ state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:true,day,label:item.label||(item.isIncome?item.srcName:(item.subName||item.catName)),active:true,memberId:actingMemberId()}); created++; }
     } else {
-      months.forEach((k,mi)=>{ const amt=item.amounts[mi]; if(amt<=0) return;
-        const mlen=mlenOf(k); const date=k+"-"+String(Math.min(25,mlen)).padStart(2,"0");
-        state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:false,date,label:item.label||(item.sub||item.cat),active:true,memberId:actingMemberId()});
+      months.forEach((k,mi)=>{ const amt=clampAmt(item.amounts[mi]); if(amt<=0) return;
+        const dy=item.days[mi]||defDay(mi,k); const date=k+"-"+String(dy).padStart(2,"0");
+        state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:false,date,label:item.label||(item.subName||item.catName),active:true,memberId:actingMemberId()});
         created++;
       });
     }
@@ -7184,6 +7332,9 @@ function applyPlanImport(d){
   save(); render_current();
   toast(`Готово: +${created} · изменено ${updated}${deleted?` · удалено ${deleted}`:''}`);
 }
+// вспомогательные для scope новых источников
+function scope0Personal(){ return isJoinedMember(); }
+function curOwnerId(){ return isJoinedMember()?participantMemberId():curMember(); }
 function exportPlanTemplate(){
   try{
     const bytes=buildXLSX(buildPlanTemplateSheets());
