@@ -2826,7 +2826,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.44-design2";
+const APP_VERSION="v7.45-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -6835,11 +6835,12 @@ function buildPlanTemplateSheets(){
   const rowTemplate=(p)=>{
     const cat = p.type==='income' ? (byId(state.incomeSources,p.categoryId)||{}).name||p.label||"" : catName(p.categoryId);
     const sub = (p.type!=='income'&&p.subId)?subName(p.subId):"";
-    const idTok = p.type+":"+p.categoryId+(p.subId?(":"+p.subId):"")+(p.repeat?":R":":O");
-    return [idTok, p.type==='income'?"Доход":"Расход", scope.ownerLabel(p), cat, sub, p.label||"", p.repeat?"да":"нет", ...months.map(()=>"")];
+    return ["", p.type==='income'?"Доход":"Расход", scope.ownerLabel(p), cat, sub, p.label||"", p.repeat?"да":"нет", ...months.map(()=>"")];
   };
+  const rowIds=new Map();   // ключ строки → Set реальных id операций (для колонки ID)
 
   const incMap=new Map(), expMap=new Map();
+  const seenOps=new Set();
   months.forEach((k,mi)=>{
     planItemsForMonth(k).forEach(p=>{
       if(!scope.includes(p)) return;         // фильтр по владельцу
@@ -6848,8 +6849,14 @@ function buildPlanTemplateSheets(){
       if(!store.has(key)) store.set(key, rowTemplate(p));
       const r=store.get(key); const col=NM+mi;
       r[col] = (Number(r[col])||0) + Math.round(+p.amount||0);
+      // копим реальные id (каждую операцию учитываем один раз)
+      if(!rowIds.has(key)) rowIds.set(key, new Set());
+      if(!seenOps.has(p.id)){ rowIds.get(key).add(p.id); seenOps.add(p.id); }
     });
   });
+  // проставляем id в колонку 0
+  for(const [key,r] of incMap) r[0]=[...(rowIds.get(key)||[])].join(",");
+  for(const [key,r] of expMap) r[0]=[...(rowIds.get(key)||[])].join(",");
 
   const incRows=[...incMap.values()];
   const expRows=[...expMap.values()];
@@ -6910,79 +6917,81 @@ async function importPlanTemplate(e){
 
   const months=planTemplateMonths();
   const monthSet=new Set(months);
-
-  // строим карту существующих плановых, попадающих в окно 6 месяцев И в scope пользователя
   const scope=planTemplateScope();
-  const rowKey=(p)=> (p.type==='income'?'I':'E')+"|"+p.categoryId+"|"+(p.subId||"")+"|"+(p.repeat?"R":("O:"+(p.label||"")));
-  const existing=new Map();
+
+  // все плановые операции пользователя в окне 6 месяцев — по их реальному id
+  const inScopeOps=new Map();  // id → операция
   (state.planned||[]).forEach(p=>{
-    if(!scope.includes(p)) return;   // участник не видит и не трогает общее/чужое
+    if(!scope.includes(p)) return;
     let inWindow=false;
     if(p.repeat){ inWindow = months.some(k=>planItemsForMonth(k).some(x=>x.id===p.id)); }
     else { inWindow = p.date && monthSet.has(ym(p.date)); }
-    if(!inWindow) return;
-    const key=rowKey(p);
-    if(!existing.has(key)) existing.set(key, []);
-    existing.get(key).push(p);
+    if(inWindow) inScopeOps.set(p.id, p);
   });
 
-  // разбираем файл
   const findCat=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.categories.find(c=>!c.deleted && String(c.name).trim().toLowerCase()===nm); };
   const findSub=(catId,name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.subcategories.find(s=>!s.deleted && s.categoryId===catId && String(s.name).trim().toLowerCase()===nm); };
   const findSrc=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return (state.incomeSources||[]).find(s=>String(s.name).trim().toLowerCase()===nm); };
 
-  const plan=[]; const willCreateCats=[]; const problems=[];
-  const fileKeys=new Set();
+  const plan=[];               // намерения по строкам файла
+  const willCreateCats=[];
+  const referencedIds=new Set(); // какие существующие операции упомянуты в файле (по ID)
 
   for(let ri=1;ri<rows.length;ri++){
     const r=rows[ri]; if(!r) continue;
     // колонки: 0 ID,1 Тип,2 Бюджет,3 Категория,4 Подкатегория,5 Название,6 Повтор,7.. месяцы
     const cat=String(r[3]||"").trim();
     if(/^(ПЛАН |ИТОГО|БАЛАНС)/i.test(cat) || (!cat && !String(r[1]||"").trim())) continue;
+    const idRaw=String(r[0]||"").trim();
+    const ids=idRaw?idRaw.split(",").map(s=>s.trim()).filter(Boolean):[];
     const isIncome=/доход/i.test(String(r[1]||""));
     const sub=String(r[4]||"").trim();
     const label=String(r[5]||"").trim();
     const repeat=/да|yes|true|1/i.test(String(r[6]||""));
     const amounts=months.map((k,mi)=>{ const v=r[7+mi]; const n=typeof v==="number"?v:parseFloat(String(v).replace(/\s/g,"").replace(",",".")); return isFinite(n)?Math.round(n):0; });
 
-    // резолвим категорию/подкатегорию/источник
-    let categoryId=null, subId=null, needCat=null, needSub=null;
-    if(isIncome){
-      let s=findSrc(cat); if(!s){ needCat={kind:'src', name:cat}; categoryId="__NEW_SRC__:"+cat; } else categoryId=s.id;
-    } else {
-      let c=findCat(cat); if(!c){ needCat={kind:'cat', name:cat}; categoryId="__NEW_CAT__:"+cat; }
-      else { categoryId=c.id; if(sub){ let su=findSub(c.id,sub); if(!su){ needSub={kind:'sub', cat:c.id, name:sub}; subId="__NEW_SUB__:"+sub; } else subId=su.id; } }
-    }
-    if(needCat) willCreateCats.push(needCat.name+(isIncome?" (доход)":""));
-    if(needSub) willCreateCats.push(sub+" (в «"+cat+"»)");
+    // существующие id этой строки, реально живущие в базе и в scope
+    const liveIds=ids.filter(id=>inScopeOps.has(id));
+    liveIds.forEach(id=>referencedIds.add(id));
 
-    plan.push({isIncome, categoryId, subId, label, repeat, amounts, needCat, needSub, cat, sub});
-    // ключ для сопоставления с existing (только для уже существующих статей)
-    if(!needCat && !needSub){
-      const key=(isIncome?'I':'E')+"|"+categoryId+"|"+(subId||"")+"|"+(repeat?"R":("O:"+label));
-      fileKeys.add(key);
+    // резолвим категорию/подкатегорию/источник (нужно только для НОВЫХ строк)
+    let categoryId=null, subId=null, needCat=null, needSub=null;
+    if(liveIds.length){
+      // берём привязку из первой существующей операции — категория/подкатегория не меняются через файл
+      const p0=inScopeOps.get(liveIds[0]);
+      categoryId=p0.categoryId; subId=p0.subId||null;
+    } else {
+      if(isIncome){ let s=findSrc(cat); if(!s){ needCat={kind:'src', name:cat}; } else categoryId=s.id; }
+      else { let c=findCat(cat); if(!c){ needCat={kind:'cat', name:cat}; }
+        else { categoryId=c.id; if(sub){ let su=findSub(c.id,sub); if(!su){ needSub={kind:'sub', cat:c.id, name:sub}; } else subId=su.id; } } }
+      if(needCat) willCreateCats.push(cat+(isIncome?" (доход)":""));
+      if(needSub) willCreateCats.push(sub+" (в «"+cat+"»)");
     }
+
+    plan.push({ids:liveIds, isIncome, categoryId, subId, label, repeat, amounts, needCat, needSub, cat, sub});
   }
 
-  // считаем что изменится
+  // классификация
   let cntNew=0, cntUpd=0, cntSame=0;
   plan.forEach(item=>{
-    if(item.needCat||item.needSub){ cntNew++; return; }
-    const key=(item.isIncome?'I':'E')+"|"+item.categoryId+"|"+(item.subId||"")+"|"+(item.repeat?"R":("O:"+item.label));
-    const ex=existing.get(key);
-    if(!ex||!ex.length){ cntNew++; return; }
-    // сравним суммы
-    const curTotal=months.map((k,mi)=>{ return ex.filter(p=>p.repeat||ym(p.date)===k).reduce((a,p)=>a+Math.round(+p.amount||0),0); });
-    const same=item.amounts.every((a,mi)=> a===(item.repeat?(Math.round(+ex[0].amount||0)):curTotal[mi]) );
+    if(!item.ids.length){ cntNew++; return; }
+    // сравниваем сумму файла с текущей суммой этих операций по месяцам
+    const curByMonth=months.map((k,mi)=>{
+      return item.ids.reduce((a,id)=>{ const p=inScopeOps.get(id); if(!p)return a;
+        if(p.repeat) return a+Math.round(+p.amount||0);
+        return a+((p.date&&ym(p.date)===k)?Math.round(+p.amount||0):0);
+      },0);
+    });
+    const same=item.amounts.every((a,mi)=>a===curByMonth[mi]);
     if(same) cntSame++; else cntUpd++;
   });
 
-  // удалённые: были в окне, но в файле их ключа нет
+  // удалённые: операции в scope+окне, чей ID не встретился ни в одной строке файла
+  const removedIds=[...inScopeOps.keys()].filter(id=>!referencedIds.has(id));
   const removed=[];
-  existing.forEach((arr,key)=>{ if(!fileKeys.has(key)){ removed.push({key, ops:arr}); } });
+  removedIds.forEach(id=>{ const p=inScopeOps.get(id); removed.push({id, ops:[p]}); });
 
-  // предпросмотр
-  showImportPreview({plan, months, existing, willCreateCats:[...new Set(willCreateCats)], cntNew, cntUpd, cntSame, removed});
+  showImportPreview({plan, months, willCreateCats:[...new Set(willCreateCats)], cntNew, cntUpd, cntSame, removed, inScopeOps});
 }
 // ---- Чтение .xlsx (распаковка zip + парсинг первого листа) ----
 async function inflateRaw(bytes){
@@ -7057,7 +7066,7 @@ async function readXLSXFirstSheet(buf){
   return parseSheetXML(files[name], shared);
 }
 function showImportPreview(d){
-  const {plan, months, existing, willCreateCats, cntNew, cntUpd, cntSame, removed}=d;
+  const {plan, months, inScopeOps, willCreateCats, cntNew, cntUpd, cntSame, removed}=d;
   const delList = removed.map((rd,i)=>{
     const p=rd.ops[0]; const nm=(p.type==='income'?'Доход: ':'')+(p.label||catName(p.categoryId))+(p.subId?(' · '+subName(p.subId)):'');
     const total=rd.ops.reduce((a,x)=>a+Math.round(+x.amount||0),0);
@@ -7094,22 +7103,22 @@ function showImportPreview(d){
     el.querySelector("#impCancel").onclick=closeSheet;
     el.querySelector("#impApply").onclick=()=>{
       const toDelete = removed.filter((rd,i)=>{ const c=el.querySelector(`[data-del="${i}"]`); return c && c.checked; });
-      applyPlanImport({plan, months, existing, removed:toDelete});
+      applyPlanImport({plan, months, inScopeOps, removed:toDelete});
       closeSheet();
     };
   });
 }
 
 function applyPlanImport(d){
-  const {plan, months, existing, removed}=d;
+  const {plan, months, removed, inScopeOps}=d;
   let created=0, updated=0, deleted=0;
 
   // 1. удаления (подтверждённые)
   const delIds=new Set();
-  removed.forEach(rd=>rd.ops.forEach(p=>delIds.add(p.id)));
+  (removed||[]).forEach(rd=>rd.ops.forEach(p=>delIds.add(p.id)));
   if(delIds.size){ state.planned=(state.planned||[]).filter(p=>!delIds.has(p.id)); deleted=delIds.size; }
 
-  // 2. создаём недостающие категории/подкатегории/источники
+  // 2. создаём недостающие категории/подкатегории/источники для новых строк
   const catByName={}, subByKey={}, srcByName={};
   plan.forEach(item=>{
     if(item.needCat){
@@ -7131,21 +7140,43 @@ function applyPlanImport(d){
   // 3. применяем суммы
   plan.forEach(item=>{
     const type=item.isIncome?'income':'expense';
+
+    // --- существующая строка (есть привязка по id) ---
+    if(item.ids && item.ids.length){
+      // повторяющаяся: одна операция, обновляем сумму
+      const ops=item.ids.map(id=>inScopeOps.get(id)).filter(Boolean);
+      const repOp=ops.find(p=>p.repeat);
+      if(repOp){
+        const amt=item.amounts.find(a=>a>0)||0;
+        if(Math.round(+repOp.amount||0)!==amt){ repOp.amount=amt; updated++; }
+        if(item.label && repOp.label!==item.label){ repOp.label=item.label; }
+      } else {
+        // разовые по месяцам: сопоставляем существующие по месяцу, меняем/создаём/зануляем
+        months.forEach((k,mi)=>{
+          const amt=item.amounts[mi];
+          const ex=ops.find(p=>p.date&&ym(p.date)===k);
+          if(ex){
+            if(amt<=0){ state.planned=state.planned.filter(p=>p.id!==ex.id); deleted++; }
+            else if(Math.round(+ex.amount||0)!==amt){ ex.amount=amt; updated++; }
+          } else if(amt>0){
+            const mlen=mlenOf(k); const date=k+"-"+String(Math.min(25,mlen)).padStart(2,"0");
+            state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:false,date,label:item.label||(item.sub||item.cat),active:true,memberId:actingMemberId()});
+            created++;
+          }
+        });
+      }
+      return;
+    }
+
+    // --- новая строка (id нет) ---
     if(item.repeat){
-      // одна повторяющаяся операция; сумма = из первого ненулевого месяца (обычно все одинаковы)
       const amt=item.amounts.find(a=>a>0)||0;
-      const key=(item.isIncome?'I':'E')+"|"+item.categoryId+"|"+(item.subId||"")+"|R";
-      const ex=(existing.get(key)||[])[0];
-      if(ex){ if(Math.round(+ex.amount||0)!==amt){ ex.amount=amt; if(item.label)ex.label=item.label; updated++; } }
-      else if(amt>0){ state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:true,day:25,label:item.label||(item.isIncome?item.cat:(item.sub||item.cat)),active:true,memberId:actingMemberId()}); created++; }
+      if(amt>0){ state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:true,day:25,label:item.label||(item.isIncome?item.cat:(item.sub||item.cat)),active:true,memberId:actingMemberId()}); created++; }
     } else {
-      // разовые по месяцам
       months.forEach((k,mi)=>{ const amt=item.amounts[mi]; if(amt<=0) return;
         const mlen=mlenOf(k); const date=k+"-"+String(Math.min(25,mlen)).padStart(2,"0");
-        // ищем существующую разовую в этом месяце
-        const ex=(state.planned||[]).find(p=>p.type===type&&!p.repeat&&p.categoryId===item.categoryId&&(p.subId||null)===(item.subId||null)&&(p.label||"")===item.label&&p.date&&ym(p.date)===k);
-        if(ex){ if(Math.round(+ex.amount||0)!==amt){ ex.amount=amt; updated++; } }
-        else { state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:false,date,label:item.label||(item.sub||item.cat),active:true,memberId:actingMemberId()}); created++; }
+        state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:false,date,label:item.label||(item.sub||item.cat),active:true,memberId:actingMemberId()});
+        created++;
       });
     }
   });
