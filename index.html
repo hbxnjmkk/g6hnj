@@ -2826,7 +2826,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.39-design2";
+const APP_VERSION="v7.42-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -3915,7 +3915,7 @@ function openAddTxn(preset){
         <button data-type="expense" class="${draft.type==='expense'?'active':''}">Расход</button>
         <button data-type="income" class="${draft.type==='income'?'active':''}">Доход</button>
       </div>
-      <input class="amount-big num" id="amt" inputmode="decimal" placeholder="0 ${CUR}" value="${draft.amount?esc(String(draft.amount)):''}">
+      <input class="amount-big num" id="amt" inputmode="decimal" autofocus placeholder="0 ${CUR}" value="${draft.amount?esc(String(draft.amount)):''}">
       </div>
       <div class="field">
         <label>${draft.type==='income'?'Источник дохода':'Категория'}</label>
@@ -3976,10 +3976,16 @@ function openAddTxn(preset){
         repDay.onchange=capRep;
       }
       attachNum(el.querySelector("#amt"));
-      // курсор всегда в поле суммы: при открытии и пока сумма не введена
+      // курсор в поле суммы. На мобильных программный focus капризен —
+      // ставим синхронно (ближе к жесту) и дублируем с задержкой как запас.
       const _amt=el.querySelector("#amt");
-      if(!draft.__opened){ draft.__opened=true; setTimeout(()=>{ try{ _amt.focus(); _amt.select&&_amt.select(); }catch(e){} },60); }
-      else if(draft.__focusDate){ draft.__focusDate=false; if(!String(_amt.value).trim()){ setTimeout(()=>{ try{ _amt.focus(); }catch(e){} },50); } }
+      if(!draft.__opened){
+        draft.__opened=true;
+        try{ _amt.focus({preventScroll:true}); }catch(e){ try{_amt.focus();}catch(_){} }
+        requestAnimationFrame(()=>{ try{ _amt.focus({preventScroll:true}); }catch(e){} });
+        setTimeout(()=>{ if(document.activeElement!==_amt){ try{ _amt.focus(); }catch(e){} } },120);
+      }
+      else if(draft.__focusDate){ draft.__focusDate=false; if(!String(_amt.value).trim()){ try{ _amt.focus(); }catch(e){} } }
       el.querySelector("#saveTxn").onclick=()=>{
         const amount=parseFloat(String(el.querySelector("#amt").value).replace(/\s/g,"").replace(",","."));
         if(!amount||amount<=0){ toast("Введите сумму"); el.querySelector("#amt").focus(); return; }
@@ -4960,9 +4966,17 @@ function pgPlan(v){
   const scopeWord = family ? (famView()?' · общий бюджет семьи':' · мой личный бюджет') : '';
   v.appendChild(h(`<div class="page-title">План месяца</div><div class="page-sub">${ymLabel(k)}${scopeWord} · двойное нажатие по строке — переименовать или удалить</div>`));
   if(isDesktopWide()){
-    const seg=h(`<div class="p3head"><div class="p3seg"><button class="on" data-p3="0">1 месяц</button><button data-p3="1">3 месяца</button></div></div>`);
+    const seg=h(`<div class="p3head"><div class="p3seg"><button class="on" data-p3="0">1 месяц</button><button data-p3="1">3 месяца</button></div>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn sm" data-tpl-dl title="Скачать план на 6 месяцев в Excel">📥 Шаблон Excel</button>
+        <button class="btn sm" data-tpl-up title="Загрузить заполненный шаблон">📤 Загрузить</button>
+      </div></div>`);
     seg.querySelector('[data-p3="1"]').onclick=()=>{ state.settings=state.settings||{}; state.settings.plan3=true; save(false); render_current(); };
+    seg.querySelector('[data-tpl-dl]').onclick=exportPlanTemplate;
+    seg.querySelector('[data-tpl-up]').onclick=()=>document.getElementById("planTplInput").click();
     v.appendChild(seg);
+    v.appendChild(h(`<input type="file" id="planTplInput" accept=".xlsx" style="display:none">`));
+    v.querySelector("#planTplInput").onchange=importPlanTemplate;
   }
   if(planMonthTotal(k)===0 && plannedIncome(k)===0){
     v.appendChild(h(`<div class="infobox" style="margin-bottom:12px"><b>Как планировать:</b> раскройте группу, добавьте категорию (＋), в ней подкатегорию (＋), затем впишите сумму прямо в строке или добавьте плановую операцию с датой (иконка календаря). Двойное нажатие по строке — переименовать или удалить.<br><br>Когда плановая операция происходит, подтвердите её на «Сегодня» — она станет фактом, но останется в плане с пометкой ✓. План не уменьшается, растёт «выполнено».</div>`));
@@ -6782,6 +6796,339 @@ function buildWorkbookSheets(){
     sheets.push({name:"Цели",rows:gRows}); }
   return sheets;
 }
+// ---- Excel-шаблон плана: текущий месяц + 5 вперёд, доходы и расходы ----
+function planTemplateMonths(){ const a=[]; let m=realMonth(); for(let i=0;i<6;i++){ a.push(m); m=addMonths(m,1); } return a; }
+function ymHeader(k){ const MN=["янв","фев","мар","апр","май","июн","июл","авг","сен","окт","ноя","дек"]; return MN[+k.slice(5,7)-1]+" "+k.slice(2,4); }
+
+// Собираем строки: одна строка = одна плановая позиция (повтор или разовая привязка к статье).
+// Для повторяющихся сумма одинаковая во всех месяцах; для разовых — в своём месяце.
+function buildPlanTemplateSheets(){
+  const months=planTemplateMonths();
+  const HEAD=["ID","Тип","Категория","Подкатегория","Название","Повтор",...months.map(ymHeader)];
+  const rows=[HEAD];
+
+  // индекс существующих плановых по «ключу строки»: тип+категория+подкатегория+(повтор|разовый-ярлык)
+  // повторяющиеся — одна строка на все месяцы; разовые — группируем по статье, раскладывая суммы по месяцам
+  const repeatRows=new Map();   // key → {rowArr}
+  const onceRows=new Map();     // key(cat+sub+label) → {rowArr}
+
+  const keyOf=(p)=> p.type+"|"+p.categoryId+"|"+(p.subId||"")+"|"+(p.repeat?"R":"O:"+(p.label||""));
+  const rowTemplate=(p)=>{
+    const cat = p.type==='income' ? (byId(state.incomeSources,p.categoryId)||{}).name||p.label||"" : catName(p.categoryId);
+    const sub = (p.type!=='income'&&p.subId)?subName(p.subId):"";
+    const idTok = p.type+":"+p.categoryId+(p.subId?(":"+p.subId):"")+(p.repeat?":R":":O");
+    return [idTok, p.type==='income'?"Доход":"Расход", cat, sub, p.label||"", p.repeat?"да":"нет", ...months.map(()=>"")];
+  };
+
+  months.forEach((k,mi)=>{
+    planItemsForMonth(k).forEach(p=>{
+      const key=keyOf(p);
+      const store = p.repeat?repeatRows:onceRows;
+      if(!store.has(key)) store.set(key, rowTemplate(p));
+      const r=store.get(key);
+      const col=6+mi;
+      r[col] = (Number(r[col])||0) + Math.round(+p.amount||0);
+    });
+  });
+  // повторяющиеся сначала, потом разовые
+  for(const r of repeatRows.values()) rows.push(r);
+  for(const r of onceRows.values()) rows.push(r);
+
+  // строки-итоги
+  const sumRow=(label, filter)=>{
+    const out=[ "", "", label, "", "", "" , ...months.map((k,mi)=>{
+      let s=0; rows.slice(1).forEach(r=>{ if(filter(r)) s+=Number(r[6+mi])||0; }); return s;
+    })];
+    return out;
+  };
+  rows.push(sumRow("ПЛАН ДОХОДА", r=>r[1]==="Доход"));
+  rows.push(sumRow("ПЛАН РАСХОДА", r=>r[1]==="Расход"));
+
+  const dict=[["Справочник категорий — для добавления новых строк в лист «План»"],[],
+    ["ID категории","Группа","Категория","ID подкатегории","Подкатегория"]];
+  expenseGroups().forEach(g=>{ catsOf(g.id).forEach(c=>{
+    const subs=subsOf(c.id);
+    if(subs.length) subs.forEach(su=>dict.push([c.id,g.name,c.name,su.id,su.name]));
+    else dict.push([c.id,g.name,c.name,"",""]);
+  }); });
+  dict.push([]); dict.push(["Источники дохода:"]);
+  (state.incomeSources||[]).forEach(s=>dict.push([s.id,"Доход",s.name,"",""]));
+
+  const help=[["Как пользоваться шаблоном"],[],
+    ["1. Впишите суммы в столбцы месяцев на листе «План»."],
+    ["2. Существующие строки менять можно: сумму, название. Не удаляйте столбец «ID» — по нему приложение узнаёт строку."],
+    ["3. Новая строка: оставьте «ID» пустым, впишите Тип (Доход/Расход), Категорию, Подкатегорию (точно как в «Справочнике» или новое имя), при необходимости Название."],
+    ["4. «Повтор» = да — одна сумма повторяется каждый месяц (аренда, зарплата). = нет — сумма только в указанном месяце."],
+    ["5. Удаление строк в файле НЕ удаляет план в приложении — удаляйте в самом приложении."],
+    ["6. Сохраните файл и загрузите обратно в приложении: План → Загрузить из Excel. Перед применением будет показан предпросмотр изменений."]];
+
+  return [{name:"План",rows}, {name:"Справочник",rows:dict}, {name:"Инструкция",rows:help}];
+}
+async function importPlanTemplate(e){
+  const f=e&&e.target&&e.target.files&&e.target.files[0]; if(!f){ return; }
+  e.target.value="";
+  let rows;
+  try{
+    const buf=await f.arrayBuffer();
+    rows=await readXLSXFirstSheet(buf);
+  }catch(err){
+    console.warn(err);
+    toast(err.message==="no-inflate" ? "Браузер не смог прочитать файл — попробуйте в Chrome" : "Не удалось прочитать файл");
+    return;
+  }
+  if(!rows||rows.length<2){ toast("В файле нет данных плана"); return; }
+
+  const months=planTemplateMonths();
+  const monthSet=new Set(months);
+
+  // строим карту существующих плановых, попадающих в окно 6 месяцев, по «ключу строки»
+  const rowKey=(p)=> (p.type==='income'?'I':'E')+"|"+p.categoryId+"|"+(p.subId||"")+"|"+(p.repeat?"R":("O:"+(p.label||"")));
+  const existing=new Map();
+  (state.planned||[]).forEach(p=>{
+    // попадает ли операция в окно?
+    let inWindow=false;
+    if(p.repeat){ inWindow = months.some(k=>planItemsForMonth(k).some(x=>x.id===p.id)); }
+    else { inWindow = p.date && monthSet.has(ym(p.date)); }
+    if(!inWindow) return;
+    const key=rowKey(p);
+    if(!existing.has(key)) existing.set(key, []);
+    existing.get(key).push(p);
+  });
+
+  // разбираем файл
+  const findCat=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.categories.find(c=>!c.deleted && String(c.name).trim().toLowerCase()===nm); };
+  const findSub=(catId,name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.subcategories.find(s=>!s.deleted && s.categoryId===catId && String(s.name).trim().toLowerCase()===nm); };
+  const findSrc=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return (state.incomeSources||[]).find(s=>String(s.name).trim().toLowerCase()===nm); };
+
+  const plan=[]; const willCreateCats=[]; const problems=[];
+  const fileKeys=new Set();
+
+  for(let ri=1;ri<rows.length;ri++){
+    const r=rows[ri]; if(!r) continue;
+    const cat=String(r[2]||"").trim();
+    if(/^ПЛАН /.test(cat) || (!cat && !String(r[1]||"").trim())) continue;
+    const isIncome=/доход/i.test(String(r[1]||""));
+    const sub=String(r[3]||"").trim();
+    const label=String(r[4]||"").trim();
+    const repeat=/да|yes|true|1/i.test(String(r[5]||""));
+    const amounts=months.map((k,mi)=>{ const v=r[6+mi]; const n=typeof v==="number"?v:parseFloat(String(v).replace(/\s/g,"").replace(",",".")); return isFinite(n)?Math.round(n):0; });
+
+    // резолвим категорию/подкатегорию/источник
+    let categoryId=null, subId=null, needCat=null, needSub=null;
+    if(isIncome){
+      let s=findSrc(cat); if(!s){ needCat={kind:'src', name:cat}; categoryId="__NEW_SRC__:"+cat; } else categoryId=s.id;
+    } else {
+      let c=findCat(cat); if(!c){ needCat={kind:'cat', name:cat}; categoryId="__NEW_CAT__:"+cat; }
+      else { categoryId=c.id; if(sub){ let su=findSub(c.id,sub); if(!su){ needSub={kind:'sub', cat:c.id, name:sub}; subId="__NEW_SUB__:"+sub; } else subId=su.id; } }
+    }
+    if(needCat) willCreateCats.push(needCat.name+(isIncome?" (доход)":""));
+    if(needSub) willCreateCats.push(sub+" (в «"+cat+"»)");
+
+    plan.push({isIncome, categoryId, subId, label, repeat, amounts, needCat, needSub, cat, sub});
+    // ключ для сопоставления с existing (только для уже существующих статей)
+    if(!needCat && !needSub){
+      const key=(isIncome?'I':'E')+"|"+categoryId+"|"+(subId||"")+"|"+(repeat?"R":("O:"+label));
+      fileKeys.add(key);
+    }
+  }
+
+  // считаем что изменится
+  let cntNew=0, cntUpd=0, cntSame=0;
+  plan.forEach(item=>{
+    if(item.needCat||item.needSub){ cntNew++; return; }
+    const key=(item.isIncome?'I':'E')+"|"+item.categoryId+"|"+(item.subId||"")+"|"+(item.repeat?"R":("O:"+item.label));
+    const ex=existing.get(key);
+    if(!ex||!ex.length){ cntNew++; return; }
+    // сравним суммы
+    const curTotal=months.map((k,mi)=>{ return ex.filter(p=>p.repeat||ym(p.date)===k).reduce((a,p)=>a+Math.round(+p.amount||0),0); });
+    const same=item.amounts.every((a,mi)=> a===(item.repeat?(Math.round(+ex[0].amount||0)):curTotal[mi]) );
+    if(same) cntSame++; else cntUpd++;
+  });
+
+  // удалённые: были в окне, но в файле их ключа нет
+  const removed=[];
+  existing.forEach((arr,key)=>{ if(!fileKeys.has(key)){ removed.push({key, ops:arr}); } });
+
+  // предпросмотр
+  showImportPreview({plan, months, existing, willCreateCats:[...new Set(willCreateCats)], cntNew, cntUpd, cntSame, removed});
+}
+// ---- Чтение .xlsx (распаковка zip + парсинг первого листа) ----
+async function inflateRaw(bytes){
+  // несжатые записи (метод 0) отдаём как есть; для deflate — нативный поток
+  if(typeof DecompressionStream!=="undefined"){
+    try{
+      const ds=new DecompressionStream("deflate-raw");
+      const stream=new Response(new Blob([bytes]).stream().pipeThrough(ds));
+      return new Uint8Array(await stream.arrayBuffer());
+    }catch(e){ /* упадём ниже */ }
+  }
+  throw new Error("no-inflate");
+}
+async function unzip(buf){
+  const b=new Uint8Array(buf); const dv=new DataView(b.buffer);
+  const files={};
+  // идём по локальным заголовкам
+  let i=0;
+  const u16=o=>dv.getUint16(o,true), u32=o=>dv.getUint32(o,true);
+  while(i+4<=b.length && u32(i)===0x04034b50){
+    const method=u16(i+8), nameLen=u16(i+26), extraLen=u16(i+28);
+    let compSize=u32(i+18), uncompSize=u32(i+22);
+    const name=new TextDecoder().decode(b.slice(i+30, i+30+nameLen));
+    let dataStart=i+30+nameLen+extraLen;
+    // data descriptor (размер 0 в заголовке) — ищем в центральном каталоге позже; наши файлы его не используют
+    const comp=b.slice(dataStart, dataStart+compSize);
+    let data;
+    if(method===0){ data=comp; }
+    else { data=await inflateRaw(comp); }
+    files[name]=data;
+    i=dataStart+compSize;
+  }
+  return files;
+}
+function parseSheetXML(xmlBytes, shared){
+  const xml=new TextDecoder().decode(xmlBytes);
+  const rows=[];
+  const rowRe=/<row[^>]*>([\s\S]*?)<\/row>/g; let rm;
+  while((rm=rowRe.exec(xml))){
+    const cells=[]; const cellRe=/<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/g; let cm;
+    while((cm=cellRe.exec(rm[1]))){
+      const attrs=(cm[1]||cm[3]||""); const inner=cm[2]||"";
+      const ref=(attrs.match(/r="([A-Z]+)\d+"/)||[])[1]||"";
+      const col=ref?colIndex(ref):cells.length;
+      const isStr=/t="s"/.test(attrs), isInline=/t="inlineStr"/.test(attrs);
+      let val="";
+      if(isInline){ const t=inner.match(/<t[^>]*>([\s\S]*?)<\/t>/); val=t?xmlUnesc(t[1]):""; }
+      else { const v=inner.match(/<v>([\s\S]*?)<\/v>/); const raw=v?v[1]:"";
+        if(isStr){ val=shared[+raw]!=null?shared[+raw]:""; } else { val=raw===""?"":Number(raw); }
+      }
+      cells[col]=val;
+    }
+    for(let j=0;j<cells.length;j++) if(cells[j]===undefined) cells[j]="";
+    rows.push(cells);
+  }
+  return rows;
+}
+function colIndex(ref){ let n=0; for(const ch of ref) n=n*26+(ch.charCodeAt(0)-64); return n-1; }
+function xmlUnesc(s){ return String(s).replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&apos;/g,"'").replace(/&amp;/g,"&"); }
+async function readXLSXFirstSheet(buf){
+  const files=await unzip(buf);
+  // общие строки (если есть)
+  let shared=[];
+  if(files["xl/sharedStrings.xml"]){
+    const sx=new TextDecoder().decode(files["xl/sharedStrings.xml"]);
+    const re=/<si>([\s\S]*?)<\/si>/g; let m;
+    while((m=re.exec(sx))){ const parts=[...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x=>xmlUnesc(x[1])); shared.push(parts.join("")); }
+  }
+  // первый лист по workbook.xml.rels → но проще взять sheet1.xml
+  const name=Object.keys(files).find(n=>/xl\/worksheets\/sheet1\.xml$/.test(n))||Object.keys(files).find(n=>/xl\/worksheets\/sheet\d+\.xml$/.test(n));
+  if(!name) throw new Error("лист не найден");
+  return parseSheetXML(files[name], shared);
+}
+function showImportPreview(d){
+  const {plan, months, existing, willCreateCats, cntNew, cntUpd, cntSame, removed}=d;
+  const delList = removed.map((rd,i)=>{
+    const p=rd.ops[0]; const nm=(p.type==='income'?'Доход: ':'')+(p.label||catName(p.categoryId))+(p.subId?(' · '+subName(p.subId)):'');
+    const total=rd.ops.reduce((a,x)=>a+Math.round(+x.amount||0),0);
+    return `<label class="row" style="gap:8px;padding:6px 0;cursor:pointer;border-bottom:1px solid var(--line)">
+      <input type="checkbox" data-del="${i}" checked style="width:auto">
+      <span style="flex:1;min-width:0">${esc(nm)} <span class="dim">${p.repeat?'· ежемес.':''}</span></span>
+      <span class="num dim">${fmt(total,{bare:true})}</span></label>`;
+  }).join("");
+
+  const html=`<div>
+    <h3 style="margin:0 0 4px">Загрузка плана из Excel</h3>
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Проверьте изменения перед применением. Фактические операции не затрагиваются.</p>
+    <div class="okbox" style="margin:0 0 10px">
+      <div>➕ Новых строк: <b>${cntNew}</b></div>
+      <div>✏️ Изменённых: <b>${cntUpd}</b></div>
+      <div>✓ Без изменений: <b>${cntSame}</b></div>
+    </div>
+    ${willCreateCats.length?`<div class="infobox" style="margin:0 0 10px;font-size:12px">Будут созданы новые статьи: ${esc(willCreateCats.join(", "))}</div>`:''}
+    ${removed.length?`<div style="margin:6px 0 10px">
+      <div style="font-weight:600;margin-bottom:4px">🗑 Есть в приложении, но нет в файле (${removed.length})</div>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Отметьте, что удалить. Снятые галочки останутся в плане без изменений.</div>
+      ${delList}
+      <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm ghost" id="delAll">Отметить все</button><button class="btn sm ghost" id="delNone">Снять все</button></div>
+    </div>`:''}
+    <button class="btn primary block" id="impApply" style="padding:13px;margin-top:6px">Применить изменения</button>
+    <button class="btn block" id="impCancel" style="margin-top:8px">Отмена</button>
+  </div>`;
+
+  openSheet(html, el=>{
+    if(removed.length){
+      el.querySelector("#delAll").onclick=()=>el.querySelectorAll("[data-del]").forEach(c=>c.checked=true);
+      el.querySelector("#delNone").onclick=()=>el.querySelectorAll("[data-del]").forEach(c=>c.checked=false);
+    }
+    el.querySelector("#impCancel").onclick=closeSheet;
+    el.querySelector("#impApply").onclick=()=>{
+      const toDelete = removed.filter((rd,i)=>{ const c=el.querySelector(`[data-del="${i}"]`); return c && c.checked; });
+      applyPlanImport({plan, months, existing, removed:toDelete});
+      closeSheet();
+    };
+  });
+}
+
+function applyPlanImport(d){
+  const {plan, months, existing, removed}=d;
+  let created=0, updated=0, deleted=0;
+
+  // 1. удаления (подтверждённые)
+  const delIds=new Set();
+  removed.forEach(rd=>rd.ops.forEach(p=>delIds.add(p.id)));
+  if(delIds.size){ state.planned=(state.planned||[]).filter(p=>!delIds.has(p.id)); deleted=delIds.size; }
+
+  // 2. создаём недостающие категории/подкатегории/источники
+  const catByName={}, subByKey={}, srcByName={};
+  plan.forEach(item=>{
+    if(item.needCat){
+      if(item.isIncome){
+        if(!srcByName[item.cat]){ const s={id:uid(),name:item.cat,kind:'labor'}; state.incomeSources.push(s); srcByName[item.cat]=s.id; }
+        item.categoryId=srcByName[item.cat];
+      } else {
+        if(!catByName[item.cat]){ const grp=expenseGroups()[1]||expenseGroups()[0]; const c={id:uid(),name:item.cat,groupId:grp.id,icon:'•',scope:'shared'}; state.categories.push(c); catByName[item.cat]=c.id; }
+        item.categoryId=catByName[item.cat];
+      }
+    }
+    if(item.needSub){
+      const key=item.categoryId+"|"+item.sub;
+      if(!subByKey[key]){ const su={id:uid(),categoryId:item.categoryId,name:item.sub,scope:'shared'}; state.subcategories.push(su); subByKey[key]=su.id; }
+      item.subId=subByKey[key];
+    }
+  });
+
+  // 3. применяем суммы
+  plan.forEach(item=>{
+    const type=item.isIncome?'income':'expense';
+    if(item.repeat){
+      // одна повторяющаяся операция; сумма = из первого ненулевого месяца (обычно все одинаковы)
+      const amt=item.amounts.find(a=>a>0)||0;
+      const key=(item.isIncome?'I':'E')+"|"+item.categoryId+"|"+(item.subId||"")+"|R";
+      const ex=(existing.get(key)||[])[0];
+      if(ex){ if(Math.round(+ex.amount||0)!==amt){ ex.amount=amt; if(item.label)ex.label=item.label; updated++; } }
+      else if(amt>0){ state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:true,day:25,label:item.label||(item.isIncome?item.cat:(item.sub||item.cat)),active:true,memberId:actingMemberId()}); created++; }
+    } else {
+      // разовые по месяцам
+      months.forEach((k,mi)=>{ const amt=item.amounts[mi]; if(amt<=0) return;
+        const mlen=mlenOf(k); const date=k+"-"+String(Math.min(25,mlen)).padStart(2,"0");
+        // ищем существующую разовую в этом месяце
+        const ex=(state.planned||[]).find(p=>p.type===type&&!p.repeat&&p.categoryId===item.categoryId&&(p.subId||null)===(item.subId||null)&&(p.label||"")===item.label&&p.date&&ym(p.date)===k);
+        if(ex){ if(Math.round(+ex.amount||0)!==amt){ ex.amount=amt; updated++; } }
+        else { state.planned.push({id:uid(),type,amount:amt,categoryId:item.categoryId,subId:item.subId||null,repeat:false,date,label:item.label||(item.sub||item.cat),active:true,memberId:actingMemberId()}); created++; }
+      });
+    }
+  });
+
+  save(); render_current();
+  toast(`Готово: +${created} · изменено ${updated}${deleted?` · удалено ${deleted}`:''}`);
+}
+function exportPlanTemplate(){
+  try{
+    const bytes=buildXLSX(buildPlanTemplateSheets());
+    const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+    const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="План_ДомФин_"+realMonth()+".xlsx"; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),2000); toast("Шаблон плана скачан");
+  }catch(e){ toast("Не удалось создать шаблон"); console.warn(e); }
+}
 function exportXLSX(){
   try{
     const bytes=buildXLSX(buildWorkbookSheets());
@@ -7783,7 +8130,7 @@ function setupAutoSync(){
 if(!state.__meta || !Object.keys(state.__meta).length) buildMetaBaseline(state);
 __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.reschedulePlanned=reschedulePlanned; window.planActionSheet=planActionSheet; window.duePlanned=duePlanned; window.addLedger=addLedger; window.setAssetValue=setAssetValue; window.assetDeprForMonth=assetDeprForMonth; window.assetLiveValue=assetLiveValue; window.assetContribSince=assetContribSince; window.assetLinkedSubs=assetLinkedSubs; window.reserveCapital=reserveCapital; window.workingCapital=workingCapital; window.startOnboarding=startOnboarding; window.finishOnboarding=finishOnboarding; window.onbRenderStep=onbRenderStep; window.maybeCapitalBridge=maybeCapitalBridge; window.isDesktopWide=isDesktopWide; window.plan3on=plan3on; window.plan3Months=plan3Months; Object.defineProperty(window,"onbDraft",{get:()=>onbDraft,set:v=>{onbDraft=v;},configurable:true}); Object.defineProperty(window,"onbIdx",{get:()=>onbIdx,set:v=>{onbIdx=v;},configurable:true}); Object.defineProperty(window,"onbMode",{get:()=>onbMode,set:v=>{onbMode=v;},configurable:true}); Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.buildPlanTemplateSheets=buildPlanTemplateSheets; window.buildXLSX=buildXLSX; window.exportPlanTemplate=exportPlanTemplate; window.readXLSXFirstSheet=readXLSXFirstSheet; window.importPlanTemplate=importPlanTemplate; window.applyPlanImport=applyPlanImport; window.unzip=unzip; window.planTemplateMonths=planTemplateMonths; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.reschedulePlanned=reschedulePlanned; window.planActionSheet=planActionSheet; window.duePlanned=duePlanned; window.addLedger=addLedger; window.setAssetValue=setAssetValue; window.assetDeprForMonth=assetDeprForMonth; window.assetLiveValue=assetLiveValue; window.assetContribSince=assetContribSince; window.assetLinkedSubs=assetLinkedSubs; window.reserveCapital=reserveCapital; window.workingCapital=workingCapital; window.startOnboarding=startOnboarding; window.finishOnboarding=finishOnboarding; window.onbRenderStep=onbRenderStep; window.maybeCapitalBridge=maybeCapitalBridge; window.isDesktopWide=isDesktopWide; window.plan3on=plan3on; window.plan3Months=plan3Months; Object.defineProperty(window,"onbDraft",{get:()=>onbDraft,set:v=>{onbDraft=v;},configurable:true}); Object.defineProperty(window,"onbIdx",{get:()=>onbIdx,set:v=>{onbIdx=v;},configurable:true}); Object.defineProperty(window,"onbMode",{get:()=>onbMode,set:v=>{onbMode=v;},configurable:true}); Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 restoreDurable().then(n=>{
