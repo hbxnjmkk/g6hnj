@@ -2849,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.67-design2";
+const APP_VERSION="v7.68-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -4324,26 +4324,28 @@ function pgToday(v){
   const _dueVis=(x)=>{ const c=byId(state.categories, x.p.categoryId); if(!c) return true; if((c.scope||'shared')==='shared') return true; return c.ownerId===_mid; };
   const duep = (k===realMonth()) ? duePlanned().filter(_dueVis) : [];
   const totalPlanned = duep.length;
-  const pcard=h(`<div class="card"><h3>Подтвердить плановые на сегодня ${duep.length?`<span class="tag">${duep.length}</span>`:''}<button class="btn sm ghost" id="planManage" style="margin-left:auto">Плановые</button></h3></div>`);
+  const pcard=h(`<div class="card"><h3>Напоминания об оплате ${duep.length?`<span class="tag">${duep.length}</span>`:''}<button class="btn sm ghost" id="planManage" style="margin-left:auto">Все платежи</button></h3><p class="muted" style="font-size:12px;margin:-4px 0 4px">Ожидаемые платежи по датам. «Оплатил» — записать в факт, «⋯» — перенести или пропустить.</p></div>`);
   pcard.querySelector("#planManage").onclick=openPlannedManager;
   if(duep.length){
     duep.forEach(({p,date,overdue,remaining})=>{
       const dstr=date.slice(8,10)+"."+date.slice(5,7);
-      const row=h(`<div class="lrow"><div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
+      const row=h(`<div class="lrow"><div class="ic">${p.type==='income'?'💰':'📅'}</div>
         <div style="flex:1;min-width:0;cursor:pointer" data-planrow><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
-          <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">просрочено</span>':''} · ${p.type==='income'?'доход':'расход'}${p.repeat?' · ежемесячно':''}</div></div>
+          <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">ожидает</span>':''} · ${p.type==='income'?'поступление':'платёж'}</div></div>
         <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt((remaining!=null&&p.type==='expense')?remaining:p.amount)}</div>
-        <button class="btn sm primary" data-yes style="margin-left:8px">Да</button>
-        <button class="btn sm" data-more style="margin-left:6px" title="Перенести или убрать">⋯</button></div>`);
-      row.querySelector("[data-yes]").onclick=()=>{ confirmPlanned(p,date); toast("Подтверждено"); render_current(); };
+        <button class="btn sm primary" data-yes style="margin-left:8px">${p.type==='income'?'Получил':'Оплатил'}</button>
+        <button class="btn sm" data-skip style="margin-left:6px" title="Пропустить (без записи)">✕</button>
+        <button class="btn sm" data-more style="margin-left:6px" title="Перенести">⋯</button></div>`);
+      row.querySelector("[data-yes]").onclick=()=>{ confirmPlanned(p,date); toast(p.type==='income'?"Записано в доход":"Записано в факт"); render_current(); };
+      row.querySelector("[data-skip]").onclick=()=>{ skipPlannedPayment(p); toast("Пропущено"); render_current(); };
       row.querySelector("[data-more]").onclick=()=>planActionSheet(p,date);
       row.querySelector("[data-planrow]").onclick=()=>planActionSheet(p,date);
       pcard.appendChild(row);
     });
   } else if(!totalPlanned){
-    pcard.appendChild(h(`<div class="empty" style="padding:12px 6px;text-align:left">Плановых операций нет. Поставьте у операции дату в будущем или отметьте «🔁 Повторять ежемесячно» — они появятся здесь в свой день и в календаре.</div>`));
+    pcard.appendChild(h(`<div class="empty" style="padding:12px 6px;text-align:left">Напоминаний нет. Платежи по датам задаются в бюджете статьи (План → тап по сумме → «Платежи по датам») и появляются здесь в свой день.</div>`));
   } else {
-    pcard.appendChild(h(`<div class="okbox" style="margin:0;text-align:left">На сегодня всё подтверждено. 👍 Будущие плановые — в календаре.</div>`));
+    pcard.appendChild(h(`<div class="okbox" style="margin:0;text-align:left">На сегодня всё оплачено. 👍</div>`));
   }
   v.appendChild(pcard);
 
@@ -4545,20 +4547,27 @@ function reschedulePlanned(p, newDate){
 }
 // Меню действий по плановой операции с «Сегодня»: перенести дату / изменить / убрать
 function planActionSheet(p, date){
-  const isRep=p.repeat;
+  const pay=p&&p.__pay;
   const html=`<div>
     <h3 style="margin:0 0 2px">${esc(p.label||catName(p.categoryId))}</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 14px">${isRep?'Повторяющаяся':'Разовая'} · ${p.type==='income'?'доход':'расход'} · ${fmt(p.amount)}</p>
+    <p class="muted" style="font-size:12.5px;margin:0 0 14px">Платёж · ${p.type==='income'?'поступление':'расход'} · ${fmt((pay&&pay.amount)||p.amount)}</p>
     <div class="field"><label>Перенести на дату</label><input type="date" id="paDate" value="${esc(date)}"></div>
     <button class="btn primary block" id="paMove" style="padding:12px;margin-bottom:8px">📅 Перенести на эту дату</button>
-    <button class="btn block" id="paEdit" style="padding:12px;margin-bottom:8px">✏️ Изменить плановую операцию</button>
-    <button class="btn danger block" id="paDel" style="padding:12px">${isRep?'🚫 Убрать из плана этого месяца':'🗑 Удалить из плана'}</button>
-    ${isRep?'<p class="muted" style="font-size:11.5px;margin:8px 0 0">Повтор вернётся в следующем месяце. Чтобы отменить повтор совсем — откройте «Изменить».</p>':''}
+    <button class="btn block" id="paEdit" style="padding:12px;margin-bottom:8px">✏️ Изменить бюджет статьи</button>
+    <button class="btn block" id="paSkip" style="padding:12px;margin-bottom:8px">✕ Пропустить напоминание</button>
+    <p class="muted" style="font-size:11.5px;margin:0">Пропуск убирает напоминание без записи в факт. Сумма плана статьи не меняется.</p>
   </div>`;
   openSheet(html, el=>{
-    el.querySelector("#paMove").onclick=()=>{ const nd=el.querySelector("#paDate").value; if(!nd){toast("Выберите дату");return;} reschedulePlanned(p,nd); closeSheet(); toast("Перенесено на "+fmtDate(nd)); render_current(); };
-    el.querySelector("#paEdit").onclick=()=>{ closeSheet(); editPlanned(p.id); };
-    el.querySelector("#paDel").onclick=()=>{ skipPlanned(p); closeSheet(); toast(p.repeat?"Убрано из плана этого месяца":"Удалено из плана"); render_current(); };
+    el.querySelector("#paMove").onclick=()=>{ const nd=el.querySelector("#paDate").value; if(!nd){toast("Выберите дату");return;}
+      if(pay){ const rec=state.budgets[pay.key] && state.budgets[pay.key][pay.ym]; if(rec && rec.payments && rec.payments[pay.idx]){ rec.payments[pay.idx].day=Math.max(1,Math.min(31,+nd.slice(8,10)||25)); rec.payments[pay.idx].done=false; save(); } }
+      closeSheet(); toast("Перенесено на "+fmtDate(nd)); render_current(); };
+    el.querySelector("#paEdit").onclick=()=>{ closeSheet();
+      const isInc=p.type==='income';
+      const k=pay?pay.ym:realMonth();
+      if(isInc) editBudgetSheet(k, p.categoryId, null, p.label||catName(p.categoryId));
+      else editBudgetSheet(k, p.subId?null:p.categoryId, p.subId||null, p.label||catName(p.categoryId));
+    };
+    el.querySelector("#paSkip").onclick=()=>{ skipPlannedPayment(p); closeSheet(); toast("Пропущено"); render_current(); };
   });
 }
 // эффективная дата планового пункта в месяце k (повтор — число, зажатое к длине месяца)
@@ -4775,6 +4784,25 @@ function migratePlansToBudgets(){
     });
   });
 
+  // Гашение прошлых платежей: те, что уже наступили И по чьей статье есть факт в этом месяце — помечаем оплаченными,
+  // чтобы после миграции не всплывали как «просроченные» напоминания (умный вариант).
+  const today0=todayISOdate();
+  Object.keys(state.budgets).forEach(key=>{
+    const catId=key.startsWith('cat:')?key.slice(4):null;
+    const subId=key.startsWith('cat:')?null:key;
+    Object.keys(state.budgets[key]).forEach(mm=>{
+      const rec=state.budgets[key][mm];
+      if(!rec||typeof rec!=='object'||!Array.isArray(rec.payments)) return;
+      // есть ли факт по этой статье в этом месяце
+      const hasFact = (state.txns||[]).some(t=>{ if(ym(t.date)!==mm) return false; if(subId) return t.subId===subId; return t.categoryId===catId && !t.subId; });
+      rec.payments.forEach(p=>{
+        if(p.fict) return;
+        const dateStr=mm+"-"+String(Math.max(1,Math.min(31,+p.day||25))).padStart(2,"0");
+        if(dateStr<=today0 && hasFact) p.done=true;
+      });
+    });
+  });
+
   state.planned=[];
   state.budgetsMigrated=true;
 }
@@ -4830,34 +4858,31 @@ function confirmPlanned(p,dateStr,amount){
   state.freq[catId]=(state.freq[catId]||0)+1;
   save();
 }
-
+// Пропустить платёж-напоминание: пометить оплаченным БЕЗ создания факта (напоминание уходит)
+function skipPlannedPayment(p){
+  const pay=p&&p.__pay; if(!pay) return;
+  const rec=state.budgets[pay.key] && state.budgets[pay.key][pay.ym];
+  if(rec && Array.isArray(rec.payments) && rec.payments[pay.idx]){ rec.payments[pay.idx].done=true; save(); }
+}
 function openPlannedManager(){
-  const list=(state.planned||[]).slice().sort((a,b)=>{
-    const ka=a.repeat?("A"+String(a.day||0).padStart(2,"0")):("B"+(a.date||""));
-    const kb=b.repeat?("A"+String(b.day||0).padStart(2,"0")):("B"+(b.date||""));
-    return ka<kb?-1:1;
-  });
-  const rows = list.length ? list.map(p=>{
-    const when = p.repeat ? (p.day+" число · ежемесячно") : ("дата "+(p.date||"—"));
-    return `<div class="lrow" data-r="${p.id}">
-      <div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
-      <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
-        <div class="t2">${when} · ${p.type==='income'?'доход':'расход'}${p.active===false?' · <span style="color:var(--ink3)">пауза</span>':''}</div></div>
-      <div class="amt">${fmt(p.amount)}</div>
-      ${p.repeat?`<button class="iconbtn" data-toggle title="${p.active===false?'включить':'пауза'}">${p.active===false?'▶️':'⏸'}</button>`:''}
-      <button class="iconbtn" data-edit title="изменить">✎</button></div>`;
+  const k=realMonth();
+  const pays=allBudgetPaymentsForMonth(k).filter(p=>!p.fict).sort((a,b)=>a.day-b.day);
+  const rows = pays.length ? pays.map((pay,i)=>{
+    const isInc=(state.incomeSources||[]).some(s=>s.id===pay.catId);
+    const nm = pay.label || (isInc?((incomeSrcById(pay.catId)||{}).name||'Доход'):(pay.subId?subName(pay.subId):catName(pay.catId)));
+    return `<div class="lrow" data-pk="${esc(pay.key)}" data-pi="${pay.idx}">
+      <div class="ic">${isInc?'💰':'📅'}</div>
+      <div style="flex:1;min-width:0"><div class="t1">${esc(nm)}</div>
+        <div class="t2">${String(pay.day).padStart(2,'0')}.${k.slice(5,7)} · ${isInc?'поступление':'платёж'}${pay.done?' · <span style="color:var(--green)">оплачено</span>':''}</div></div>
+      <div class="amt">${isInc?'+':''}${fmt(pay.amount)}</div></div>`;
   }).join("")
-    : `<div class="empty" style="padding:14px 6px">Плановых операций нет. Поставьте у операции дату в будущем (разовый план) или отметьте «🔁 Повторять ежемесячно» — они появятся здесь, на «Сегодня» в свой день и в календаре.</div>`;
-  openSheet(`<h3>Плановые и повторяющиеся</h3>
-    <p class="muted" style="font-size:12.5px;margin-top:-6px">Будущие и регулярные операции. Подтверждаются в свой день на «Сегодня» и учитываются в календаре. В факт попадают только после подтверждения.</p>
+    : `<div class="empty" style="padding:14px 6px">Платежей по датам нет. Задайте их в бюджете статьи: План → тап по сумме → «Платежи по датам». Они появятся здесь и как напоминания на «Сегодня» в свой день.</div>`;
+  openSheet(`<h3>Все платежи месяца</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:-6px">Ожидаемые платежи по датам (${ymHeader(k)}). Задаются в бюджете статьи. Служат для прогноза потока и напоминаний на «Сегодня».</p>
     <div id="recList">${rows}</div>
-    <button class="btn primary block" id="recAdd" style="margin-top:10px;padding:13px">＋ Добавить плановую</button>
-    <button class="btn ghost block" id="recClose" style="margin-top:8px">Закрыть</button>`,
+    <button class="btn ghost block" id="recClose" style="margin-top:10px">Закрыть</button>`,
   el=>{
     el.querySelector("#recClose").onclick=closeSheet;
-    el.querySelector("#recAdd").onclick=()=>editPlanned(null);
-    el.querySelectorAll("[data-toggle]").forEach(b=>b.onclick=()=>{ const id=b.closest("[data-r]").dataset.r; const p=byId(state.planned,id); if(p){ p.active=(p.active===false); save(); openPlannedManager(); } });
-    el.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>{ const id=b.closest("[data-r]").dataset.r; editPlanned(id); });
   });
 }
 function editPlanned(id, preset){
@@ -5342,7 +5367,23 @@ function pgPlan(v){
       incBody.appendChild(h(`<div class="isec"><span class="isec-n">Доходы ${esc(mm.name)}</span><span class="num isec-s">${t>0?fmt(t,{bare:true}):'—'}</span></div>`));
       own.forEach(_renderSrc);
     });
-  } else _incList.forEach(_renderSrc);
+  } else {
+    // личный вид: деление Общие / Личные сразу видно
+    const shared=_incList.filter(s=>!srcOwner(s));
+    const personal=_incList.filter(s=>srcOwner(s));
+    if(shared.length){
+      const st=shared.reduce((a,x)=>a+incomeSrcPlanned(k,x.id),0);
+      incBody.appendChild(h(`<div class="isec"><span class="isec-n">Общие</span><span class="num isec-s">${st>0?fmt(st,{bare:true}):'—'}</span></div>`));
+      shared.forEach(_renderSrc);
+    }
+    if(personal.length){
+      const pt=personal.reduce((a,x)=>a+incomeSrcPlanned(k,x.id),0);
+      incBody.appendChild(h(`<div class="isec"><span class="isec-n">Личные</span><span class="num isec-s">${pt>0?fmt(pt,{bare:true}):'—'}</span></div>`));
+      personal.forEach(_renderSrc);
+    }
+    // если деления нет (все без владельца или все личные и один тип) — список уже показан выше
+    if(!shared.length && !personal.length) _incList.forEach(_renderSrc);
+  }
   v.appendChild(incCard);
 
   // ---------- РАСХОДЫ ----------
@@ -8609,7 +8650,7 @@ __lastSaved=_clone(state);
 // хук для отладки/тестов: доступ к внутренним объектам (безвреден в браузере)
 try{ Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 try{ Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true}); }catch(e){}
-try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.migrate=migrate; window.HELP=HELP; window.buildMetaBaseline=buildMetaBaseline; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.allBudgetPaymentsForMonth=allBudgetPaymentsForMonth; window.confirmPlanned=confirmPlanned; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.buildPlanTemplateSheets=buildPlanTemplateSheets; window.buildXLSX=buildXLSX; window.exportPlanTemplate=exportPlanTemplate; window.readXLSXFirstSheet=readXLSXFirstSheet; window.importPlanTemplate=importPlanTemplate; window.applyPlanImport=applyPlanImport; window.unzip=unzip; window.planTemplateMonths=planTemplateMonths; window.planTemplateScope=planTemplateScope; window.planOwnerId=planOwnerId; window.getBudget=getBudget; window.setBudget=setBudget; window.setBudgetPayments=setBudgetPayments; window.budgetPayments=budgetPayments; window.budgetPaymentsSum=budgetPaymentsSum; window.budgetRec=budgetRec; window.migratePlansToBudgets=migratePlansToBudgets; window.datedPlanSub=datedPlanSub; window.catsOfAll=catsOfAll; window.subsOfAll=subsOfAll; window.childSubsOf=childSubsOf; window.subSpendOwn=subSpendOwn; window.subSpend=subSpend; window.hasChildSubs=hasChildSubs; window.planSubOwn=planSubOwn; window.allSubsOfCat=allSubsOfCat; window.planCatDirect=planCatDirect; window.planDoneSub=planDoneSub; window.getBudget=getBudget; window.budgetKeyFor=budgetKeyFor; window.editBudgetSheet=editBudgetSheet; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.reschedulePlanned=reschedulePlanned; window.planActionSheet=planActionSheet; window.duePlanned=duePlanned; window.addLedger=addLedger; window.setAssetValue=setAssetValue; window.assetDeprForMonth=assetDeprForMonth; window.assetLiveValue=assetLiveValue; window.assetContribSince=assetContribSince; window.assetLinkedSubs=assetLinkedSubs; window.reserveCapital=reserveCapital; window.workingCapital=workingCapital; window.startOnboarding=startOnboarding; window.finishOnboarding=finishOnboarding; window.onbRenderStep=onbRenderStep; window.maybeCapitalBridge=maybeCapitalBridge; window.isDesktopWide=isDesktopWide; window.plan3on=plan3on; window.plan3Months=plan3Months; Object.defineProperty(window,"onbDraft",{get:()=>onbDraft,set:v=>{onbDraft=v;},configurable:true}); Object.defineProperty(window,"onbIdx",{get:()=>onbIdx,set:v=>{onbIdx=v;},configurable:true}); Object.defineProperty(window,"onbMode",{get:()=>onbMode,set:v=>{onbMode=v;},configurable:true}); Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
+try{ window.VaultCrypto=VaultCrypto; window.ACCT=ACCT; window.SRV=SRV; window.memberById=memberById; window.qrSVG=qrSVG; window.syncLiabSubcats=syncLiabSubcats; window.liabBalance=liabBalance; window.liabPrincipalSub=liabPrincipalSub; window.totalLiab=totalLiab; window.subsOf=subsOf; window.memberBalance=memberBalance; window.memberMonthIncome=memberMonthIncome; window.memberMonthExpense=memberMonthExpense; window.famView=famView; window.setViewScope=setViewScope; window.activeMember=activeMember; window.catsForEntry=catsForEntry; window.catScopeVisible=catScopeVisible; window.catsOfView=catsOfView; window.ensureOwnerLabel=ensureOwnerLabel; window.goalsForView=goalsForView; window.syncGoalSubcats=syncGoalSubcats; window.goalSub=goalSub; window.planTotalView=planTotalView; window.expenseGroups=expenseGroups; window.catsOfView=catsOfView; window.planCat=planCat; window.personalPlanExpense=personalPlanExpense; window.plannedIsShared=plannedIsShared; window.migratePlannedScope=migratePlannedScope; window.planMonthTotal=planMonthTotal; window.plannedIncomeView=plannedIncomeView; window.familyCash=familyCash; window.migrateCashToPersonal=migrateCashToPersonal; window.totalAssets=totalAssets; window.liquidAssets=liquidAssets; window.reducesCash=reducesCash; window.planSub=planSub; window.planCat=planCat; window.planItemsForMonth=planItemsForMonth; window.migratePlansToOps=migratePlansToOps; window.plannedDoneInMonth=plannedDoneInMonth; window.projIncome=projIncome; window.projExpense=projExpense; window.forecastSeries=forecastSeries; window.familyCashAsOf=familyCashAsOf; window.freeFlow=freeFlow; window.projCashOut=projCashOut; window.factExpenseView=factExpenseView; window.catDirectSpend=catDirectSpend; window.subSpend=subSpend; window.groupSpend=groupSpend; window.mergeStates=mergeStates; window.migrate=migrate; window.HELP=HELP; window.buildMetaBaseline=buildMetaBaseline; window.ym=ym; window.todayISOdate=todayISOdate; window.planDoneTotal=planDoneTotal; window.essentialSpend=essentialSpend; window.plannedIncomeRemaining=plannedIncomeRemaining; window.realMonth=realMonth; window.memberBalanceAsOf=memberBalanceAsOf; window.netWorth=netWorth; window.liabBalance=liabBalance; window.monthCapital=monthCapital; window.monthExpense=monthExpense; window.inviteLink=inviteLink; window.parseInvite=parseInvite; window.startAuthFlow=startAuthFlow; window.openInviteSheet=openInviteSheet; window.go=go; window.bootApp=bootApp; window.showAuthGate=showAuthGate; window.cashLeftToday=cashLeftToday; window.applyTheme=applyTheme; window.dayPlan=dayPlan; window.duePlanned=duePlanned; window.allBudgetPaymentsForMonth=allBudgetPaymentsForMonth; window.confirmPlanned=confirmPlanned; window.skipPlannedPayment=skipPlannedPayment; window.plannedForMonth=plannedForMonth; window.openAddTxn=openAddTxn; window.compoundFV=compoundFV; window.fmt=fmt; window.applyFont=applyFont; window.fmtNumInput=fmtNumInput; window.showDashInfo=showDashInfo; window.plannedIncome=plannedIncome; window.monthIncome=monthIncome; window.planMonthTotal=planMonthTotal; window.incomeSrcPlanned=incomeSrcPlanned; window.planDeficit=planDeficit; window.isParticipant=isParticipant; window.SRV=SRV; window.buildWorkbookSheets=buildWorkbookSheets; window.buildPlanTemplateSheets=buildPlanTemplateSheets; window.buildXLSX=buildXLSX; window.exportPlanTemplate=exportPlanTemplate; window.readXLSXFirstSheet=readXLSXFirstSheet; window.importPlanTemplate=importPlanTemplate; window.applyPlanImport=applyPlanImport; window.unzip=unzip; window.planTemplateMonths=planTemplateMonths; window.planTemplateScope=planTemplateScope; window.planOwnerId=planOwnerId; window.getBudget=getBudget; window.setBudget=setBudget; window.setBudgetPayments=setBudgetPayments; window.budgetPayments=budgetPayments; window.budgetPaymentsSum=budgetPaymentsSum; window.budgetRec=budgetRec; window.migratePlansToBudgets=migratePlansToBudgets; window.datedPlanSub=datedPlanSub; window.catsOfAll=catsOfAll; window.subsOfAll=subsOfAll; window.childSubsOf=childSubsOf; window.subSpendOwn=subSpendOwn; window.subSpend=subSpend; window.hasChildSubs=hasChildSubs; window.planSubOwn=planSubOwn; window.allSubsOfCat=allSubsOfCat; window.planCatDirect=planCatDirect; window.planDoneSub=planDoneSub; window.getBudget=getBudget; window.budgetKeyFor=budgetKeyFor; window.editBudgetSheet=editBudgetSheet; window.editPlanned=editPlanned; window.skipPlanned=skipPlanned; window.reschedulePlanned=reschedulePlanned; window.planActionSheet=planActionSheet; window.duePlanned=duePlanned; window.addLedger=addLedger; window.setAssetValue=setAssetValue; window.assetDeprForMonth=assetDeprForMonth; window.assetLiveValue=assetLiveValue; window.assetContribSince=assetContribSince; window.assetLinkedSubs=assetLinkedSubs; window.reserveCapital=reserveCapital; window.workingCapital=workingCapital; window.startOnboarding=startOnboarding; window.finishOnboarding=finishOnboarding; window.onbRenderStep=onbRenderStep; window.maybeCapitalBridge=maybeCapitalBridge; window.isDesktopWide=isDesktopWide; window.plan3on=plan3on; window.plan3Months=plan3Months; Object.defineProperty(window,"onbDraft",{get:()=>onbDraft,set:v=>{onbDraft=v;},configurable:true}); Object.defineProperty(window,"onbIdx",{get:()=>onbIdx,set:v=>{onbIdx=v;},configurable:true}); Object.defineProperty(window,"onbMode",{get:()=>onbMode,set:v=>{onbMode=v;},configurable:true}); Object.defineProperty(window,"curMonth",{get:()=>curMonth,set:v=>{curMonth=v;},configurable:true});
   Object.defineProperty(window,"state",{get:()=>state,set:v=>{state=v;},configurable:true}); }catch(e){}
 applyTheme(); applyFont(); watchAutoTheme();
 restoreDurable().then(n=>{
