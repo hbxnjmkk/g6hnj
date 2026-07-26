@@ -227,10 +227,24 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .ibtn2:hover{background:var(--panel2);color:var(--gold);opacity:1}
 @media (hover:hover){ .prow .ibtn2{opacity:0} .prow:hover .ibtn2{opacity:.55} .prow:hover .ibtn2:hover{opacity:1} }
 .pgrp{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);margin-bottom:10px;overflow:hidden;box-shadow:var(--shadow)}
-.prow{display:flex;align-items:center;gap:8px;padding:8px 6px;border-radius:10px;cursor:pointer;user-select:none;min-height:40px}
+.prow{display:flex;align-items:center;gap:8px;padding:8px 6px;border-radius:10px;cursor:pointer;user-select:none;min-height:40px;position:relative}
 .prow .ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:16px;line-height:1;flex:none;background:var(--panel2)}
 .prow .ic svg{width:16px;height:16px}
 .prow:hover{background:var(--panel2)}
+/* число всегда прижато к правому краю на одной вертикали */
+.prow .num{margin-left:auto;text-align:right;flex:none;padding-right:2px}
+.prow .pcaret{flex:none}
+/* десктоп: кнопки действий появляются при hover, absolute — не сдвигают число */
+@media (hover:hover){
+  .prow .ibtn2{position:absolute;top:50%;transform:translateY(-50%);z-index:2;right:52px}
+  .prow.psub .ibtn2{right:14px}
+}
+/* мобильный: кнопки в потоке слева от числа; число всё равно ровное (margin-left:auto прижимает вправо блок число+каретку) */
+@media (hover:none){
+  .prow .ibtn2{opacity:.5}
+  .prow .num{margin-left:8px}
+  .prow .pname{margin-right:auto}
+}
 .phead{padding:12px 10px}
 .gdot{width:10px;height:10px;border-radius:3px;flex:none}
 .pname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700;font-size:14.5px}
@@ -255,13 +269,16 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .pbar.xs{height:3px;margin:4px 34px 0 6px}
 .pmeta{font-size:10.5px;color:var(--ink3);margin:2px 76px 0 6px}
 .pmeta b{color:var(--green);font-weight:600}
-.ssum{min-width:76px;text-align:right;font-size:13.5px;font-weight:600;color:var(--ink)}
+/* правая зона одинаковой ширины у всех уровней: число + место под каретку (24px) */
+.prow .pcaret{width:16px;flex:none}
+.prow.psub .rspace{width:16px;flex:none;display:inline-block}
+.ssum{text-align:right;font-size:13.5px;font-weight:600;color:var(--ink)}
 .ssum[data-blim],.ssum[data-cblim]{cursor:pointer;border-bottom:1px dashed var(--line)}
 .ssum[data-blim]:hover,.ssum[data-cblim]:hover{color:var(--gold2)}
 .ssum.empty{color:var(--ink3);font-weight:400}
 .pop{display:flex;align-items:center;gap:6px;padding:5px 6px 5px 40px;font-size:12px;color:var(--ink2);border-radius:8px;cursor:pointer}
 .pop .opl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pop .opa{min-width:76px;text-align:right;flex:none}
+.pop .opa{text-align:right;flex:none;padding-right:16px}
 .prow.psub{min-height:0;padding-top:7px;padding-bottom:7px}
 .psubwrap{padding-bottom:2px}
 .psubwrap+.psubwrap{border-top:1px solid var(--line)}
@@ -2828,7 +2845,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.58-design2";
+const APP_VERSION="v7.59-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -5190,7 +5207,7 @@ function pgPlan(v){
     let gTot=0,gDone=0; cats.forEach(c=>{ gTot+=planCat(k,c.id); subsOf(c.id).forEach(su=>gDone+=planDoneSub(k,su.id)); });
     const gOpen=planOpen.has(g.id);
     const card=h(`<div class="pgrp${gOpen?' open':''}"><div class="prow phead"><span class="gdot" style="background:${g.color}"></span>
-        <span class="pname">${esc(g.name)}</span><span class="num psum" data-gtag="${g.id}">${fmt(gTot)}</span>
+        <span class="pname">${esc(g.name)}</span><span class="num psum" data-gtag="${g.id}">${fmt(gTot,{bare:true})}</span>
         <button class="ibtn2" data-addcat title="Добавить категорию">${SVG_PLUS}</button><span class="pcaret">${SVG_CARET}</span></div>
       ${gTot>0?`<div class="pbar sm"><i style="width:${Math.min(100,gDone/gTot*100)}%;background:${g.color}"></i></div>`:''}
       <div class="pbody"></div></div>`);
@@ -5222,7 +5239,7 @@ function pgPlan(v){
           const w=h(`<div class="psubwrap">
             <div class="prow psub"><span class="pname">${esc(su.name)}${badge}</span>
               <span class="num ssum${sTot>0?'':' empty'}" data-blim title="Нажмите, чтобы задать план на месяц">${sTot>0?fmt(sTot,{bare:true}):'задать'}</span>
-              <button class="ibtn2" data-splan title="Плановая операция с датой">${SVG_CAL}</button></div>
+              <button class="ibtn2" data-splan title="Плановая операция с датой">${SVG_CAL}</button><span class="rspace"></span></div>
             ${sTot>0?`<div class="pbar xs"><i style="width:${Math.min(100,(over?spent:sDone)/sTot*100)}%;background:${over?'var(--red)':'var(--green)'}"></i></div>
               <div class="pmeta">${over?`<span style="color:var(--red)">перерасход +${fmt(spent-sTot,{bare:true})}</span> · план ${fmt(sTot,{bare:true})}`:`<b>✓ ${fmt(sDone,{bare:true})}</b> · осталось ${fmt(Math.max(0,sTot-sDone),{bare:true})}`}</div>`:''}
             <div class="opsbox"></div></div>`);
@@ -5241,7 +5258,7 @@ function pgPlan(v){
         const cTotD=planCatDirect(k,c.id);
         const w=h(`<div class="psubwrap"><div class="prow psub"><span class="pname dim" style="font-size:12px">без подкатегорий</span>
           <span class="num ssum${cTotD>0?'':' empty'}" data-cblim title="Нажмите, чтобы задать план">${cTotD>0?fmt(cTotD,{bare:true}):'задать'}</span>
-          <button class="ibtn2" data-cplan title="Плановая операция с датой">${SVG_CAL}</button></div><div class="opsbox"></div></div>`);
+          <button class="ibtn2" data-cplan title="Плановая операция с датой">${SVG_CAL}</button><span class="rspace"></span></div><div class="opsbox"></div></div>`);
         w.querySelector('[data-cplan]').onclick=e=>{ e.stopPropagation(); editPlanned(null,{type:'expense',categoryId:c.id,repeat:false}); };
         const cblimEl=w.querySelector('[data-cblim]');
         if(cblimEl) cblimEl.onclick=e=>{ e.stopPropagation(); editBudgetSheet(k, c.id, null, c.name+' (без подкатегории)'); };
