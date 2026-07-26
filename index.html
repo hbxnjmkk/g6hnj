@@ -231,19 +231,23 @@ table.tbl{width:100%;border-collapse:collapse;font-size:13px}
 .prow .ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:16px;line-height:1;flex:none;background:var(--panel2)}
 .prow .ic svg{width:16px;height:16px}
 .prow:hover{background:var(--panel2)}
-/* число всегда прижато к правому краю на одной вертикали */
-.prow .num{margin-left:auto;text-align:right;flex:none;padding-right:2px}
-.prow .pcaret{flex:none}
-/* десктоп: кнопки действий появляются при hover, absolute — не сдвигают число */
+/* Правая зона Плана: [кнопка-действие] [ЧИСЛО фикс.ширины, выровнено вправо] [каретка/spacer].
+   Число в блоке фиксированной ширины — заканчивается на одной вертикали на всех уровнях.
+   Кнопка стоит СЛЕВА от числа (в потоке), не наезжает. */
+.prow .num{margin-left:auto;text-align:right;flex:none;min-width:92px}
+.prow .ibtn2{position:static;transform:none;flex:none;order:0}
+.prow .num{order:1}
+.prow .pcaret,.prow.psub .rspace{order:2;flex:none;width:16px}
+.prow .pname{order:-1}
+.prow .ic,.prow .gdot{order:-2}
+/* десктоп: кнопка появляется при hover, но место под неё зарезервировано всегда — число не прыгает */
 @media (hover:hover){
-  .prow .ibtn2{position:absolute;top:50%;transform:translateY(-50%);z-index:2;right:52px}
-  .prow.psub .ibtn2{right:14px}
+  .prow .ibtn2{opacity:0;transition:opacity .12s}
+  .prow:hover .ibtn2{opacity:.55}
+  .prow:hover .ibtn2:hover{opacity:1}
 }
-/* мобильный: кнопки в потоке слева от числа; число всё равно ровное (margin-left:auto прижимает вправо блок число+каретку) */
 @media (hover:none){
   .prow .ibtn2{opacity:.5}
-  .prow .num{margin-left:8px}
-  .prow .pname{margin-right:auto}
 }
 .phead{padding:12px 10px}
 .gdot{width:10px;height:10px;border-radius:3px;flex:none}
@@ -2845,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.59-design2";
+const APP_VERSION="v7.60-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -5160,7 +5164,7 @@ function pgPlan(v){
   v.appendChild(h(`<div class="eyebrow" style="margin:14px 2px 6px">Доходы</div>`));
   const incOpen=planOpen.has('inc');
   const incCard=h(`<div class="pgrp${incOpen?' open':''}"><div class="prow phead"><span class="gdot" style="background:var(--grpI)"></span>
-      <span class="pname">Доход (план)</span><span class="num psum" id="planIncTag" style="color:var(--grpI)">${fmt(plannedIncomeView(k))}</span>
+      <span class="pname">Доход (план)</span><span class="num psum" id="planIncTag" style="color:var(--grpI)">${fmt(plannedIncomeView(k),{bare:true})}</span>
       <button class="ibtn2" data-addsrc title="Добавить источник">${SVG_PLUS}</button><span class="pcaret">${SVG_CARET}</span></div>
     <div class="pbody"></div></div>`);
   const incBody=incCard.querySelector('.pbody');
@@ -5298,13 +5302,13 @@ function pgPlan(v){
 function refreshPlanTotals(){
   const k=curMonth, plan=state.plans[k]||{}, tot=planTotalView(k), inc=plannedIncomeView(k);
   const bb=document.getElementById("planBudgetBig"); if(bb)bb.textContent=fmt(tot);
-  const it=document.getElementById("planIncTag"); if(it)it.textContent=fmt(inc);
+  const it=document.getElementById("planIncTag"); if(it)it.textContent=fmt(inc,{bare:true});
   const sl=document.getElementById("planSummaryLine");
   if(sl){ sl.innerHTML = tot===0
     ? `<div class="infobox" style="margin:0">Бюджет пуст — впишите лимиты ниже, скопируйте прошлый месяц или нажмите «Собрать из целей». Плановый доход ${fmt(inc)}.</div>`
     : `<div class="linrow"><span class="dim">Плановый доход ${fmt(inc)}</span><span style="color:${tot>inc?'var(--red)':'var(--green)'}">${tot>inc?'Расходы > дохода на '+fmt(tot-inc):'Свободно '+fmt(inc-tot)}</span></div>`; }
-  document.querySelectorAll("[data-gtag]").forEach(el=>{ const gid=el.dataset.gtag; let gt=0; catsOfView(gid).forEach(c=>gt+=planCat(k,c.id)); el.textContent=fmt(gt); });
-  document.querySelectorAll("[data-ctag]").forEach(el=>{ let ct=0; subsOf(el.dataset.ctag).forEach(su=>ct+=planSub(k,su.id)); el.textContent=fmt(ct); });
+  document.querySelectorAll("[data-gtag]").forEach(el=>{ const gid=el.dataset.gtag; let gt=0; catsOfView(gid).forEach(c=>gt+=planCat(k,c.id)); el.textContent=fmt(gt,{bare:true}); });
+  document.querySelectorAll("[data-ctag]").forEach(el=>{ let ct=0; subsOf(el.dataset.ctag).forEach(su=>ct+=planSub(k,su.id)); el.textContent=fmt(ct,{bare:true}); });
 }
 
 /* ============================================================
