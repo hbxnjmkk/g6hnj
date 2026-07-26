@@ -2849,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.69-design2";
+const APP_VERSION="v7.71-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -4083,19 +4083,29 @@ function openAddTxn(preset){
         const base={type:draft.type,amount,categoryId:draft.categoryId,subId:draft.subId,memberId:mid,label:comment||catName(draft.categoryId)};
         const wantRepeat = !part && repChk && repChk.checked;
         if(wantRepeat){
-          // повторяющийся план (ежемесячно)
+          // повтор → платёж в бюджете статьи во всех месяцах (виден в Плане и напоминаниях)
           let day=parseInt(repDay.value,10); if(!day||day<1)day=parseInt(date.slice(8,10),10)||1; if(day>31)day=31;
-          const pid=uid();
-          state.planned.push({id:pid,...base,repeat:true,day,date:null,active:true});
+          const isInc=draft.type==='income';
+          const bcat = isInc? draft.categoryId : (draft.subId?null:draft.categoryId);
+          const bsub = isInc? null : draft.subId;
+          const ex = budgetPayments(realMonth(), bcat, bsub).filter(p=>!p.fict).map(p=>({day:p.day,amount:p.amount,label:p.label||''}));
+          ex.push({day,amount,label:comment||catName(draft.categoryId)});
+          setBudgetPayments(realMonth(), bcat, bsub, ex, true);
           if(date<=today){ // сегодняшний/прошлый экземпляр — сразу факт
-            state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:mid,createdAt:nowISO(),fromPlanned:pid});
+            state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:mid,createdAt:nowISO()});
             state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
             save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId); if(draft.type==="expense") maybeCapitalBridge(draft.categoryId);
-          } else { save(); closeSheet(); render_current(); toast("Плановый повторяющийся добавлен"); }
+          } else { save(); closeSheet(); render_current(); toast("Регулярный платёж добавлен в план"); }
         } else if(!part && date>today){
-          // разовый плановый (дата в будущем) — в факт не идёт
-          state.planned.push({id:uid(),...base,repeat:false,day:null,date,active:true});
-          save(); closeSheet(); render_current(); toast("Плановая операция добавлена — подтвердите в её день");
+          // будущая дата → платёж в бюджете этого месяца (виден в Плане и напоминаниях)
+          const isInc=draft.type==='income';
+          const bcat = isInc? draft.categoryId : (draft.subId?null:draft.categoryId);
+          const bsub = isInc? null : draft.subId;
+          const mk=ym(date), day=parseInt(date.slice(8,10),10)||25;
+          const ex = budgetPayments(mk, bcat, bsub).filter(p=>!p.fict).map(p=>({day:p.day,amount:p.amount,label:p.label||''}));
+          ex.push({day,amount,label:comment||catName(draft.categoryId)});
+          setBudgetPayments(mk, bcat, bsub, ex, false);
+          save(); closeSheet(); render_current(); toast("Платёж добавлен в план — появится в свой день на «Сегодня»");
         } else {
           // обычный факт (участник всегда сюда)
           const _fp = draft.fromPlanned || null;
@@ -5027,18 +5037,22 @@ function pgOps(v){
   function renderOpsList(){
     const box=document.getElementById("opsList"); box.innerHTML="";
     if(opsFilter.planned){
-      let pl=(state.planned||[]).slice().sort((a,b)=>{ const ka=a.repeat?("A"+String(a.day||0).padStart(2,"0")):("B"+(a.date||"")); const kb=b.repeat?("A"+String(b.day||0).padStart(2,"0")):("B"+(b.date||"")); return ka<kb?-1:1; });
-      if(opsFilter.type) pl=pl.filter(p=>p.type===opsFilter.type);
-      if(opsFilter.member) pl=pl.filter(p=>(p.memberId||null)===opsFilter.member);
-      if(opsFilter.q) pl=pl.filter(p=>((p.label||"")+catName(p.categoryId)).toLowerCase().includes(opsFilter.q.toLowerCase()));
-      if(!pl.length){ box.appendChild(h(`<div class="empty"><div class="big">📅</div>Плановых операций нет.<br>Заведите их на «Плане» (＋ у категории) или поставьте будущую дату/повтор у операции.</div>`)); return; }
-      box.appendChild(h(`<div class="linrow" style="padding:2px 2px 10px;border-bottom:1px solid var(--line);font-size:12px"><span class="dim">Плановых: ${pl.length}</span><span class="dim">нажмите, чтобы изменить</span></div>`));
-      pl.forEach(p=>{ const when=p.repeat?(p.day+" число · ежемесячно"):("дата "+((p.date||"").slice(8,10)+"."+(p.date||"").slice(5,7))); 
-        const row=h(`<div class="lrow" style="cursor:pointer"><div class="ic">${p.type==='income'?'💰':(p.repeat?'🔁':'📅')}</div>
-          <div style="flex:1;min-width:0"><div class="t1">${esc(p.label||catName(p.categoryId))}${p.active===false?' <span class="dim">· пауза</span>':''}</div>
-            <div class="t2">${when} · ${p.type==='income'?'доход':'расход'}</div></div>
-          <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt(p.amount)}</div></div>`);
-        row.onclick=()=>editPlanned(p.id); box.appendChild(row); });
+      const km=realMonth();
+      let pl=allBudgetPaymentsForMonth(km).filter(p=>!p.fict).sort((a,b)=>a.day-b.day);
+      if(opsFilter.type) pl=pl.filter(p=>{ const isInc=(state.incomeSources||[]).some(s=>s.id===p.catId); return opsFilter.type==='income'?isInc:!isInc; });
+      if(opsFilter.q){ const q=opsFilter.q.toLowerCase(); pl=pl.filter(p=>{ const isInc=(state.incomeSources||[]).some(s=>s.id===p.catId); const nm=p.label||(isInc?((incomeSrcById(p.catId)||{}).name||''):(p.subId?subName(p.subId):catName(p.catId))); return nm.toLowerCase().includes(q); }); }
+      if(!pl.length){ box.appendChild(h(`<div class="empty"><div class="big">📅</div>Платежей по датам нет.<br>Задайте их в бюджете статьи: «План» → тап по сумме → «Платежи по датам», или иконка 📅 у статьи.</div>`)); return; }
+      box.appendChild(h(`<div class="linrow" style="padding:2px 2px 10px;border-bottom:1px solid var(--line);font-size:12px"><span class="dim">Платежей: ${pl.length} · ${ymHeader(km)}</span><span class="dim">нажмите, чтобы изменить</span></div>`));
+      pl.forEach(pay=>{
+        const isInc=(state.incomeSources||[]).some(s=>s.id===pay.catId);
+        const nm=pay.label||(isInc?((incomeSrcById(pay.catId)||{}).name||'Доход'):(pay.subId?subName(pay.subId):catName(pay.catId)));
+        const row=h(`<div class="lrow" style="cursor:pointer"><div class="ic">${isInc?'💰':'📅'}</div>
+          <div style="flex:1;min-width:0"><div class="t1">${esc(nm)}${pay.done?' <span class="dim">· оплачено</span>':''}</div>
+            <div class="t2">${String(pay.day).padStart(2,'0')}.${km.slice(5,7)} · ${isInc?'поступление':'платёж'}</div></div>
+          <div class="amt" style="color:${isInc?'var(--green)':'var(--ink)'}">${isInc?'+':''}${fmt(pay.amount)}</div></div>`);
+        row.onclick=()=>{ if(isInc) editBudgetSheet(km,pay.catId,null,nm,true); else editBudgetSheet(km,pay.subId?null:pay.catId,pay.subId||null,nm,true); };
+        box.appendChild(row);
+      });
       return;
     }
     let l=opsBaseTxns().slice().sort((a,b)=>(b.date+(b.createdAt||"")).localeCompare(a.date+(a.createdAt||"")));
@@ -5192,7 +5206,7 @@ function openCatSheet(c){
     el.querySelector('[data-a=ren]').onclick=()=>{ const nm=prompt("Название категории:",c.name); if(nm&&nm.trim()){ c.name=nm.trim(); save(); } closeSheet(); render_current(); };
     el.querySelector('[data-a=ico]').onclick=()=>{ closeSheet(); openEmojiPicker(c.icon||"🏷️", em=>{ c.icon=em; save(); render_current(); }); };
     el.querySelector('[data-a=sub]').onclick=()=>{ closeSheet(); openSubCatalog(c, nm=>{ const su={id:uid(),categoryId:c.id,name:nm,scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)su.ownerId=c.ownerId; state.subcategories.push(su); planOpen.add(c.id); save(); render_current(); }); };
-    el.querySelector('[data-a=del]').onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; subsOfAll(c.id).forEach(su=>su.deleted=true); save(); } closeSheet(); render_current(); };
+    el.querySelector('[data-a=del]').onclick=()=>{ if(confirm("Удалить категорию «"+c.name+"»? История в прошлых месяцах сохранится.")){ c.deleted=true; state.subcategories.filter(su=>su.categoryId===c.id).forEach(su=>{ su.deleted=true; if(state.budgets[su.id]) delete state.budgets[su.id]; }); if(state.budgets['cat:'+c.id]) delete state.budgets['cat:'+c.id]; save(); } closeSheet(); render_current(); };
   });
 }
 function openSubSheet(su){
@@ -5200,7 +5214,7 @@ function openSubSheet(su){
     <button class="btn block" data-a="ren" style="justify-content:flex-start">Переименовать</button>
     <button class="btn block danger" data-a="del" style="justify-content:flex-start">Удалить подкатегорию</button></div>`, el=>{
     el.querySelector('[data-a=ren]').onclick=()=>{ const nm=prompt("Название подкатегории:",su.name); if(nm&&nm.trim()){ su.name=nm.trim(); save(); } closeSheet(); render_current(); };
-    el.querySelector('[data-a=del]').onclick=()=>{ if(confirm("Удалить подкатегорию «"+su.name+"»? История сохранится.")){ su.deleted=true; save(); } closeSheet(); render_current(); };
+    el.querySelector('[data-a=del]').onclick=()=>{ if(confirm("Удалить подкатегорию «"+su.name+"»? История сохранится.")){ su.deleted=true; childSubsOf(su.id).forEach(ch=>{ ch.deleted=true; if(state.budgets[ch.id]) delete state.budgets[ch.id]; }); save(); } closeSheet(); render_current(); };
   });
 }
 function openSrcSheet(s){
@@ -5222,7 +5236,7 @@ function openSrcSheet(s){
     });
     el.querySelector('[data-a=ico]').onclick=()=>{ closeSheet(); openEmojiPicker(s.icon||"💼", em=>{ s.icon=em; save(); render_current(); }); };
     el.querySelectorAll('[data-k]').forEach(b=>b.onclick=()=>{ s.kind=b.dataset.k; save(); closeSheet(); render_current(); });
-    el.querySelector('[data-a=plan]').onclick=()=>{ closeSheet(); editPlanned(null,{type:'income',categoryId:s.id,repeat:false}); };
+    el.querySelector('[data-a=plan]').onclick=()=>{ closeSheet(); editBudgetSheet(curMonth, s.id, null, s.name, true); };
     el.querySelector('[data-a=ren]').onclick=()=>{ const nm=prompt("Название источника:",s.name); if(nm&&nm.trim()){ s.name=nm.trim(); save(); } closeSheet(); render_current(); };
     el.querySelector('[data-a=del]').onclick=()=>{ if(confirm("Удалить источник «"+s.name+"»? Прошлые доходы останутся.")){ state.incomeSources=state.incomeSources.filter(x=>x.id!==s.id); save(); } closeSheet(); render_current(); };
   });
@@ -7209,44 +7223,56 @@ function planOwnerId(p){
 function buildPlanTemplateSheets(){
   const months=planTemplateMonths();
   const scope=planTemplateScope();
-  const HEAD=["Тип строки","Название","ID",...months.map(ymHeader)];
+  // Колонки: Тип | Название | ID | Бюджет(владелец) | месяцы...
+  const HEAD=["Тип строки","Название","ID","Бюджет",...months.map(ymHeader)];
   const rows=[HEAD];
-  const NM=3;
+  const NM=4;
   const colLetter=(ci)=>colRef(ci);
   const sumCol=(mi)=>NM+mi;
   const tail=()=>Array(months.length).fill("");
   const sumFormula=(colIdx, fromRow, toRow)=> (toRow>=fromRow)?{f:`SUM(${colLetter(colIdx)}${fromRow}:${colLetter(colIdx)}${toRow})`}:0;
 
-  // строка узла (подкатегория/под-подкатегория) с СОБСТВЕННЫМ бюджетом по месяцам
+  // Базовая месячная сумма узла для Excel = amount + фиктивные платежи (без реальных дат).
+  // Реальные датированные платежи идут отдельным блоком — чтобы сумма НЕ задваивалась при обратном импорте.
+  const baseSum=(catId,subId,k)=>{
+    const rec=budgetRec(k,catId,subId); if(!rec) return 0;
+    const amt=Math.round(+rec.amount||0);
+    const fictSum=(rec.payments||[]).filter(p=>p.fict).reduce((a,p)=>a+Math.round(+p.amount||0),0);
+    return amt+fictSum;
+  };
+  // владелец узла (для колонки «Бюджет»)
+  const ownerLabel=(scopeVal,ownerId)=>{ if((scopeVal||'shared')!=='personal') return "Общий"; const m=ownerId?memberById(ownerId):null; return m?("Личный · "+m.name):"Личный"; };
+
   const nodeRow=(su, isChild)=>{
-    const r=[isChild?"ПОД-ПОДКАТЕГОРИЯ":"ПОДКАТЕГОРИЯ", (isChild?"    ":"")+su.name, su.id, ...tail()];
-    months.forEach((k,mi)=>{ const lim=getBudget(k,null,su.id); if(lim!=null && lim>0) r[sumCol(mi)]=lim; });
+    const c=byId(state.categories,su.categoryId);
+    const r=[isChild?"ПОД-ПОДКАТЕГОРИЯ":"ПОДКАТЕГОРИЯ", (isChild?"    ":"")+su.name, su.id, ownerLabel(c&&c.scope,c&&c.ownerId), ...tail()];
+    months.forEach((k,mi)=>{ const v=baseSum(null,su.id,k); if(v>0) r[sumCol(mi)]=v; });
     return r;
   };
   const catDirectRow=(c)=>{
-    const r=["КАТЕГОРИЯ-ПРЯМО", c.name+" (без подкатегории)", "cat:"+c.id, ...tail()];
+    const r=["КАТЕГОРИЯ-ПРЯМО", c.name+" (без подкатегории)", "cat:"+c.id, ownerLabel(c.scope,c.ownerId), ...tail()];
     let any=false;
-    months.forEach((k,mi)=>{ const lim=getBudget(k,c.id,null); if(lim!=null && lim>0){ r[sumCol(mi)]=lim; any=true; } });
+    months.forEach((k,mi)=>{ const v=baseSum(c.id,null,k); if(v>0){ r[sumCol(mi)]=v; any=true; } });
     return any?r:null;
   };
 
   // ------- ДОХОДЫ (бюджет источника: одна строка на источник) -------
-  rows.push(["РАЗДЕЛ","ДОХОДЫ","",...tail()]);
+  rows.push(["РАЗДЕЛ","ДОХОДЫ","","",...tail()]);
   const incRowNums=[];
   (state.incomeSources||[]).forEach(s=>{
     if(scope.joined){ if(srcOwner(s)!==scope.meId) return; } else { const own=srcOwner(s); if(!(own===null||own===scope.meId)) return; }
-    const r=["ДОХОД-ИСТОЧНИК", s.name, s.id, ...tail()];
+    const r=["ДОХОД-ИСТОЧНИК", s.name, s.id, ownerLabel(s.scope, s.ownerId), ...tail()];
     let any=false;
-    months.forEach((k,mi)=>{ const v=getBudget(k,s.id,null); if(v!=null && v>0){ r[sumCol(mi)]=v; any=true; } });
+    months.forEach((k,mi)=>{ const v=baseSum(s.id,null,k); if(v>0){ r[sumCol(mi)]=v; any=true; } });
     rows.push(r); incRowNums.push(rows.length);
   });
   const incTotalRow=rows.length+1;
-  { const r=["ИТОГО","ИТОГО ДОХОД","",...tail()]; if(incRowNums.length){ const f=Math.min(...incRowNums),t=Math.max(...incRowNums); months.forEach((k,mi)=>{ r[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); } rows.push(r); }
-  rows.push(["","","",...tail()]);
+  { const r=["ИТОГО","ИТОГО ДОХОД","","",...tail()]; if(incRowNums.length){ const f=Math.min(...incRowNums),t=Math.max(...incRowNums); months.forEach((k,mi)=>{ r[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); } rows.push(r); }
+  rows.push(["","","","",...tail()]);
 
-  // ------- РАСХОДЫ (узлы: категория → подкатегория → под-подкатегория) -------
-  rows.push(["РАЗДЕЛ","РАСХОДЫ","",...tail()]);
-  const leafRowNums=[];   // строки, чьи суммы идут в итог (листья: под-подкатегории или подкатегории без детей, прямые категории)
+  // ------- РАСХОДЫ -------
+  rows.push(["РАЗДЕЛ","РАСХОДЫ","","",...tail()]);
+  const leafRowNums=[];
   expenseGroups().forEach(g=>{
     const cats=catsOf(g.id).filter(c=>{ if(scope.joined) return c.scope==='personal'&&c.ownerId===scope.meId; return (c.scope||'shared')==='shared'||(c.scope==='personal'&&c.ownerId===scope.meId); });
     if(!cats.length) return;
@@ -7258,11 +7284,10 @@ function buildPlanTemplateSheets(){
       subsOf(c.id).forEach(su=>{
         const kids=childSubsOf(su.id);
         if(kids.length){
-          // подкатегория-родитель: строка-заголовок с формулой суммы детей
           const subIdx=rows.length; rows.push(null);
           const kidNums=[];
           kids.forEach(ch=>{ rows.push(nodeRow(ch,true)); const rn=rows.length; kidNums.push(rn); leafRowNums.push(rn); });
-          const shr=["ПОДКАТЕГОРИЯ", su.name, su.id, ...tail()];
+          const shr=["ПОДКАТЕГОРИЯ", su.name, su.id, ownerLabel(c.scope,c.ownerId), ...tail()];
           if(kidNums.length){ const f=Math.min(...kidNums),t=Math.max(...kidNums); months.forEach((k,mi)=>{ shr[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); }
           rows[subIdx]=shr;
           catNums.push(...kidNums); grpNums.push(...kidNums);
@@ -7271,60 +7296,65 @@ function buildPlanTemplateSheets(){
         }
       });
       const dr=catDirectRow(c); if(dr){ rows.push(dr); const rn=rows.length; catNums.push(rn); grpNums.push(rn); leafRowNums.push(rn); }
-      const hr=["КАТЕГОРИЯ", (c.icon?c.icon+" ":"")+c.name, c.id, ...tail()];
+      const hr=["КАТЕГОРИЯ", (c.icon?c.icon+" ":"")+c.name, c.id, ownerLabel(c.scope,c.ownerId), ...tail()];
       if(catNums.length){ const f=Math.min(...catNums),t=Math.max(...catNums); months.forEach((k,mi)=>{ hr[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); }
       rows[catIdx]=hr;
     });
-    const hr=["ГРУППА", g.name, g.id, ...tail()];
+    const hr=["ГРУППА", g.name, g.id, "", ...tail()];
     if(grpNums.length){ const f=Math.min(...grpNums),t=Math.max(...grpNums); months.forEach((k,mi)=>{ hr[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); }
     rows[grpIdx]=hr;
   });
   const expTotalRow=rows.length+1;
-  { const r=["ИТОГО","ИТОГО РАСХОД","",...tail()]; if(leafRowNums.length){ const f=Math.min(...leafRowNums),t=Math.max(...leafRowNums); months.forEach((k,mi)=>{ r[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); } rows.push(r); }
-  rows.push(["","","",...tail()]);
-  { const r=["ИТОГО","БАЛАНС (доход − расход)","",...tail()]; months.forEach((k,mi)=>{ const L=colLetter(sumCol(mi)); r[sumCol(mi)]={f:`${L}${incTotalRow}-${L}${expTotalRow}`}; }); rows.push(r); }
+  { const r=["ИТОГО","ИТОГО РАСХОД","","",...tail()]; if(leafRowNums.length){ const f=Math.min(...leafRowNums),t=Math.max(...leafRowNums); months.forEach((k,mi)=>{ r[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); } rows.push(r); }
+  rows.push(["","","","",...tail()]);
+  { const r=["ИТОГО","БАЛАНС (доход − расход)","","",...tail()]; months.forEach((k,mi)=>{ const L=colLetter(sumCol(mi)); r[sumCol(mi)]={f:`${L}${incTotalRow}-${L}${expTotalRow}`}; }); rows.push(r); }
 
-  // ------- ПЛАТЕЖИ ПО ДАТАМ (из бюджета, только реальные — не fict) -------
+  // ------- ПЛАТЕЖИ ПО ДАТАМ (только реальные, не fict) -------
   const payLines=[];
-  const collectPays=(catId,subId,label)=>{ months.forEach(k=>{ budgetPayments(k,catId,subId).forEach(p=>{ if(p.fict) return; payLines.push([ "ПЛАТЁЖ", p.label||label, (subId||('cat:'+catId)), ymHeader(k), Math.round(+p.amount||0), p.day||"" ]); }); }); };
+  const collectPays=(catId,subId,label)=>{ months.forEach(k=>{ budgetPayments(k,catId,subId).forEach(p=>{ if(p.fict) return; payLines.push([ "ПЛАТЁЖ", p.label||label, (subId||('cat:'+catId)), "", ymHeader(k), Math.round(+p.amount||0), p.day||"" ]); }); }); };
+  (state.incomeSources||[]).forEach(s=>collectPays(s.id,null,s.name));
   expenseGroups().forEach(g=>catsOf(g.id).forEach(c=>{
     allSubsOfCat(c.id).forEach(su=>collectPays(null,su.id,su.name));
     collectPays(c.id,null,c.name);
   }));
-  if(payLines.length){
-    rows.push(["","","",...tail()]);
-    rows.push(["РАЗДЕЛ","ПЛАТЕЖИ ПО ДАТАМ (для прогноза потока)","",...tail()]);
-    rows.push(["Тип строки","Название","ID узла","Месяц","Сумма","День"]);
-    payLines.forEach(l=>rows.push(l));
-  }
+  rows.push(["","","","",...tail()]);
+  rows.push(["РАЗДЕЛ","ПЛАТЕЖИ ПО ДАТАМ (для прогноза потока)","","",...tail()]);
+  rows.push(["Тип строки","Название","ID узла","","Месяц","Сумма","День"]);
+  if(payLines.length){ payLines.forEach(l=>rows.push(l)); }
+  else { rows.push(["ПЛАТЁЖ","(пример: Аренда — заполните и добавьте строки ниже)","","",ymHeader(months[0]),0,5]); }
 
   // ----- Справочник -----
   const who = scope.joined ? "личный бюджет" : "общий и личный бюджет";
-  const dict=[["Справочник — структура категорий приложения"],["Шаблон содержит: "+who],[],
-    ["Группа","ID категории","Категория","ID подкатегории","Подкатегория","Родитель (для 3 уровня)"]];
-  expenseGroups().forEach(g=>{ catsOf(g.id).forEach(c=>{ const subs=subsOf(c.id);
-    if(subs.length) subs.forEach(su=>{ dict.push([g.name,c.id,c.name,su.id,su.name,""]);
-      childSubsOf(su.id).forEach(ch=>dict.push([g.name,c.id,c.name,ch.id,"    "+ch.name,su.id])); });
-    else dict.push([g.name,c.id,c.name,"","",""]); }); });
+  const dict=[["Справочник — структура категорий"],["Шаблон содержит: "+who],[],
+    ["Группа","ID категории","Категория","ID подкатегории","Подкатегория","Родитель (3-й уровень)","Бюджет"]];
+  expenseGroups().forEach(g=>{ catsOf(g.id).forEach(c=>{ const subs=subsOf(c.id); const ol=ownerLabel(c.scope,c.ownerId);
+    if(subs.length) subs.forEach(su=>{ dict.push([g.name,c.id,c.name,su.id,su.name,"",ol]);
+      childSubsOf(su.id).forEach(ch=>dict.push([g.name,c.id,c.name,ch.id,"    "+ch.name,su.id,ol])); });
+    else dict.push([g.name,c.id,c.name,"","","",ol]); }); });
   dict.push([]); dict.push(["Источники дохода:"]);
-  (state.incomeSources||[]).forEach(s=>dict.push([s.id,"",s.name,"","",""]));
+  (state.incomeSources||[]).forEach(s=>dict.push([s.id,"",s.name,"","","",ownerLabel(s.scope,s.ownerId)]));
 
   const help=[["Как пользоваться шаблоном"],[],
-    ["ПЛАН — месячная сумма на статью. Впишите её в столбец нужного месяца в строке ПОДКАТЕГОРИЯ или ПОД-ПОДКАТЕГОРИЯ."],
-    ["Одна строка = одна статья. Суммы по месяцам можно делать разными."],
-    ["Три уровня: КАТЕГОРИЯ → ПОДКАТЕГОРИЯ → ПОД-ПОДКАТЕГОРИЯ (например, Репетиторы → Английский)."],
-    ["Строки-заголовки (ГРУППА, КАТЕГОРИЯ, подкатегория с детьми, ИТОГО) считаются формулами — их менять не нужно."],
+    ["ГЛАВНОЕ: этот файл — источник истины. Что вы удалите здесь — удалится и в приложении при загрузке. Имена обновятся по тому, что здесь написано."],
     [""],
-    ["Добавить статью: вставьте строку нужного типа, ID оставьте пустым, впишите название и суммы."],
-    ["Под-подкатегория: строка ПОД-ПОДКАТЕГОРИЯ под своей ПОДКАТЕГОРИЕЙ."],
+    ["ПЛАН МЕСЯЦА — сумма в столбце месяца, в строке ПОДКАТЕГОРИЯ или ПОД-ПОДКАТЕГОРИЯ."],
+    ["Одна строка = одна статья. Суммы по месяцам могут быть разными."],
+    ["Строки-заголовки (ГРУППА, КАТЕГОРИЯ, ИТОГО, подкатегория с детьми) — это формулы-суммы, их менять не нужно."],
     [""],
-    ["ДОХОДЫ — строка на источник (ДОХОД-ИСТОЧНИК) с суммами по месяцам."],
+    ["КОЛОНКА «Бюджет» — показывает, чей это бюджет: «Общий» или «Личный · Имя». Только для информации, менять не нужно."],
     [""],
-    ["ПЛАТЕЖИ ПО ДАТАМ — необязательный блок внизу (для прогноза потока: аренда, кредиты)."],
-    ["План месяца берётся из строк статей, а не из платежей. Платежи — только подсказка о датах."],
+    ["ПЕРЕИМЕНОВАТЬ статью: просто измените текст в колонке «Название», ID оставьте как есть."],
+    ["ДОБАВИТЬ статью: вставьте строку, ID оставьте ПУСТЫМ, впишите тип, название и суммы."],
+    ["ДОБАВИТЬ ПОД-ПОДКАТЕГОРИЮ (3-й уровень): вставьте строку типа ПОД-ПОДКАТЕГОРИЯ сразу под нужной ПОДКАТЕГОРИЕЙ. Пример: под «Репетиторы» строки «Английский», «Математика»."],
+    ["УДАЛИТЬ статью: удалите её строку целиком. При загрузке она удалится и в приложении."],
     [""],
-    ["НЕ удаляйте и НЕ меняйте столбец ID у существующих строк."],
-    ["Загрузка: План → Загрузить."]];
+    ["ДОХОДЫ — строка ДОХОД-ИСТОЧНИК с суммами по месяцам (одна на источник)."],
+    [""],
+    ["ПЛАТЕЖИ ПО ДАТАМ (блок внизу) — когда именно уходят/приходят деньги, для прогноза «хватит ли до зарплаты» и напоминаний."],
+    ["Как добавить платёж: в блоке ПЛАТЕЖИ впишите строку — Тип «ПЛАТЁЖ», Название (напр. Аренда), ID узла (скопируйте из колонки ID нужной статьи), Месяц (как в шапке, напр. «июл 26»), Сумма, День (1–31)."],
+    ["Удалить платёж: удалите его строку. Платежи в блоке — только с реальными датами; они НЕ прибавляются к плану, а лишь размечают даты."],
+    [""],
+    ["НЕ удаляйте и НЕ меняйте ID у существующих строк (кроме случая, когда удаляете статью целиком)."]];
 
   return [{name:"План",rows}, {name:"Справочник",rows:dict}, {name:"Инструкция",rows:help}];
 }
@@ -7399,39 +7429,25 @@ async function importPlanTemplate(e){
   const months=planTemplateMonths();
   const monthSet=new Set(months);
   const scope=planTemplateScope();
-  const NM=3;                     // Тип, Название, ID
+  const NM=4;                     // Тип, Название, ID, Бюджет
   const sumCol=(mi)=>NM+mi;
+  const monthByHeader={}; months.forEach(k=>monthByHeader[ymHeader(k).toLowerCase()]=k);
 
-  // существующие плановые операции пользователя в окне (для доходов и платежей)
-  const inScopeOps=new Map();
-  (state.planned||[]).forEach(p=>{
-    if(!scope.includes(p)) return;
-    let inWindow=false;
-    if(p.repeat){ inWindow=months.some(k=>planItemsForMonth(k).some(x=>x.id===p.id)); }
-    else { inWindow=p.date && monthSet.has(ym(p.date)); }
-    if(inWindow) inScopeOps.set(p.id,p);
-  });
-
-  const findCat=(name)=>{ const nm=String(name||"").replace(/^[^\p{L}\d]+/u,'').trim().toLowerCase(); return state.categories.find(c=>!c.deleted && String(c.name).replace(/^[^\p{L}\d]+/u,'').trim().toLowerCase()===nm); };
-  const findSub=(catId,name)=>{ const nm=String(name||"").trim().toLowerCase(); return state.subcategories.find(s=>!s.deleted && s.categoryId===catId && String(s.name).trim().toLowerCase()===nm); };
-  const findSrc=(name)=>{ const nm=String(name||"").trim().toLowerCase(); return (state.incomeSources||[]).find(s=>String(s.name).trim().toLowerCase()===nm); };
   const catById=(id)=>state.categories.find(c=>c.id===id&&!c.deleted);
   const subById=(id)=>state.subcategories.find(s=>s.id===id&&!s.deleted);
   const srcById=(id)=>(state.incomeSources||[]).find(s=>s.id===id);
   const parseAmt=(v)=>{ const n=typeof v==="number"?v:parseFloat(String(v).replace(/\s/g,"").replace(",",".")); return isFinite(n)?Math.abs(Math.round(n)):0; };
 
   // намерения
-  const budgetChanges=[];      // {catId|null, subId|null, name, monthAmounts:{ym:amount}}
-  const incomeOps=[];          // доходные операции (id или новая)
-  const datedPayments=[];      // платежи по датам
+  const budgetChanges=[];      // {catId|null, subId|null, name, amounts, isIncome?, newSub?, newSrc?, renameTo?}
+  const renames=[];            // {kind:'cat'|'sub'|'src', id, from, to}
+  const payFile=[];            // платежи из файла: {key, ym, day, amount, label}
   const willCreateCats=[];
   const structErrors=[];
-  const referencedIncomeIds=new Set();
-  const referencedPayIds=new Set();
+  const seenSubIds=new Set(), seenCatDirect=new Set(), seenSrcIds=new Set();
 
-  let curSection=null, curCatId=null, curCatName="", curCatNew=false, curSrcId=null, curSrcName="", curSrcNew=false;
-  let curSubParent=null, curSubParentName="";
-  let inPayments=false, payHeaderCols=null;
+  let curCatId=null, curCatName="", curCatNew=false, curSubParent=null, curSubParentName="";
+  let inPayments=false;
 
   for(let ri=1;ri<rows.length;ri++){
     const r=rows[ri]; if(!r) continue;
@@ -7440,102 +7456,95 @@ async function importPlanTemplate(e){
     const id=String(r[2]||"").trim();
     if(!rowType && !name) continue;
 
-    // переключение в блок платежей
     if(rowType==="РАЗДЕЛ" && /ПЛАТЕЖИ ПО ДАТ/i.test(name)){ inPayments=true; continue; }
-    if(rowType==="РАЗДЕЛ"){ curSection=/доход/i.test(name)?'income':'expense'; inPayments=false; curCatId=null; curSrcId=null; continue; }
-    if(rowType==="ТИП СТРОКИ") continue; // заголовок блока платежей
+    if(rowType==="РАЗДЕЛ"){ inPayments=false; curCatId=null; curSubParent=null; continue; }
+    if(rowType==="ТИП СТРОКИ") continue;
     if(rowType==="ИТОГО"||rowType==="ГРУППА") continue;
 
     if(inPayments){
       if(rowType!=="ПЛАТЁЖ" && rowType!=="ПЛАТЕЖ") continue;
-      // колонки блока: 0 ПЛАТЁЖ,1 Название,2 ID,3 Подкатегория,4 Сумма,5 День,6 Повтор
-      const payId=id;
-      const amt=parseAmt(r[4]);
-      const day=parseInt(String(r[5]).replace(/\D/g,""),10);
-      const rep=/да|yes|true|1/i.test(String(r[6]||""));
-      if(payId && inScopePayment(payId)){ referencedPayIds.add(payId); datedPayments.push({id:payId, amt, day:(day>=1&&day<=31?day:null), rep, name}); }
-      else if(amt>0){ /* новый платёж — привязку определим по названию подкатегории */ datedPayments.push({id:null, amt, day:(day>=1&&day<=31?day:null), rep, name, where:String(r[3]||"").trim()}); }
+      // колонки: 0 ПЛАТЁЖ,1 Название,2 ID узла,3 (пусто),4 Месяц,5 Сумма,6 День
+      const nodeKey=id; const amt=parseAmt(r[5]);
+      const mh=String(r[4]||"").trim().toLowerCase(); const mk=monthByHeader[mh]||null;
+      const day=parseInt(String(r[6]).replace(/\D/g,""),10);
+      if(!nodeKey || amt<=0 || !mk) continue;
+      payFile.push({key:nodeKey, ym:mk, amount:amt, day:(day>=1&&day<=31?day:25), label:name});
       continue;
     }
 
+    // читаем суммы месяцев
+    const amounts={}; let hasAny=false;
+    months.forEach((k,mi)=>{ const a=parseAmt(r[sumCol(mi)]); amounts[k]=a; if(a>0)hasAny=true; });
+
     if(rowType==="ДОХОД-ИСТОЧНИК"){
-      let s=id?srcById(id):null; if(!s)s=findSrc(name);
-      const amounts={}; let hasAny=false;
-      months.forEach((k,mi)=>{ const a=parseAmt(r[sumCol(mi)]); amounts[k]=a; if(a>0)hasAny=true; });
-      if(s){ curSrcId=s.id; curSrcName=s.name; curSrcNew=false;
-        if(hasAny||true) budgetChanges.push({catId:s.id, subId:null, name:s.name, amounts, isIncome:true}); }
-      else { curSrcId=null; curSrcName=name; curSrcNew=true; if(name)willCreateCats.push(name+" (доход)");
-        if(hasAny) budgetChanges.push({catId:null, subId:null, newSrc:{name}, amounts, isIncome:true}); }
+      let s=id?srcById(id):null;
+      if(s){ seenSrcIds.add(s.id); if(name && name!==s.name) renames.push({kind:'src',id:s.id,from:s.name,to:name}); budgetChanges.push({catId:s.id, subId:null, name, amounts, isIncome:true}); }
+      else if(name){ willCreateCats.push(name+" (доход)"); budgetChanges.push({catId:null, subId:null, newSrc:{name}, amounts, isIncome:true}); }
       continue;
     }
-    if(rowType==="ДОХОД-ОПЕРАЦИЯ"){ continue; } // устаревший формат — игнорируем
-    if(rowType==="ПОД-ПОДКАТЕГОРИЯ"){
-      const amounts={}; let hasAny=false;
-      months.forEach((k,mi)=>{ const a=parseAmt(r[sumCol(mi)]); amounts[k]=a; if(a>0)hasAny=true; });
-      let su=id?subById(id):null;
-      if(su){ budgetChanges.push({catId:null, subId:su.id, name:su.name, amounts}); }
-      else if(hasAny && curSubParent){ budgetChanges.push({catId:null, subId:null, newSub:{name, catId:curCatId, parentSubId:curSubParent}, name, amounts}); if(name)willCreateCats.push(name.trim()+" (под «"+curSubParentName+"»)"); }
-      continue;
-    }
+    if(rowType==="ДОХОД-ОПЕРАЦИЯ"){ continue; }
     if(rowType==="КАТЕГОРИЯ"){
-      let c=id?catById(id):null; if(!c)c=findCat(name);
-      if(c){ curCatId=c.id; curCatName=c.name; curCatNew=false; } else { curCatId=null; curCatName=String(name).replace(/^[^\p{L}\d]+/u,'').trim(); curCatNew=true; if(curCatName)willCreateCats.push(curCatName); }
+      const cid=id;
+      let c=cid?catById(cid):null;
+      const cleanName=String(name).replace(/^[^\p{L}\d]+/u,'').trim();
+      if(c){ curCatId=c.id; curCatName=c.name; curCatNew=false; if(cleanName && cleanName!==c.name) renames.push({kind:'cat',id:c.id,from:c.name,to:cleanName}); }
+      else { curCatId=null; curCatName=cleanName; curCatNew=true; if(cleanName)willCreateCats.push(cleanName); }
       curSubParent=null; curSubParentName="";
       continue;
     }
+    if(rowType==="КАТЕГОРИЯ-ПРЯМО"){
+      const cid=id.replace(/^cat:/,''); const c=catById(cid);
+      if(c){ seenCatDirect.add(c.id); budgetChanges.push({catId:c.id, subId:null, name:c.name, amounts}); }
+      continue;
+    }
     if(rowType==="ПОДКАТЕГОРИЯ"){
-      const amounts={}; let hasAny=false;
-      months.forEach((k,mi)=>{ const a=parseAmt(r[sumCol(mi)]); amounts[k]=a; if(a>0)hasAny=true; });
       let su=id?subById(id):null;
-      if(!su && !curCatNew && curCatId) su=findSub(curCatId,name);
-      if(su){ budgetChanges.push({catId:null, subId:su.id, name:su.name, amounts}); curSubParent=su.id; curSubParentName=su.name; }
-      else { // новая подкатегория
-        curSubParent=null; curSubParentName=name;
-        if(!hasAny) continue;
-        if(curCatNew){ budgetChanges.push({catId:null, subId:null, newSub:{name, catName:curCatName, catNew:true}, name, amounts}); if(name)willCreateCats.push(name+(curCatName?(" (в «"+curCatName+"»)"):"")); }
-        else if(curCatId){ budgetChanges.push({catId:null, subId:null, newSub:{name, catId:curCatId}, name, amounts}); if(name)willCreateCats.push(name+(curCatName?(" (в «"+curCatName+"»)"):"")); }
-        else { structErrors.push(`строка ${ri+1}: подкатегория «${name}» без категории`); }
+      if(su){ seenSubIds.add(su.id); const c=catById(su.categoryId); if(c){curCatId=c.id;curCatName=c.name;} if(name && name!==su.name) renames.push({kind:'sub',id:su.id,from:su.name,to:name}); budgetChanges.push({catId:null, subId:su.id, name, amounts}); curSubParent=su.id; curSubParentName=name; }
+      else if(name){ curSubParent=null; curSubParentName=name;
+        if(curCatNew){ budgetChanges.push({catId:null, subId:null, newSub:{name, catName:curCatName, catNew:true}, name, amounts}); willCreateCats.push(name+(curCatName?(" (в «"+curCatName+"»)"):"")); }
+        else if(curCatId){ budgetChanges.push({catId:null, subId:null, newSub:{name, catId:curCatId}, name, amounts}); willCreateCats.push(name+(curCatName?(" (в «"+curCatName+"»)"):"")); }
+        else structErrors.push(`строка ${ri+1}: подкатегория «${name}» без категории`);
       }
       continue;
     }
-    if(rowType==="КАТЕГОРИЯ-ПРЯМО"){
-      const amounts={}; months.forEach((k,mi)=>{ amounts[k]=parseAmt(r[sumCol(mi)]); });
-      const cid = id.replace(/^cat:/,'');
-      const c=catById(cid);
-      if(c) budgetChanges.push({catId:c.id, subId:null, name:c.name, amounts});
+    if(rowType==="ПОД-ПОДКАТЕГОРИЯ"){
+      const cleanName=String(name).trim();
+      let su=id?subById(id):null;
+      if(su){ seenSubIds.add(su.id); if(cleanName && cleanName!==su.name) renames.push({kind:'sub',id:su.id,from:su.name,to:cleanName}); budgetChanges.push({catId:null, subId:su.id, name:cleanName, amounts}); }
+      else if(cleanName && curSubParent){ budgetChanges.push({catId:null, subId:null, newSub:{name:cleanName, catId:curCatId, parentSubId:curSubParent}, name:cleanName, amounts}); willCreateCats.push(cleanName+" (под «"+curSubParentName+"»)"); }
+      else if(cleanName && !curSubParent){ structErrors.push(`строка ${ri+1}: под-подкатегория «${cleanName}» без родительской подкатегории выше`); }
       continue;
     }
   }
 
-  function inScopePayment(pid){ const p=(state.planned||[]).find(x=>x.id===pid); return p && scope.includes(p); }
-
-  // --- классификация лимитов ---
+  // --- классификация: новые / изменённые / без изменений (по базовой сумме) ---
+  const baseSumNow=(catId,subId,k)=>{ const rec=budgetRec(k,catId,subId); if(!rec)return 0; const amt=Math.round(+rec.amount||0); const fs=(rec.payments||[]).filter(p=>p.fict).reduce((a,p)=>a+Math.round(+p.amount||0),0); return amt+fs; };
   let cntNew=0, cntUpd=0, cntSame=0;
   budgetChanges.forEach(bc=>{
-    if(bc.newSub){ cntNew++; return; }
-    let changed=false, isNew=false;
-    months.forEach(k=>{ const cur=getBudget(k, bc.subId?null:bc.catId, bc.subId); const nv=bc.amounts[k]||0;
-      if(cur==null && nv>0) isNew=true;
-      else if((cur||0)!==nv) changed=true;
-    });
-    if(isNew && !changed) cntNew++; else if(changed||isNew) cntUpd++; else cntSame++;
-  });
-  incomeOps.forEach(op=>{ if(!op.id){ cntNew++; return; } const p=inScopeOps.get(op.id);
-    const cur=months.map((k,mi)=>{ if(p.repeat)return planItemsForMonth(k).some(x=>x.id===p.id)?Math.round(+p.amount||0):0; return (p.date&&ym(p.date)===k)?Math.round(+p.amount||0):0; });
-    if(op.amounts.every((a,mi)=>a===cur[mi])) cntSame++; else cntUpd++;
+    if(bc.newSub||bc.newSrc){ cntNew++; return; }
+    let changed=false;
+    months.forEach(k=>{ const cur=baseSumNow(bc.isIncome?bc.catId:(bc.subId?null:bc.catId), bc.isIncome?null:bc.subId, k); if(cur!==(bc.amounts[k]||0)) changed=true; });
+    if(changed) cntUpd++; else cntSame++;
   });
 
-  // --- удаления: лимиты, которых больше нет в файле, и платежи ---
-  const fileSubKeys=new Set(budgetChanges.filter(b=>b.subId).map(b=>b.subId));
-  const fileCatKeys=new Set(budgetChanges.filter(b=>b.catId).map(b=>'cat:'+b.catId));
+  // --- удаления: статьи, которых нет в файле (полная синхронизация) ---
   const removed=[];
-  if(state.budgets){ Object.keys(state.budgets).forEach(key=>{
-    const rec=state.budgets[key]; const inWin=months.some(k=>rec[k]!=null&&rec[k]>0); if(!inWin) return;
-    // принадлежит ли scope?
-    let belongs=true, label=key, subId=null, catId=null;
-    if(key.startsWith('cat:')){ catId=key.slice(4); const c=catById(catId); if(!c){belongs=false;} else { label=c.name+" (без подкатегории)"; belongs = scope.joined? (c.scope==='personal'&&c.ownerId===scope.meId) : true; if(!fileCatKeys.has(key)&&belongs) removed.push({budgetKey:key, name:label, ops:[]}); }
-    } else { subId=key; const su=subById(subId); if(!su){belongs=false;} else { const c=catById(su.categoryId); label=su.name; belongs = scope.joined? (c&&c.scope==='personal'&&c.ownerId===scope.meId) : true; if(!fileSubKeys.has(subId)&&belongs) removed.push({budgetKey:key, name:label, ops:[]}); } }
-  }); }
+  const scopeOwnsSub=(su)=>{ const c=catById(su.categoryId); if(!c)return false; return scope.joined? (c.scope==='personal'&&c.ownerId===scope.meId) : ((c.scope||'shared')==='shared'||(c.scope==='personal'&&c.ownerId===scope.meId)); };
+  const scopeOwnsCat=(c)=>scope.joined? (c.scope==='personal'&&c.ownerId===scope.meId) : ((c.scope||'shared')==='shared'||(c.scope==='personal'&&c.ownerId===scope.meId));
+  const scopeOwnsSrc=(s)=>scope.joined? (srcOwner(s)===scope.meId) : (srcOwner(s)===null||srcOwner(s)===scope.meId);
+  // подкатегории в scope с бюджетом, но не встреченные в файле → удалить
+  state.subcategories.filter(su=>!su.deleted && scopeOwnsSub(su)).forEach(su=>{
+    const hasBudget=months.some(k=>baseSumNow(null,su.id,k)>0 || budgetPayments(k,null,su.id).length);
+    if(hasBudget && !seenSubIds.has(su.id)) removed.push({kind:'sub', id:su.id, name:su.name});
+  });
+  state.categories.filter(c=>!c.deleted && scopeOwnsCat(c)).forEach(c=>{
+    const hasDirect=months.some(k=>baseSumNow(c.id,null,k)>0 || budgetPayments(k,c.id,null).length);
+    if(hasDirect && !seenCatDirect.has(c.id)) removed.push({kind:'catdirect', id:c.id, name:c.name+" (без подкатегории)"});
+  });
+  (state.incomeSources||[]).filter(s=>scopeOwnsSrc(s)).forEach(s=>{
+    const hasBudget=months.some(k=>baseSumNow(s.id,null,k)>0 || budgetPayments(k,s.id,null).length);
+    if(hasBudget && !seenSrcIds.has(s.id)) removed.push({kind:'src', id:s.id, name:s.name+" (доход)"});
+  });
 
   if(structErrors.length){
     openSheet(`<div><h3 style="margin:0 0 8px">Структура файла нарушена</h3>
@@ -7545,29 +7554,33 @@ async function importPlanTemplate(e){
     return;
   }
 
-  showImportPreview({budgetChanges, incomeOps, datedPayments, months, willCreateCats:[...new Set(willCreateCats)], cntNew, cntUpd, cntSame, removed, inScopeOps, referencedPayIds});
+  showImportPreview({budgetChanges, payFile, renames, months, willCreateCats:[...new Set(willCreateCats)], cntNew, cntUpd, cntSame, removed});
 }
 function showImportPreview(d){
-  const {budgetChanges, incomeOps, datedPayments, months, willCreateCats, cntNew, cntUpd, cntSame, removed, inScopeOps, referencedPayIds}=d;
+  const {budgetChanges, payFile, renames, months, willCreateCats, cntNew, cntUpd, cntSame, removed}=d;
   const delList = removed.map((rd,i)=>{
     return `<label class="row" style="gap:8px;padding:6px 0;cursor:pointer;border-bottom:1px solid var(--line)">
       <input type="checkbox" data-del="${i}" checked style="width:auto">
       <span style="flex:1;min-width:0">${esc(rd.name)}</span>
-      <span class="num dim">план</span></label>`;
+      <span class="num dim" style="color:var(--red)">удалить</span></label>`;
   }).join("");
+  const renList = renames.map(rn=>`<div style="font-size:12px;padding:3px 0;border-bottom:1px solid var(--line)">«${esc(rn.from)}» → <b>${esc(rn.to)}</b></div>`).join("");
 
   const html=`<div>
     <h3 style="margin:0 0 4px">Загрузка плана из Excel</h3>
-    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Проверьте изменения перед применением. Фактические операции не затрагиваются.</p>
+    <p class="muted" style="font-size:12.5px;margin:0 0 12px">Файл — источник истины. Проверьте изменения. Фактические операции (реальные траты) не затрагиваются.</p>
     <div class="okbox" style="margin:0 0 10px">
-      <div>➕ Новых: <b>${cntNew}</b></div>
-      <div>✏️ Изменённых: <b>${cntUpd}</b></div>
+      <div>➕ Новых статей: <b>${cntNew}</b></div>
+      <div>✏️ Изменённых сумм: <b>${cntUpd}</b></div>
       <div>✓ Без изменений: <b>${cntSame}</b></div>
+      ${renames.length?`<div>🔤 Переименований: <b>${renames.length}</b></div>`:''}
+      ${payFile.length?`<div>📅 Платежей в файле: <b>${payFile.length}</b></div>`:''}
     </div>
-    ${willCreateCats.length?`<div class="infobox" style="margin:0 0 10px;font-size:12px">Будут созданы новые статьи: ${esc(willCreateCats.join(", "))}</div>`:''}
+    ${willCreateCats.length?`<div class="infobox" style="margin:0 0 10px;font-size:12px"><b>Будут созданы:</b> ${esc(willCreateCats.join(", "))}</div>`:''}
+    ${renames.length?`<div style="margin:6px 0 10px"><div style="font-weight:600;margin-bottom:4px">🔤 Переименования</div>${renList}</div>`:''}
     ${removed.length?`<div style="margin:6px 0 10px">
-      <div style="font-weight:600;margin-bottom:4px">🗑 Есть в приложении, но нет в файле (${removed.length})</div>
-      <div class="muted" style="font-size:12px;margin-bottom:6px">Отметьте, что удалить. Снятые галочки останутся в плане без изменений.</div>
+      <div style="font-weight:600;margin-bottom:4px;color:var(--red)">🗑 Будет удалено (${removed.length})</div>
+      <div class="muted" style="font-size:12px;margin-bottom:6px">Эти статьи есть в приложении, но их нет в файле. Отмеченные — удалятся вместе с их суммами и платежами. Снимите галочку, чтобы оставить.</div>
       ${delList}
       <div class="row" style="gap:8px;margin-top:8px"><button class="btn sm ghost" id="delAll">Отметить все</button><button class="btn sm ghost" id="delNone">Снять все</button></div>
     </div>`:''}
@@ -7583,66 +7596,113 @@ function showImportPreview(d){
     el.querySelector("#impCancel").onclick=closeSheet;
     el.querySelector("#impApply").onclick=()=>{
       const toDelete = removed.filter((rd,i)=>{ const c=el.querySelector(`[data-del="${i}"]`); return c && c.checked; });
-      applyPlanImport({budgetChanges, incomeOps, datedPayments, months, inScopeOps, removed:toDelete, referencedPayIds});
+      if(toDelete.length){
+        const names=toDelete.slice(0,8).map(rd=>"• "+rd.name).join("\n")+(toDelete.length>8?("\n… и ещё "+(toDelete.length-8)):"");
+        if(!confirm("Будет БЕЗВОЗВРАТНО удалено статей: "+toDelete.length+"\n\n"+names+"\n\nВместе с их суммами и платежами. Продолжить?")) return;
+      }
+      applyPlanImport({budgetChanges, payFile, renames, months, removed:toDelete});
       closeSheet();
     };
   });
 }
 
 function applyPlanImport(d){
-  const {budgetChanges, incomeOps, datedPayments, months, removed, inScopeOps, referencedPayIds}=d;
-  let created=0, updated=0, deleted=0;
+  const {budgetChanges, payFile, renames, months, removed}=d;
+  let created=0, updated=0, deleted=0, renamed=0;
   const scope=planTemplateScope();
+  if(!state.budgets) state.budgets={};
 
-  // 1. удаления лимитов (подтверждённые)
-  (removed||[]).forEach(rd=>{ if(rd.budgetKey && state.budgets && state.budgets[rd.budgetKey]){ months.forEach(k=>{ delete state.budgets[rd.budgetKey][k]; }); if(!Object.keys(state.budgets[rd.budgetKey]).length) delete state.budgets[rd.budgetKey]; deleted++; } });
+  // Установить базовую сумму узла в месяце, СОХРАНИВ реальные (не fict) платежи.
+  // Фиктивные платежи заменяются на amount (они и есть «сумма без даты»).
+  const setBase=(catId,subId,k,amount)=>{
+    const key=budgetKeyFor(catId,subId);
+    const rec=state.budgets[key] && state.budgets[key][k];
+    let realPays=[];
+    if(rec && typeof rec==='object' && Array.isArray(rec.payments)) realPays=rec.payments.filter(p=>!p.fict);
+    const amt=Math.round(+amount||0);
+    if(amt<=0 && !realPays.length){ if(state.budgets[key]) delete state.budgets[key][k]; }
+    else { if(!state.budgets[key]) state.budgets[key]={}; state.budgets[key][k]= realPays.length? {amount:amt, payments:realPays} : amt; }
+    if(state.budgets[key] && !Object.keys(state.budgets[key]).length) delete state.budgets[key];
+  };
+  const baseSumNow=(catId,subId,k)=>{ const rec=budgetRec(k,catId,subId); if(!rec)return 0; const a=Math.round(+rec.amount||0); const fs=(rec.payments||[]).filter(p=>p.fict).reduce((x,p)=>x+Math.round(+p.amount||0),0); return a+fs; };
 
-  // 2. создаём новые категории/подкатегории для budgetChanges
+  // 1. удаления (подтверждённые) — статья целиком по всем месяцам окна
+  (removed||[]).forEach(rd=>{
+    let key=null;
+    if(rd.kind==='sub') key=rd.id;
+    else if(rd.kind==='catdirect') key='cat:'+rd.id;
+    else if(rd.kind==='src') key='cat:'+rd.id;
+    if(key && state.budgets[key]){ months.forEach(k=>{ delete state.budgets[key][k]; }); if(!Object.keys(state.budgets[key]).length) delete state.budgets[key]; }
+    // помечаем саму сущность удалённой (кроме catdirect — там удаляется только прямой бюджет категории, сама категория остаётся)
+    if(rd.kind==='sub'){ const s=state.subcategories.find(x=>x.id===rd.id); if(s){ s.deleted=true; // удаляем и детей
+        state.subcategories.filter(ch=>ch.parentSubId===rd.id).forEach(ch=>{ ch.deleted=true; if(state.budgets[ch.id]){delete state.budgets[ch.id];} }); } }
+    else if(rd.kind==='src'){ const s=(state.incomeSources||[]).find(x=>x.id===rd.id); if(s){ state.incomeSources=state.incomeSources.filter(x=>x.id!==rd.id); } }
+    deleted++;
+  });
+
+  // 2. переименования
+  (renames||[]).forEach(rn=>{
+    if(rn.kind==='cat'){ const c=state.categories.find(x=>x.id===rn.id); if(c && c.name!==rn.to){ c.name=rn.to; renamed++; } }
+    else if(rn.kind==='sub'){ const s=state.subcategories.find(x=>x.id===rn.id); if(s && s.name!==rn.to){ s.name=rn.to; renamed++; } }
+    else if(rn.kind==='src'){ const s=(state.incomeSources||[]).find(x=>x.id===rn.id); if(s && s.name!==rn.to){ s.name=rn.to; renamed++; } }
+  });
+
+  // 3. создаём новые категории/подкатегории/источники
   const catByName={}, subByKey={};
   budgetChanges.forEach(bc=>{
-    if(bc.newSrc){ // новый источник дохода
-      const nm=bc.newSrc.name; if(!catByName['SRC:'+nm]){ const s={id:uid(),name:nm,kind:'labor'}; if(scope.joined){s.scope='personal';s.ownerId=scope.meId;} state.incomeSources.push(s); catByName['SRC:'+nm]=s.id; }
-      bc.catId=catByName['SRC:'+nm]; bc.isIncome=true; created++;
-    } else if(bc.newSub){
+    if(bc.newSrc){ const nm=bc.newSrc.name; if(!catByName['SRC:'+nm]){ const s={id:uid(),name:nm,kind:'labor'}; if(scope.joined){s.scope='personal';s.ownerId=scope.meId;} state.incomeSources.push(s); catByName['SRC:'+nm]=s.id; } bc.catId=catByName['SRC:'+nm]; bc.isIncome=true; created++; }
+    else if(bc.newSub){
       let catId=bc.newSub.catId;
-      if(bc.newSub.catNew){ const nm=bc.newSub.catName; if(!catByName[nm]){ const grp=expenseGroups()[1]||expenseGroups()[0]; const c={id:uid(),name:nm,groupId:grp.id,icon:'•',scope:'shared'}; state.categories.push(c); catByName[nm]=c.id; } catId=catByName[nm]; }
+      if(bc.newSub.catNew){ const nm=bc.newSub.catName; if(!catByName[nm]){ const grp=expenseGroups()[1]||expenseGroups()[0]; const c={id:uid(),name:nm,groupId:grp.id,icon:'•',scope:'shared'}; if(scope.joined){c.scope='personal';c.ownerId=scope.meId;} state.categories.push(c); catByName[nm]=c.id; } catId=catByName[nm]; }
       const parentSubId=bc.newSub.parentSubId||null;
       const key=catId+"|"+bc.newSub.name+"|"+(parentSubId||'');
-      if(!subByKey[key]){ const su={id:uid(),categoryId:catId,name:bc.newSub.name,scope:'shared'}; if(parentSubId)su.parentSubId=parentSubId; state.subcategories.push(su); subByKey[key]=su.id; }
-      bc.subId=subByKey[key];
-      created++;
+      if(!subByKey[key]){ const su={id:uid(),categoryId:catId,name:bc.newSub.name,scope:'shared'}; if(parentSubId)su.parentSubId=parentSubId; const pc=byId(state.categories,catId); if(pc&&pc.scope==='personal'){su.scope='personal';su.ownerId=pc.ownerId;} state.subcategories.push(su); subByKey[key]=su.id; }
+      bc.subId=subByKey[key]; created++;
     }
   });
 
-  // 3. применяем бюджеты (лимиты)
-  if(!state.budgets) state.budgets={};
+  // 4. применяем базовые суммы (перезапись, реальные платежи сохраняются)
   budgetChanges.forEach(bc=>{
     const catId = bc.isIncome ? bc.catId : (bc.subId?null:bc.catId);
     const subId = bc.isIncome ? null : bc.subId;
-    months.forEach(k=>{ const nv=bc.amounts[k]||0; const cur=getBudget(k,catId,subId);
-      if((cur||0)!==nv){ setBudget(k,catId,subId,nv,false); if(cur==null&&nv>0){} else if(!bc.newSub&&!bc.newSrc) updated++; }
+    if(!catId && !subId) return;
+    months.forEach(k=>{ const nv=bc.amounts[k]||0; const cur=baseSumNow(catId,subId,k); if(cur!==nv){ setBase(catId,subId,k,nv); if(!bc.newSub&&!bc.newSrc) updated++; } });
+  });
+
+  // 5. синхронизация платежей: заменяем ВСЕ реальные платежи узлов из файла.
+  // Сначала собираем платежи файла по ключу+месяцу, затем для каждого затронутого узла/месяца заменяем реальные.
+  const payByKeyMonth={};
+  (payFile||[]).forEach(p=>{ const kk=p.key+"|"+p.ym; (payByKeyMonth[kk]=payByKeyMonth[kk]||[]).push({day:p.day,amount:p.amount,label:p.label}); });
+  // множество узлов, которые вообще фигурируют в файле (для очистки исчезнувших платежей)
+  const fileNodeKeys=new Set();
+  budgetChanges.forEach(bc=>{ if(bc.subId)fileNodeKeys.add(bc.subId); else if(bc.catId)fileNodeKeys.add('cat:'+bc.catId); });
+  (payFile||[]).forEach(p=>fileNodeKeys.add(p.key));
+  // применяем: для каждого узла из файла и каждого месяца — реальные платежи = из файла (или пусто)
+  fileNodeKeys.forEach(nodeKey=>{
+    const catId = nodeKey.startsWith('cat:')?nodeKey.slice(4):null;
+    const subId = nodeKey.startsWith('cat:')?null:nodeKey;
+    months.forEach(k=>{
+      const filePays=(payByKeyMonth[nodeKey+"|"+k]||[]);
+      const rec=state.budgets[nodeKey] && state.budgets[nodeKey][k];
+      const hadReal = rec && typeof rec==='object' && Array.isArray(rec.payments) && rec.payments.some(p=>!p.fict);
+      if(!filePays.length && !hadReal) return; // нечего менять
+      // текущий amount и фиктивные платежи сохраняем
+      let amt=0, fictPays=[];
+      if(rec && typeof rec==='object'){ amt=Math.round(+rec.amount||0); fictPays=(rec.payments||[]).filter(p=>p.fict); }
+      else if(typeof rec==='number'){ amt=Math.round(rec); }
+      const newPayments=fictPays.concat(filePays.map(p=>({day:p.day,amount:p.amount,label:p.label,fict:false})));
+      if(!state.budgets[nodeKey]) state.budgets[nodeKey]={};
+      if(amt>0 || newPayments.length) state.budgets[nodeKey][k]= newPayments.length? {amount:amt,payments:newPayments} : amt;
+      else delete state.budgets[nodeKey][k];
+      if(filePays.length!==(hadReal?rec.payments.filter(p=>!p.fict).length:0)) updated++;
     });
+    if(state.budgets[nodeKey] && !Object.keys(state.budgets[nodeKey]).length) delete state.budgets[nodeKey];
   });
-
-  // 4. доходы теперь применяются как бюджеты источников (см. блок выше через isIncome) — операции не создаются
-
-  // 5. датированные платежи (расход)
-  (datedPayments||[]).forEach(pay=>{
-    if(pay.id && inScopeOps.has(pay.id)){
-      const p=inScopeOps.get(pay.id);
-      if(pay.amt<=0){ state.planned=state.planned.filter(x=>x.id!==pay.id); deleted++; return; }
-      if(Math.round(+p.amount||0)!==pay.amt){ p.amount=pay.amt; updated++; }
-      if(pay.rep){ p.repeat=true; if(pay.day){p.day=pay.day;} delete p.date; }
-      else { if(pay.day){ const k=p.date?ym(p.date):realMonth(); p.date=k+"-"+String(pay.day).padStart(2,"0"); } p.repeat=false; }
-    }
-    // новые платежи из файла игнорируем в этой версии (привязка по названию ненадёжна) — лимиты уже покрывают план
-  });
-
-  // удаляем платежи, чей id был в scope, но исчез из блока платежей файла — НЕ трогаем (консервативно)
 
   save(); render_current();
-  toast(`Готово: +${created} · изменено ${updated}${deleted?` · удалено ${deleted}`:''}`);
+  toast(`Готово: +${created} · изменено ${updated}${renamed?` · переименовано ${renamed}`:''}${deleted?` · удалено ${deleted}`:''}`);
 }
+
 // вспомогательные для scope новых источников
 function scope0Personal(){ return isJoinedMember(); }
 function curOwnerId(){ return isJoinedMember()?participantMemberId():curMember(); }
