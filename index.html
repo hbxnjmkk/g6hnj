@@ -2849,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.68-design2";
+const APP_VERSION="v7.69-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -4662,11 +4662,16 @@ function datedPlanSub(k,subId){ return budgetPaymentsSum(k,null,subId); }
 function datedPlanCatDirect(k,catId){ return budgetPaymentsSum(k,catId,null); }
 
 // Редактор месячного лимита (вариант C): вписал сумму — задал план, без создания операций.
-function editBudgetSheet(k, catId, subId, name){
+function editBudgetSheet(k, catId, subId, name, focusPay){
   const cur=getBudget(k, subId?null:catId, subId);
   const rec = subId? budgetRec(k,null,subId) : budgetRec(k,catId,null);
   let pays = (rec&&Array.isArray(rec.payments))? rec.payments.filter(p=>!p.fict).map(p=>({day:p.day,amount:p.amount,label:p.label||''})) : [];
   const baseAmount = rec? Math.round(+rec.amount||0) : (cur||0);
+  const isIncome = !subId && !!catId && (state.incomeSources||[]).some(s=>s.id===catId);
+  const paySectionTitle = isIncome ? "Поступления по датам" : "Платежи по датам";
+  const paySectionHint = isIncome
+    ? "Необязательно. Когда и сколько приходит (аванс 10-го, зарплата 25-го) — для прогноза «когда придут деньги» и напоминаний на «Сегодня»."
+    : "Необязательно. Нужны для прогноза потока и напоминаний на «Сегодня» (аренда, кредиты). План возьмёт максимум из суммы выше и суммы платежей.";
 
   const payRowsHtml=()=>pays.map((p,i)=>`
     <div class="row payrow" data-i="${i}" style="gap:6px;align-items:center;margin:6px 0">
@@ -4683,10 +4688,10 @@ function editBudgetSheet(k, catId, subId, name){
 
     <div style="border-top:1px solid var(--line);margin:14px 0 0;padding-top:12px">
       <div class="row" style="justify-content:space-between;align-items:center">
-        <span style="font-weight:600;font-size:13px">Платежи по датам</span>
-        <button class="btn sm ghost" id="paddbtn">+ платёж</button>
+        <span style="font-weight:600;font-size:13px">${paySectionTitle}</span>
+        <button class="btn sm ghost" id="paddbtn">+ ${isIncome?'поступление':'платёж'}</button>
       </div>
-      <p class="muted" style="font-size:11.5px;margin:4px 0 8px">Необязательно. Нужны для прогноза потока и напоминаний на «Сегодня» (аренда, кредиты). План возьмёт максимум из суммы выше и суммы платежей.</p>
+      <p class="muted" style="font-size:11.5px;margin:4px 0 8px">${paySectionHint}</p>
       <div id="paylist">${payRowsHtml()}</div>
     </div>
 
@@ -4719,6 +4724,8 @@ function editBudgetSheet(k, catId, subId, name){
       save(); closeSheet(); render_current(); toast("План убран");
     };
     el.querySelector('#bcancel').onclick=closeSheet;
+    // если открыто через иконку календаря — сразу добавить пустую строку платежа и прокрутить к ней
+    if(focusPay){ setTimeout(()=>{ try{ el.querySelector('#paddbtn').click(); const pl=el.querySelector('#paylist'); if(pl) pl.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} },120); }
   });
 }
 
@@ -5345,7 +5352,7 @@ function pgPlan(v){
       <span class="pname" style="font-weight:600">${esc(s.name)}${(famView()&&!srcOwner(s))?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}<span class="pkind">${(s.kind||'labor')==='capital'?'Капитал':'Труд'}</span></span>
       <span class="num" style="font-weight:700;color:var(--grpI)">${fmt(srcTotal,{bare:true})}</span>
       <button class="ibtn2" data-plan title="Плановый доход с датой">${SVG_CAL}</button></div>`);
-    row.querySelector("[data-plan]").onclick=e=>{ e.stopPropagation(); editBudgetSheet(k, s.id, null, s.name); };
+    row.querySelector("[data-plan]").onclick=e=>{ e.stopPropagation(); editBudgetSheet(k, s.id, null, s.name, true); };
     bindPlanRow(row, null, ()=>openSrcSheet(s));   // 1 тап — ничего; 2 тапа — правка
     incBody.appendChild(row);
     budgetPayments(k,s.id,null).filter(p=>!p.fict).sort((a,b)=>a.day-b.day).forEach(p=>{
@@ -5427,7 +5434,7 @@ function pgPlan(v){
           const w=h(`<div class="psubwrap">
             <div class="prow psub"><span class="pname">${esc(su.name)}${badge}${hasKids?'':''}</span>
               <span class="num ssum${sTot>0?'':' empty'}" data-blim title="Нажмите, чтобы задать план на месяц">${sTot>0?fmt(sTot,{bare:true}):'задать'}</span>
-              <button class="ibtn2" data-addchild title="Добавить под-подкатегорию">${SVG_PLUS}</button><span class="rspace"></span></div>
+              <button class="ibtn2" data-splan title="Добавить платёж с датой">${SVG_CAL}</button><button class="ibtn2" data-addchild title="Добавить под-подкатегорию">${SVG_PLUS}</button><span class="rspace"></span></div>
             ${sTot>0?`<div class="pbar xs"><i style="width:${Math.min(100,(over?spent:sDone)/sTot*100)}%;background:${over?'var(--red)':'var(--green)'}"></i></div>
               <div class="pmeta">${over?`<span style="color:var(--red)">перерасход +${fmt(spent-sTot,{bare:true})}</span> · план ${fmt(sTot,{bare:true})}`:`<b>✓ ${fmt(sDone,{bare:true})}</b> · осталось ${fmt(Math.max(0,sTot-sDone),{bare:true})}`}</div>`:''}
             <div class="opsbox"></div><div class="kidsbox"></div></div>`);
@@ -5439,6 +5446,7 @@ function pgPlan(v){
           });
           const srow=w.querySelector('.psub');
           srow.querySelector('[data-addchild]').onclick=e=>{ e.stopPropagation(); openSubCatalog(c, nm=>{ const ch={id:uid(),categoryId:c.id,name:nm,parentSubId:su.id,scope:c.scope||'shared'}; if(c.scope==='personal'&&c.ownerId)ch.ownerId=c.ownerId; state.subcategories.push(ch); planOpen.add(c.id); save(); toast("Добавлено: "+nm); render_current(); }, su.name); };
+          const splanEl=srow.querySelector('[data-splan]'); if(splanEl) splanEl.onclick=e=>{ e.stopPropagation(); editBudgetSheet(k, null, su.id, su.name, true); };
           const blimEl=srow.querySelector('[data-blim]');
           if(blimEl) blimEl.onclick=e=>{ e.stopPropagation(); editBudgetSheet(k, null, su.id, su.name); };
           if(!locked) bindPlanRow(srow, hasKids?(()=>render_current()):null, ()=>openSubSheet(su));
@@ -6734,17 +6742,20 @@ const HELP=[
    <p><b>Сегодня</b> — сколько денег сейчас. <b>План</b> — куда всё движется и хватит ли. <b>Баланс</b> — богатеете вы или беднеете. <b>Цели</b> — к чему идёте.</p>
    <p>Начните с мастера настройки: он за пару минут заведёт доходы, расходы, активы и цель.</p>`,links:[{label:"Открыть Сегодня",route:"today"}]},
  {icon:"✍️",title:"Ежедневный учёт",body:`<p>Вносите траты сразу — кнопкой «+». Чем честнее учёт, тем точнее картина. На экране <b>Факт</b> видно, где идёте по плану, а где перерасход.</p>
-   <p>Если у статьи есть платёж с датой («аренда 5-го», «зарплата 10-го») — подтверждайте его на экране <b>Сегодня</b> кнопкой «Да». Не сегодня — тапните по операции и перенесите дату.</p>
+   <p>Если у статьи есть платёж с датой («аренда 5-го», «зарплата 10-го») — он появится на экране <b>Сегодня</b> как напоминание. Оплатили — нажмите «Оплатил», и трата запишется в факт. Не актуально — нажмите «✕», чтобы убрать без записи.</p>
    <p>Учёт занимает минуту в день, но именно он даёт власть над деньгами.</p>`,links:[{label:"Операции",route:"ops"}]},
  {icon:"🎚️",title:"План: сумма на месяц",body:`<p>Планировать просто: тапните по сумме подкатегории на экране <b>План</b> и впишите, сколько закладываете на месяц. Это метод конвертов — каждой статье своя сумма.</p>
    <p>Одна сумма применяется сразу на все 6 месяцев, но любой месяц можно поправить отдельно. Сумма категории складывается из подкатегорий.</p>
    <p>Пока каждый рубль не получил задачу — он утекает незаметно.</p>`,links:[{label:"Открыть План",route:"plan"}]},
- {icon:"📅",title:"Планы с датой и без",body:`<p>Для большинства статей (продукты, кафе, бензин) дата не важна — задайте просто сумму на месяц.</p>
-   <p>Но для <b>аренды, кредитов, зарплаты</b> дата важна: приложение должно знать, что 5-го уходит платёж, а 10-го приходит доход — тогда прогноз «хватит ли до зарплаты» будет точным. Для таких статей нажмите иконку календаря у подкатегории и добавьте <b>плановый платёж с датой</b>.</p>
-   <p>Датированные платежи входят в ту же месячную сумму — они не удваивают план, а лишь размечают, когда деньги двигаются. Подтверждайте их на <b>Сегодня</b> кнопкой «Да».</p>`,links:[{label:"Открыть План",route:"plan"}]},
- {icon:"📊",title:"Планирование в Excel",body:`<p>Планировать можно и в таблице. На экране <b>План</b> (на компьютере) нажмите «Шаблон Excel» — скачается файл со всеми вашими категориями и суммами по месяцам.</p>
-   <p>Заполните суммы в столбцах месяцев, при желании добавьте новые подкатегории — и загрузите файл обратно кнопкой «Загрузить». Перед применением приложение покажет, что изменится.</p>
-   <p>Даты платежей — в отдельном блоке «Платежи по датам» внизу листа. Если он вам не нужен — просто не трогайте его.</p>`,links:[{label:"Открыть План",route:"plan"}]},
+ {icon:"📅",title:"Платежи по датам",body:`<p>Для большинства статей (продукты, кафе, бензин) дата не важна — задайте просто сумму на месяц.</p>
+   <p>Но для <b>аренды, кредитов, зарплаты</b> дата важна: приложение должно знать, что 5-го уходит платёж, а 10-го приходит доход — тогда прогноз «хватит ли до зарплаты» будет точным. Нажмите иконку <b>календаря 📅</b> у статьи (или тапните по сумме и откройте «Платежи по датам») и добавьте день и сумму.</p>
+   <p>Платежи входят в ту же месячную сумму — они не удваивают план, а лишь размечают, когда деньги двигаются. В свой день платёж появится напоминанием на <b>Сегодня</b>.</p>`,links:[{label:"Открыть План",route:"plan"}]},
+ {icon:"🗂️",title:"Три уровня статей",body:`<p>Обычно хватает двух уровней: <b>категория → подкатегория</b> (Образование → Репетиторы). Но иногда нужен третий.</p>
+   <p>Например, «Репетиторы» можно разбить на <b>Английский</b>, <b>Математика</b>, каждый со своей суммой. Нажмите «+» у подкатегории — создастся под-подкатегория. Сумма родителя сложится из детей автоматически.</p>
+   <p>Разбивайте настолько подробно, насколько удобно именно вам — можно и не углубляться.</p>`,links:[{label:"Открыть План",route:"plan"}]},
+ {icon:"📊",title:"Планирование в Excel",body:`<p>Планировать можно и в таблице. На экране <b>План</b> (на компьютере) нажмите «Шаблон Excel» — скачается файл со всеми категориями, подкатегориями и суммами по месяцам.</p>
+   <p>Заполните суммы в столбцах месяцев, при желании добавьте статьи (в том числе под-подкатегории третьего уровня) — и загрузите файл обратно. Перед применением приложение покажет, что изменится.</p>
+   <p>Доходы — одна строка на источник. Даты платежей — в отдельном блоке «Платежи по датам» внизу листа. Не нужен — просто не трогайте его.</p>`,links:[{label:"Открыть План",route:"plan"}]},
  {icon:"⚖️",title:"Баланс: богатею или беднею",body:`<p>Главная цифра — <b>«Чистыми»</b>: всё ваше минус все долги. Её рост из месяца в месяц — и есть богатение.</p>
    <p><b>Наше</b> — счета, вклады, недвижимость, инвестиции. <b>Должны</b> — кредиты и рассрочки. У каждого объекта видна метка: приносит он деньги или содержание.</p>
    <p>Машина и техника со временем дешевеют — отметьте их «дешевеющими», и стоимость будет честно снижаться.</p>`,links:[{label:"Открыть Баланс",route:"balance"}]},
@@ -7079,6 +7090,7 @@ function pgSettings(v){
   if(!joined) v.appendChild(rc);
 
   v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">ДомФин · данные остаются у вас</p>`));
+  v.appendChild(h(`<p class="center dim" style="font-size:10.5px;margin-top:2px;opacity:.6">${esc(APP_VERSION)}</p>`));
 }
 function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="7ya-fin-"+todayISOdate()+".json"; a.click(); toast("Экспортировано"); }
 function exportOwnJSON(){ const mid=participantMemberId(); const mine=(state.txns||[]).filter(t=>t.memberId===mid); const data={exportedBy:(ACCT&&ACCT.email)||null,memberId:mid,txns:mine}; const blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="мои-операции-"+todayISOdate()+".json"; a.click(); toast("Экспортировано"); }
@@ -8341,6 +8353,19 @@ const ONB_STEPS=[
       <div class="okbox" style="margin:0">Все данные остаются у вас и шифруются вашим паролем. Мы их не видим.</div>`; },
     next:"Начать"
   },
+  { // 1 выбор режима
+    lbl:"Как будете пользоваться",
+    render:(b)=>{ b.innerHTML=`<div class="onb-ico">🎯</div><h2 class="onb-h">Как будете пользоваться?</h2>
+      <p class="onb-p">Можно вести полноценный учёт с планом и капиталом — или просто быстро записывать траты. Режим меняется в любой момент в настройках.</p>
+      <button type="button" class="onb-choice${onbDraft.useMode==='full'?' sel':''}" data-mode="full" style="width:100%;text-align:left;border:1.5px solid ${onbDraft.useMode==='full'?'var(--gold)':'var(--line2)'};border-radius:14px;padding:14px;margin-bottom:10px;background:${onbDraft.useMode==='full'?'var(--panel2)':'transparent'};cursor:pointer">
+        <div style="font-weight:700;font-size:15px">📊 Полный контроль</div>
+        <div class="dim" style="font-size:12.5px;margin-top:3px">План по статьям, прогноз, капитал, цели, баланс. Всё, чтобы управлять деньгами всерьёз.</div></button>
+      <button type="button" class="onb-choice${onbDraft.useMode==='simple'?' sel':''}" data-mode="simple" style="width:100%;text-align:left;border:1.5px solid ${onbDraft.useMode==='simple'?'var(--gold)':'var(--line2)'};border-radius:14px;padding:14px;background:${onbDraft.useMode==='simple'?'var(--panel2)':'transparent'};cursor:pointer">
+        <div style="font-weight:700;font-size:15px">✍️ Просто записывать траты</div>
+        <div class="dim" style="font-size:12.5px;margin-top:3px">Только «Сегодня»: быстро вносить доходы и расходы, видеть остаток. Остальное скрыто — можно включить позже.</div></button>`;
+      b.querySelectorAll("[data-mode]").forEach(btn=>btn.onclick=()=>{ onbDraft.useMode=btn.dataset.mode; onbRenderStep(); });
+    }
+  },
   { // 1 участники
     lbl:"Кто ведёт бюджет",
     render:(b)=>{ b.innerHTML=`<div class="onb-ico">🙂</div><h2 class="onb-h">Как вас зовут?</h2>
@@ -8532,7 +8557,7 @@ function onbRenderGoal(b){
 function startOnboarding(mode){
   onbMode = (mode==='fresh')?'fresh':(mode==='current'?'current':'new');
   if(onbMode==='fresh'){ state=seedState(); __lastSaved=_clone(state); }
-  onbDraft={ meName:(ACCT.email?String(ACCT.email).split('@')[0]:'Я'), meEmoji:'🙂', startCash:0, income:[], expenseCats:new Set(), expenseSums:{}, assets:[], liab:[], goal:null };
+  onbDraft={ meName:(ACCT.email?String(ACCT.email).split('@')[0]:'Я'), meEmoji:'🙂', startCash:0, income:[], expenseCats:new Set(), expenseSums:{}, assets:[], liab:[], goal:null, useMode:'full' };
   const ow=(state.members||[]).find(m=>m.accountType==='owner')||state.members[0];
   if(ow){ onbDraft.meName=ow.name; onbDraft.meEmoji=ow.emoji||'🙂'; onbDraft.startCash=+ow.startCash||0; }
   // режим «по текущим данным» — предзаполняем драфт из state
@@ -8607,6 +8632,8 @@ function finishOnboarding(){
     if(onbDraft.goal && onbDraft.goal.target>0){ const g={id:uid(),name:onbDraft.goal.n,target:Math.round(onbDraft.goal.target),current:0,targetDate:onbDraft.goal.date||'',priority:2,cycleStart:todayISOdate(),ownerId:undefined}; state.goals.push(g); try{ syncGoalSubcats(); }catch(e){} }
     state.settings=state.settings||{}; state.settings.onboarded=true;
     state.budgetsMigrated=true; state.budgets=state.budgets||{};
+    // применяем выбранный режим использования
+    try{ if(onbDraft.useMode==='simple') localStorage.setItem(LS_SIMPLE,"1"); else localStorage.removeItem(LS_SIMPLE); }catch(e){}
     __lastSaved=_clone(state); save();
   }catch(e){ console.warn("onboarding finalize error", e); }
   document.getElementById("onb").classList.remove("show");
