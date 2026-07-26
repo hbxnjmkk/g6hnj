@@ -2849,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.71-design2";
+const APP_VERSION="v7.72-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -3296,9 +3296,21 @@ function syncLiabSubcats(){
   (state.liabilities||[]).forEach(L=>{
     if(!L.anchorDate){ L.anchorDate=todayISOdate(); changed=true; }
     [['principal',DEBT_CAT],['interest',INT_CAT]].forEach(([role,catId])=>{
-      let su=state.subcategories.find(s=>s.liabId===L.id && s.debtRole===role);
-      if(!su){ su={id:uid(),categoryId:catId,name:L.name,liabId:L.id,debtRole:role}; state.subcategories.push(su); changed=true; }
-      else { if(su.deleted){su.deleted=false;changed=true;} if(su.name!==L.name){su.name=L.name;changed=true;} if(su.categoryId!==catId){su.categoryId=catId;changed=true;} }
+      // все живые подкатегории этого пассива+роли
+      const matches=state.subcategories.filter(s=>s.liabId===L.id && s.debtRole===role && !s.deleted);
+      let su;
+      if(matches.length){
+        // оставляем ту, у которой есть данные (бюджет или траты), иначе первую; остальные — дубли, помечаем удалёнными
+        const scored=matches.map(s=>({s, score:(state.budgets&&state.budgets[s.id]?2:0)+((state.txns||[]).some(t=>t.subId===s.id)?1:0)}));
+        scored.sort((a,b)=>b.score-a.score);
+        su=scored[0].s;
+        scored.slice(1).forEach(x=>{ if(!x.s.deleted){ x.s.deleted=true; changed=true; } });
+      } else {
+        su={id:uid(),categoryId:catId,name:L.name,liabId:L.id,debtRole:role}; state.subcategories.push(su); changed=true;
+      }
+      if(su.deleted){su.deleted=false;changed=true;}
+      if(su.name!==L.name){su.name=L.name;changed=true;}
+      if(su.categoryId!==catId){su.categoryId=catId;changed=true;}
     });
   });
   state.subcategories.forEach(s=>{ if(s.liabId && !s.deleted && !(state.liabilities||[]).some(L=>L.id===s.liabId)){ s.deleted=true; changed=true; } });
