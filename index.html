@@ -15,8 +15,8 @@
 <meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="referrer" content="no-referrer">
 <meta name="theme-color" content="#F7F4EC">
-<meta name="apple-mobile-web-app-title" content="ДомФин">
-<title>ДомФин</title>
+<meta name="apple-mobile-web-app-title" content="7Ю8">
+<title>СЕМЬЮВОСЕМЬ</title>
 <script>try{var _t=localStorage.getItem("famfin.theme")||"auto",_a=localStorage.getItem("famfin.accent")||"aqua";var _d=_t==="dark"||(_t==="auto"&&matchMedia("(prefers-color-scheme:dark)").matches);var _e=document.documentElement;_e.setAttribute("data-theme",_d?"dark":"light");_e.setAttribute("data-accent",_a);}catch(e){}</script>
 <style>
 :root{
@@ -489,7 +489,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);box-shadow:0 0 
 </div>
 <div id="app">
   <div class="topbar">
-    <div class="brand"><svg viewBox="0 0 1024 1024" width="24" height="24" style="border-radius:8px;display:block" aria-hidden="true"><rect width="1024" height="1024" rx="220" fill="#F0ECE0"/><path d="M236 496 L486 246 Q512 220 538 246 L788 496" stroke="#7FD8D0" stroke-width="76" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M330 536 Q330 520 342 509 L404 451 Q420 436 420 458 V756 Q420 786 390 786 H370 Q330 786 330 746 Z" fill="#C9B98F"/><path d="M694 536 Q694 520 682 509 L620 451 Q604 436 604 458 V756 Q604 786 634 786 H654 Q694 786 694 746 Z" fill="#F4A6B8"/><rect x="450" y="650" width="64" height="136" rx="28" fill="#D9B24A"/><rect x="536" y="584" width="64" height="202" rx="28" fill="#D9B24A"/><rect x="622" y="510" width="64" height="276" rx="28" fill="#D9B24A"/></svg><span>ДомФин</span></div>
+    <div class="brand"><svg viewBox="0 0 1024 1024" width="24" height="24" style="border-radius:8px;display:block" aria-hidden="true"><rect width="1024" height="1024" rx="220" fill="#F0ECE0"/><text x="512" y="512" text-anchor="middle" dominant-baseline="central" font-family="'SF Pro Display',-apple-system,system-ui,sans-serif" font-weight="800" font-size="440" fill="#1A4D4A"><tspan>7Ю</tspan><tspan font-style="italic" fill="#7FD8D0">8</tspan></text></svg><span style="font-weight:800;letter-spacing:.3px">СЕМЬЮ<i style="font-style:italic">ВОСЕМЬ</i></span></div>
     <div class="month" id="monthNav">
       <button id="mPrev" aria-label="Предыдущий месяц">‹</button>
       <div class="lbl num" id="mLbl">—</div>
@@ -2849,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.79-design2";
+const APP_VERSION="v7.80-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -6819,7 +6819,7 @@ function pgCapital(v){
    ============================================================ */
 let helpIdx=0;
 const HELP=[
- {icon:"🧭",title:"Как устроен ДомФин",body:`<p>Приложение отвечает на четыре вопроса о ваших деньгах — они внизу экрана.</p>
+ {icon:"🧭",title:"Как устроен СЕМЬЮВОСЕМЬ",body:`<p>Приложение отвечает на четыре вопроса о ваших деньгах — они внизу экрана.</p>
    <p><b>Сегодня</b> — сколько денег сейчас. <b>План</b> — куда всё движется и хватит ли. <b>Баланс</b> — богатеете вы или беднеете. <b>Цели</b> — к чему идёте.</p>
    <p>Начните с мастера настройки: он за пару минут заведёт доходы, расходы, активы и цель.</p>`,links:[{label:"Открыть Сегодня",route:"today"}]},
  {icon:"✍️",title:"Ежедневный учёт",body:`<p>Вносите траты сразу — кнопкой «+». Чем честнее учёт, тем точнее картина. На экране <b>Факт</b> видно, где идёте по плану, а где перерасход.</p>
@@ -6928,7 +6928,7 @@ function cloudCard(){
   return c;
 }
 function recoverySheetText(rk){
-  return "АВАРИЙНЫЙ ЛИСТ — ДомФин\n\n"+
+  return "АВАРИЙНЫЙ ЛИСТ — СЕМЬЮВОСЕМЬ\n\n"+
     "Ключ восстановления:\n\n    "+rk+"\n\n"+
     "Зачем он нужен: если вы забудете пароль, этот ключ — единственный способ\n"+
     "восстановить доступ к данным. Мы (сервер) его не храним и восстановить не можем.\n\n"+
@@ -7170,7 +7170,7 @@ function pgSettings(v){
   };
   if(!joined) v.appendChild(rc);
 
-  v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">ДомФин · данные остаются у вас</p>`));
+  v.appendChild(h(`<p class="center dim" style="font-size:11.5px;margin-top:10px">СЕМЬЮВОСЕМЬ · данные остаются у вас</p>`));
   v.appendChild(h(`<p class="center dim" style="font-size:10.5px;margin-top:2px;opacity:.6">${esc(APP_VERSION)}</p>`));
 }
 function exportJSON(){ const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"}); const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="7ya-fin-"+todayISOdate()+".json"; a.click(); toast("Экспортировано"); }
@@ -7732,7 +7732,7 @@ function exportPlanTemplate(){
   try{
     const bytes=buildXLSX(buildPlanTemplateSheets());
     const blob=new Blob([bytes],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
-    const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="План_ДомФин_"+realMonth()+".xlsx"; document.body.appendChild(a); a.click(); a.remove();
+    const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download="План_7Ю8_"+realMonth()+".xlsx"; document.body.appendChild(a); a.click(); a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),2000); toast("Шаблон плана скачан");
   }catch(e){ toast("Не удалось создать шаблон"); console.warn(e); }
 }
@@ -8404,8 +8404,8 @@ async function faceIdAvailable(){ try{ return !!window.PublicKeyCredential && aw
 async function faceIdRegister(){
   const cred=await navigator.credentials.create({publicKey:{
     challenge:crypto.getRandomValues(new Uint8Array(32)),
-    rp:{name:"ДомФин",id:location.hostname},
-    user:{id:new TextEncoder().encode((ACCT&&ACCT.email)||"famfin-user").slice(0,64),name:(ACCT&&ACCT.email)||"ДомФин",displayName:(ACCT&&ACCT.email)||"ДомФин"},
+    rp:{name:"СЕМЬЮВОСЕМЬ",id:location.hostname},
+    user:{id:new TextEncoder().encode((ACCT&&ACCT.email)||"famfin-user").slice(0,64),name:(ACCT&&ACCT.email)||"СЕМЬЮВОСЕМЬ",displayName:(ACCT&&ACCT.email)||"СЕМЬЮВОСЕМЬ"},
     pubKeyCredParams:[{type:"public-key",alg:-7},{type:"public-key",alg:-257}],
     authenticatorSelection:{authenticatorAttachment:"platform",userVerification:"required",residentKey:"required",requireResidentKey:true},
     timeout:60000,attestation:"none"}});
