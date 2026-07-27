@@ -2849,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.80-design2";
+const APP_VERSION="v7.81-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -4123,6 +4123,7 @@ function openAddTxn(preset){
           const _fp = draft.fromPlanned || null;
           state.txns.push({id:uid(),type:draft.type,date,amount,categoryId:draft.categoryId,subId:draft.subId,comment,memberId:mid,createdAt:nowISO(),fromPlanned:_fp});
           state.freq[draft.categoryId]=(state.freq[draft.categoryId]||0)+1;
+          if(typeof draft.onSaved==='function'){ try{ draft.onSaved(); }catch(e){} }
           save(); closeSheet(); render_current(); celebrateTxn(amount, draft.type, draft.categoryId); if(draft.type==="expense") maybeCapitalBridge(draft.categoryId);
           if(_fp){ const _k=ym(date); const _rem=planOpRemainingById(_fp,_k); setTimeout(()=>toast(_rem>0.5?("Засчитано в план · осталось "+fmt(_rem,{bare:true})):"Засчитано в план · выполнено"),300); }
         }
@@ -4346,20 +4347,26 @@ function pgToday(v){
   const _dueVis=(x)=>{ const c=byId(state.categories, x.p.categoryId); if(!c) return true; if((c.scope||'shared')==='shared') return true; return c.ownerId===_mid; };
   const duep = (k===realMonth()) ? duePlanned().filter(_dueVis) : [];
   const totalPlanned = duep.length;
-  const pcard=h(`<div class="card"><h3>Напоминания об оплате ${duep.length?`<span class="tag">${duep.length}</span>`:''}<button class="btn sm ghost" id="planManage" style="margin-left:auto">Все платежи</button></h3><p class="muted" style="font-size:12px;margin:-4px 0 4px">Ожидаемые платежи по датам. «Оплатил» — записать в факт, «⋯» — перенести или пропустить.</p></div>`);
+  const pcard=h(`<div class="card"><h3>Напоминания об оплате ${duep.length?`<span class="tag">${duep.length}</span>`:''}<button class="btn sm ghost" id="planManage" style="margin-left:auto">Все платежи</button></h3><p class="muted" style="font-size:12px;margin:-4px 0 4px">Сегодня подошёл срок этих плановых платежей. «Завести оплату» — внести реальную трату, «✕» — сбросить напоминание. Пока не сброшен, платёж учитывается в прогнозе потока.</p></div>`);
   pcard.querySelector("#planManage").onclick=openPlannedManager;
   if(duep.length){
     duep.forEach(({p,date,overdue,remaining})=>{
       const dstr=date.slice(8,10)+"."+date.slice(5,7);
-      const row=h(`<div class="lrow"><div class="ic">${p.type==='income'?'💰':'📅'}</div>
+      const isInc=p.type==='income';
+      const row=h(`<div class="lrow"><div class="ic">${isInc?'💰':'📅'}</div>
         <div style="flex:1;min-width:0;cursor:pointer" data-planrow><div class="t1">${esc(p.label||catName(p.categoryId))}</div>
-          <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">ожидает</span>':''} · ${p.type==='income'?'поступление':'платёж'}</div></div>
-        <div class="amt" style="color:${p.type==='income'?'var(--green)':'var(--ink)'}">${p.type==='income'?'+':''}${fmt((remaining!=null&&p.type==='expense')?remaining:p.amount)}</div>
-        <button class="btn sm primary" data-yes style="margin-left:8px">${p.type==='income'?'Получил':'Оплатил'}</button>
-        <button class="btn sm" data-skip style="margin-left:6px" title="Пропустить (без записи)">✕</button>
-        <button class="btn sm" data-more style="margin-left:6px" title="Перенести">⋯</button></div>`);
-      row.querySelector("[data-yes]").onclick=()=>{ confirmPlanned(p,date); toast(p.type==='income'?"Записано в доход":"Записано в факт"); render_current(); };
-      row.querySelector("[data-skip]").onclick=()=>{ skipPlannedPayment(p); toast("Пропущено"); render_current(); };
+          <div class="t2">${dstr}${overdue?' · <span style="color:var(--amber)">срок подошёл</span>':' · <span class="dim">срок сегодня</span>'} · ${isInc?'ожидается поступление':'плановый платёж'}</div></div>
+        <div class="amt" style="color:${isInc?'var(--green)':'var(--ink)'}">${isInc?'+':''}${fmt((remaining!=null&&!isInc)?remaining:p.amount)}</div>
+        <button class="btn sm primary" data-pay style="margin-left:8px">${isInc?'Завести приход':'Завести оплату'}</button>
+        <button class="btn sm" data-skip style="margin-left:6px" title="Сбросить напоминание (без записи)">✕</button>
+        <button class="btn sm" data-more style="margin-left:6px" title="Перенести дату">⋯</button></div>`);
+      row.querySelector("[data-pay]").onclick=()=>{
+        // открыть форму фактовой операции с предзаполнением; после сохранения — сбросить напоминание
+        const pay=p.__pay;
+        const catId = isInc ? p.categoryId : (p.subId ? ((byId(state.subcategories,p.subId)||{}).categoryId) : p.categoryId);
+        openAddTxn({ type:p.type||'expense', amount:(remaining!=null&&!isInc)?remaining:p.amount, categoryId:catId, subId:p.subId||null, comment:p.label||catName(catId), onSaved:()=>{ try{ skipPlannedPayment(p); }catch(e){} } });
+      };
+      row.querySelector("[data-skip]").onclick=()=>{ if(confirm("Сбросить напоминание за этот месяц?"+(p.__pay&&p.__pay.recur?" Платёж повторяется — в следующем месяце напомнит снова.":" Запись не создаётся."))){ skipPlannedPayment(p); toast("Напоминание сброшено"); render_current(); } };
       row.querySelector("[data-more]").onclick=()=>planActionSheet(p,date);
       row.querySelector("[data-planrow]").onclick=()=>planActionSheet(p,date);
       pcard.appendChild(row);
@@ -6823,7 +6830,8 @@ const HELP=[
    <p><b>Сегодня</b> — сколько денег сейчас. <b>План</b> — куда всё движется и хватит ли. <b>Баланс</b> — богатеете вы или беднеете. <b>Цели</b> — к чему идёте.</p>
    <p>Начните с мастера настройки: он за пару минут заведёт доходы, расходы, активы и цель.</p>`,links:[{label:"Открыть Сегодня",route:"today"}]},
  {icon:"✍️",title:"Ежедневный учёт",body:`<p>Вносите траты сразу — кнопкой «+». Чем честнее учёт, тем точнее картина. На экране <b>Факт</b> видно, где идёте по плану, а где перерасход.</p>
-   <p>Если у статьи есть платёж с датой («аренда 5-го», «зарплата 10-го») — он появится на экране <b>Сегодня</b> как напоминание. Оплатили — нажмите «Оплатил», и трата запишется в факт. Не актуально — нажмите «✕», чтобы убрать без записи.</p>
+   <p>Если у статьи есть платёж с датой («аренда 5-го», «зарплата 10-го») — в этот день он появится на экране <b>Сегодня</b> как напоминание, что подошёл срок. Плановый платёж учитывается в прогнозе движения средств, пока вы его не закроете.</p>
+   <p>Нажмите <b>«Завести оплату»</b>, чтобы внести реальную трату (сумма и категория подставятся — можно поправить) — напоминание сбросится. Или <b>«✕»</b>, чтобы просто убрать напоминание за этот месяц без записи. После этого платёж уходит из прогноза, а его место занимает либо ваша реальная операция, либо ничего.</p>
    <p>Учёт занимает минуту в день, но именно он даёт власть над деньгами.</p>`,links:[{label:"Операции",route:"ops"}]},
  {icon:"🎚️",title:"План: сумма на месяц",body:`<p>Планировать просто: тапните по сумме подкатегории на экране <b>План</b> и впишите, сколько закладываете на месяц. Это метод конвертов — каждой статье своя сумма.</p>
    <p>Одна сумма применяется сразу на все 6 месяцев, но любой месяц можно поправить отдельно. Сумма категории складывается из подкатегорий.</p>
