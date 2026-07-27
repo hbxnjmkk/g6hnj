@@ -2849,7 +2849,7 @@ const LS_FONT="famfin.font";     // размер шрифта интерфейс
 const LS_PREVIEW="famfin.previewMember"; // owner-предпросмотр режима участника
 const LS_ACCENT="famfin.accent"; // gold / blue / green / violet / teal
 const PROD_API_URL="https://hbxnjmkk-famfin-server-41b7.twc1.net";  // адрес API (Timeweb)
-const APP_VERSION="v7.72-design2";
+const APP_VERSION="v7.75-design2";
 const APP_VERSION_NUM=(APP_VERSION.match(/[\d.]+/)||[APP_VERSION])[0];
 const GATE_HASH="19bc0c710fd0ded5"; // хеш кода-заглушки (цифры), сам код в файле не хранится
 const CUR = "₽";
@@ -4650,6 +4650,8 @@ function getBudget(k, catId, subId){
   const res=Math.max(amt, paySum);
   return res>0?res:(paySum>0?paySum:(amt>0?amt:null));
 }
+// Месяцы от k включительно до конца горизонта (для «Ежемесячный» — тянем вперёд).
+function monthsFrom(k){ const hz=(state.settings&&state.settings.horizon)||12; const start=realMonth(); const a=[]; let m=k; let guard=0; while(monthsDiff(start,m)<hz && guard<60){ a.push(m); m=addMonths(m,1); guard++; } if(!a.length)a.push(k); return a; }
 function setBudget(k, catId, subId, amount, allMonths){
   if(!state.budgets) state.budgets={};
   const key=budgetKeyFor(catId,subId);
@@ -4681,6 +4683,54 @@ function setBudgetPayments(k, catId, subId, payments, allMonths){
 }
 // сумма датированных платежей узла в месяце — теперь из бюджета (payments), а не из операций
 function datedPlanSub(k,subId){ return budgetPaymentsSum(k,null,subId); }
+
+// --- Пункт 4: повторение «Ежемесячный» с текущего месяца ВПЕРЁД ---
+// Ежемесячный бюджет: recur=true — сумма во все месяцы от k вперёд; recur=false — только этот месяц,
+// а из будущих (k+1..горизонт) убираем этот бюджет (снятие обрывает повтор с текущего вперёд, прошлое не трогаем).
+function setBudgetRecur(k, catId, subId, amount, recur){
+  const key=budgetKeyFor(catId,subId);
+  const amt=Math.round(+amount||0);
+  // текущий месяц — всегда ставим сумму (сохраняя платежи)
+  setBudget(k, catId, subId, amt, false);
+  if(recur){
+    // тянем сумму вперёд на будущие месяцы (сохраняя их платежи, если есть)
+    monthsFrom(k).slice(1).forEach(mm=>{ setBudget(mm, catId, subId, amt, false); });
+  } else {
+    // снятие: с k+1 и далее убираем amount (но платежи в будущих месяцах не трогаем — только базовую сумму)
+    monthsFrom(k).slice(1).forEach(mm=>{
+      const rec=state.budgets[key] && state.budgets[key][mm];
+      if(rec==null) return;
+      if(typeof rec==='object' && Array.isArray(rec.payments) && rec.payments.length){
+        // оставляем платежи, обнуляем базовую сумму
+        state.budgets[key][mm]={amount:0, payments:rec.payments};
+      } else {
+        delete state.budgets[key][mm];
+      }
+    });
+    if(state.budgets[key] && !Object.keys(state.budgets[key]).length) delete state.budgets[key];
+  }
+}
+// Ежемесячный платёж: у конкретного платежа флаг recur — тянем ЭТОТ платёж вперёд от k;
+// список paysThisMonth — платежи текущего месяца (каждый со своим recur). Не-recur платежи только в k.
+function setBudgetPaymentsRecur(k, catId, subId, paysThisMonth){
+  const key=budgetKeyFor(catId,subId);
+  // 1. текущий месяц: все платежи как заданы
+  setBudgetPayments(k, catId, subId, paysThisMonth.map(p=>({day:p.day,amount:p.amount,label:p.label})), false);
+  // 2. будущие месяцы: синхронизируем recurring-платежи
+  const recurPays=paysThisMonth.filter(p=>p.recur).map(p=>({day:p.day,amount:p.amount,label:p.label}));
+  monthsFrom(k).slice(1).forEach(mm=>{
+    const rec=state.budgets[key] && state.budgets[key][mm];
+    const curAmt=(rec&&typeof rec==='object')?Math.round(+rec.amount||0):(Math.round(+rec||0));
+    // существующие платежи будущего месяца, помеченные recur (протянутые ранее), заменяем на актуальный набор;
+    // разовые платежи будущего месяца (без recur-происхождения) сохраняем как есть — их пользователь завёл вручную
+    const existing=(rec&&typeof rec==='object'&&Array.isArray(rec.payments))?rec.payments.filter(p=>!p.fict && !p._recur):[];
+    const merged=existing.concat(recurPays.map(p=>({day:p.day,amount:p.amount,label:p.label,_recur:true})));
+    if(merged.length){ if(!state.budgets[key])state.budgets[key]={}; state.budgets[key][mm]={amount:curAmt, payments:merged}; }
+    else if(curAmt>0){ if(!state.budgets[key])state.budgets[key]={}; state.budgets[key][mm]=curAmt; }
+    else if(state.budgets[key]) delete state.budgets[key][mm];
+  });
+  if(state.budgets[key] && !Object.keys(state.budgets[key]).length) delete state.budgets[key];
+}
 function datedPlanCatDirect(k,catId){ return budgetPaymentsSum(k,catId,null); }
 
 // Редактор месячного лимита (вариант C): вписал сумму — задал план, без создания операций.
@@ -4695,10 +4745,12 @@ function editBudgetSheet(k, catId, subId, name, focusPay){
     ? "Необязательно. Когда и сколько приходит (аванс 10-го, зарплата 25-го) — для прогноза «когда придут деньги» и напоминаний на «Сегодня»."
     : "Необязательно. Нужны для прогноза потока и напоминаний на «Сегодня» (аренда, кредиты). План возьмёт максимум из суммы выше и суммы платежей.";
 
+  const paySess='s'+Date.now().toString(36);  // уникальный префикс на открытие формы — сбивает автозаполнение Safari
   const payRowsHtml=()=>pays.map((p,i)=>`
-    <div class="row payrow" data-i="${i}" style="gap:6px;align-items:center;margin:6px 0">
-      <input class="num" data-pd inputmode="numeric" value="${p.day||''}" placeholder="день" style="width:64px;text-align:center;padding:6px 8px">
-      <input class="num" data-pa inputmode="numeric" value="${p.amount?onbFmt(p.amount):''}" placeholder="сумма" style="flex:1;text-align:right;padding:6px 8px">
+    <div class="row payrow" data-i="${i}" style="gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap">
+      <input class="num" data-pd inputmode="numeric" autocomplete="off" name="d_${paySess}_${i}" value="${p.day||''}" placeholder="день" style="width:56px;text-align:center;padding:6px 8px">
+      <input class="num" data-pa inputmode="numeric" autocomplete="off" name="a_${paySess}_${i}" value="${p.amount?onbFmt(p.amount):''}" placeholder="сумма" style="flex:1;min-width:80px;text-align:right;padding:6px 8px">
+      <label class="row" style="gap:4px;cursor:pointer;font-size:11px;white-space:nowrap"><input type="checkbox" data-pr ${p.recur?'checked':''} style="width:auto">🔁</label>
       <button class="iconbtn" data-prm title="удалить">✕</button>
     </div>`).join("");
 
@@ -4706,7 +4758,7 @@ function editBudgetSheet(k, catId, subId, name, focusPay){
     <h3 style="margin:0 0 4px">План: ${esc(name)}</h3>
     <p class="muted" style="font-size:12.5px;margin:0 0 12px">Сумма на «${esc(name)}» в этом месяце (${ymHeader(k)}).</p>
     <input class="amount-big num" id="blim" inputmode="decimal" autofocus placeholder="0 ${CUR}" value="${baseAmount>0?esc(String(baseAmount)):''}">
-    <label class="row" style="gap:8px;margin:12px 0;cursor:pointer"><input type="checkbox" id="ball" checked style="width:auto"><span>Применить на все 6 месяцев</span></label>
+    <label class="row" style="gap:8px;margin:12px 0;cursor:pointer"><input type="checkbox" id="ball" checked style="width:auto"><span>🔁 Ежемесячный бюджет <span class="dim" style="font-size:11px">(повторять сумму на все месяцы вперёд)</span></span></label>
 
     <div style="border-top:1px solid var(--line);margin:14px 0 0;padding-top:12px">
       <div class="row" style="justify-content:space-between;align-items:center">
@@ -4725,24 +4777,26 @@ function editBudgetSheet(k, catId, subId, name, focusPay){
     const inp=el.querySelector('#blim'); attachNum(inp);
     setTimeout(()=>{ try{ inp.focus(); }catch(e){} },60);
     const paylist=el.querySelector('#paylist');
-    const readPays=()=>{ const out=[]; paylist.querySelectorAll('.payrow').forEach(row=>{ const d=parseInt(String(row.querySelector('[data-pd]').value).replace(/\D/g,''),10); const a=Math.round(parseFloat(String(row.querySelector('[data-pa]').value).replace(/\s/g,'').replace(',','.'))||0); if(a>0) out.push({day:Math.max(1,Math.min(31,d||25)),amount:a}); }); return out; };
+    const readPays=()=>{ const out=[]; paylist.querySelectorAll('.payrow').forEach(row=>{ const d=parseInt(String(row.querySelector('[data-pd]').value).replace(/\D/g,''),10); const a=Math.round(parseFloat(String(row.querySelector('[data-pa]').value).replace(/\s/g,'').replace(',','.'))||0); const pr=row.querySelector('[data-pr]'); if(a>0) out.push({day:Math.max(1,Math.min(31,d||25)),amount:a,recur:!!(pr&&pr.checked)}); }); return out; };
     const bindRow=(row)=>{ attachNum(row.querySelector('[data-pa]')); const rm=row.querySelector('[data-prm]'); if(rm) rm.addEventListener('click',()=>{ row.remove(); }); };
     paylist.querySelectorAll('.payrow').forEach(bindRow);
-    el.querySelector('#paddbtn').onclick=()=>{ const div=document.createElement('div'); div.className='row payrow'; div.style.cssText='gap:6px;align-items:center;margin:6px 0'; div.innerHTML=`<input class="num" data-pd inputmode="numeric" placeholder="день" style="width:64px;text-align:center;padding:6px 8px"><input class="num" data-pa inputmode="numeric" placeholder="сумма" style="flex:1;text-align:right;padding:6px 8px"><button class="iconbtn" data-prm title="удалить">✕</button>`; paylist.appendChild(div); bindRow(div); div.querySelector('[data-pd]').focus(); };
+    el.querySelector('#paddbtn').onclick=()=>{ const div=document.createElement('div'); div.className='row payrow'; div.style.cssText='gap:6px;align-items:center;margin:6px 0;flex-wrap:wrap'; const uniq=paySess+'_n'+Date.now().toString(36)+Math.floor(Math.random()*1000); div.innerHTML=`<input class="num" data-pd inputmode="numeric" autocomplete="off" name="d_${uniq}" placeholder="день" style="width:56px;text-align:center;padding:6px 8px"><input class="num" data-pa inputmode="numeric" autocomplete="off" name="a_${uniq}" placeholder="сумма" style="flex:1;min-width:80px;text-align:right;padding:6px 8px"><label class="row" style="gap:4px;cursor:pointer;font-size:11px;white-space:nowrap"><input type="checkbox" data-pr style="width:auto">🔁</label><button class="iconbtn" data-prm title="удалить">✕</button>`; paylist.appendChild(div); const di=div.querySelector('[data-pd]'), ai=div.querySelector('[data-pa]'); di.value=''; ai.value=''; bindRow(div); di.focus(); };
 
     el.querySelector('#bsave').onclick=()=>{
       const amt=Math.round(parseFloat(String(inp.value).replace(/\s/g,'').replace(',','.'))||0);
-      const all=el.querySelector('#ball').checked;
+      const recurBudget=el.querySelector('#ball').checked;
       const newPays=readPays();
-      setBudget(k, subId?null:catId, subId, amt, all);
-      setBudgetPayments(k, subId?null:catId, subId, newPays, all);
+      // Ежемесячный бюджет: сумма вперёд или только этот месяц
+      setBudgetRecur(k, subId?null:catId, subId, amt, recurBudget);
+      // Платежи: каждый со своим флагом «Ежемесячный»
+      setBudgetPaymentsRecur(k, subId?null:catId, subId, newPays);
       save(); closeSheet(); render_current();
       toast((amt>0||newPays.length)?"План сохранён":"План убран");
     };
     if(el.querySelector('#bclear')) el.querySelector('#bclear').onclick=()=>{
-      const all=el.querySelector('#ball').checked;
-      setBudgetPayments(k, subId?null:catId, subId, [], all);
-      setBudget(k, subId?null:catId, subId, 0, all);
+      const recurBudget=el.querySelector('#ball').checked;
+      setBudgetPaymentsRecur(k, subId?null:catId, subId, []);
+      setBudgetRecur(k, subId?null:catId, subId, 0, recurBudget);
       save(); closeSheet(); render_current(); toast("План убран");
     };
     el.querySelector('#bcancel').onclick=closeSheet;
@@ -5096,7 +5150,7 @@ const SVG_CARET='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 const SVG_CAL='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v3M16 2.5v3"/></svg>';
 const SVG_REP='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11a8 8 0 0 1 13.3-6M21 13a8 8 0 0 1-13.3 6"/><path d="M16 5h4V1M8 19H4v4"/></svg>';
 const SVG_MONEY='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M12 2v20M17 6.5c0-1.9-2.2-3-5-3s-5 1.1-5 3 2.2 2.8 5 3.3 5 1.4 5 3.4-2.2 3.3-5 3.3-5-1.3-5-3.2"/></svg>';
-const planOpen=new Set();
+const planOpen=new Set(); try{window.planOpen=planOpen;}catch(e){}
 // одинарный тап — раскрыть; двойной тап / двойной клик / долгое нажатие — правка
 function bindPlanRow(el, onOpen, onEdit){
   if(!el) return;
@@ -5374,49 +5428,40 @@ function pgPlan(v){
   if(!_incList.length) incBody.appendChild(h(`<div class="empty" style="padding:12px">Источников дохода нет — нажмите ＋</div>`));
   const _renderSrc=(s)=>{
     const srcTotal=incomeSrcPlanned(k,s.id);
-    const row=h(`<div class="prow psrc"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">${s.icon?esc(s.icon):SVG_MONEY}</div>
-      <span class="pname" style="font-weight:600">${esc(s.name)}${(famView()&&!srcOwner(s))?' <span class="pill g" style="padding:0 6px;font-size:9px;vertical-align:middle">Общее</span>':''}<span class="pkind">${(s.kind||'labor')==='capital'?'Капитал':'Труд'}</span></span>
-      <span class="num" style="font-weight:700;color:var(--grpI)">${fmt(srcTotal,{bare:true})}</span>
-      <button class="ibtn2" data-plan title="Плановый доход с датой">${SVG_CAL}</button></div>`);
+    const row=h(`<div class="prow psrc" style="padding-left:14px"><div class="ic" style="background:${tint('var(--grpI)',13)};color:var(--grpI)">${s.icon?esc(s.icon):SVG_MONEY}</div>
+      <span class="pname" style="font-weight:600">${esc(s.name)}<span class="pkind">${(s.kind||'labor')==='capital'?'Капитал':'Труд'}</span></span>
+      <span class="num ssum${srcTotal>0?'':' empty'}" data-blim style="font-weight:700;color:var(--grpI)" title="Нажмите, чтобы задать план">${srcTotal>0?fmt(srcTotal,{bare:true}):'задать'}</span>
+      <button class="ibtn2" data-plan title="Поступление по дате">${SVG_CAL}</button></div>`);
+    // пункт 1: тап по числу → правка суммы бюджета
+    row.querySelector("[data-blim]").onclick=e=>{ e.stopPropagation(); editBudgetSheet(k, s.id, null, s.name); };
     row.querySelector("[data-plan]").onclick=e=>{ e.stopPropagation(); editBudgetSheet(k, s.id, null, s.name, true); };
-    bindPlanRow(row, null, ()=>openSrcSheet(s));   // 1 тап — ничего; 2 тапа — правка
+    bindPlanRow(row, null, ()=>openSrcSheet(s));   // двойной тап — меню источника
     incBody.appendChild(row);
     budgetPayments(k,s.id,null).filter(p=>!p.fict).sort((a,b)=>a.day-b.day).forEach(p=>{
       const pr=h(`<div class="pop"><span class="opi">${SVG_CAL}</span><span class="opl">${esc(p.label||s.name)} · ${String(p.day).padStart(2,'0')}.${k.slice(5,7)}</span><span class="num opa">+${fmt(p.amount,{bare:true})}</span></div>`);
       pr.onclick=e=>{ e.stopPropagation(); editBudgetSheet(k,s.id,null,s.name); }; incBody.appendChild(pr);
     });
   };
-  if(famView()){
-    const shared=_incList.filter(s=>!srcOwner(s));
-    if(shared.length){
-      const st=shared.reduce((a,x)=>a+incomeSrcPlanned(k,x.id),0);
-      incBody.appendChild(h(`<div class="isec"><span class="isec-n">Общие</span><span class="num isec-s">${st>0?fmt(st,{bare:true}):'—'}</span></div>`));
-      shared.forEach(_renderSrc);
-    }
-    (state.members||[]).forEach(mm=>{
-      const own=_incList.filter(s=>srcOwner(s)===mm.id);
-      if(!own.length) return;
-      const t=memberPlannedIncome(k,mm.id);
-      incBody.appendChild(h(`<div class="isec"><span class="isec-n">Доходы ${esc(mm.name)}</span><span class="num isec-s">${t>0?fmt(t,{bare:true}):'—'}</span></div>`));
-      own.forEach(_renderSrc);
-    });
-  } else {
-    // личный вид: деление Общие / Личные сразу видно
-    const shared=_incList.filter(s=>!srcOwner(s));
-    const personal=_incList.filter(s=>srcOwner(s));
-    if(shared.length){
-      const st=shared.reduce((a,x)=>a+incomeSrcPlanned(k,x.id),0);
-      incBody.appendChild(h(`<div class="isec"><span class="isec-n">Общие</span><span class="num isec-s">${st>0?fmt(st,{bare:true}):'—'}</span></div>`));
-      shared.forEach(_renderSrc);
-    }
-    if(personal.length){
-      const pt=personal.reduce((a,x)=>a+incomeSrcPlanned(k,x.id),0);
-      incBody.appendChild(h(`<div class="isec"><span class="isec-n">Личные</span><span class="num isec-s">${pt>0?fmt(pt,{bare:true}):'—'}</span></div>`));
-      personal.forEach(_renderSrc);
-    }
-    // если деления нет (все без владельца или все личные и один тип) — список уже показан выше
-    if(!shared.length && !personal.length) _incList.forEach(_renderSrc);
-  }
+  // пункт 2: сворачиваемые группы по меткам (Общие, Доходы Имя) — как в расходах
+  const _incGroup=(labelKey, title, list, total)=>{
+    if(!list.length) return;
+    const openKey='inc:'+labelKey;
+    const isOpen=planOpen.has(openKey);
+    const head=h(`<div class="prow csub inchead" style="cursor:pointer"><span class="pname" style="font-weight:600">${esc(title)}</span>
+      <span class="num" style="font-weight:700;color:var(--grpI)">${total>0?fmt(total,{bare:true}):'—'}</span>
+      <span class="pcaret" style="transform:rotate(${isOpen?90:0}deg)">${SVG_CARET}</span></div>`);
+    head.onclick=()=>{ isOpen?planOpen.delete(openKey):planOpen.add(openKey); render_current(); };
+    incBody.appendChild(head);
+    if(isOpen) list.forEach(_renderSrc);
+  };
+  const shared=_incList.filter(s=>!srcOwner(s));
+  _incGroup('shared', 'Общие', shared, shared.reduce((a,x)=>a+incomeSrcPlanned(k,x.id),0));
+  (state.members||[]).forEach(mm=>{
+    const own=_incList.filter(s=>srcOwner(s)===mm.id);
+    _incGroup(mm.id, 'Доходы '+mm.name, own, own.reduce((a,x)=>a+incomeSrcPlanned(k,x.id),0));
+  });
+  // источники без владельца и без участников (например, соло-режим без members) — показать напрямую
+  if(!shared.length && !(state.members||[]).length) _incList.forEach(_renderSrc);
   v.appendChild(incCard);
 
   // ---------- РАСХОДЫ ----------
@@ -7243,15 +7288,15 @@ function buildPlanTemplateSheets(){
   const sumCol=(mi)=>NM+mi;
   const tail=()=>Array(months.length).fill("");
   const sumFormula=(colIdx, fromRow, toRow)=> (toRow>=fromRow)?{f:`SUM(${colLetter(colIdx)}${fromRow}:${colLetter(colIdx)}${toRow})`}:0;
+  // Сумма по ЯВНОМУ списку строк (а не диапазону) — чтобы не захватывать промежуточные заголовки.
+  const sumRows=(colIdx, rowList)=>{ if(!rowList||!rowList.length) return 0; const L=colLetter(colIdx); return {f:rowList.map(r=>L+r).join('+')}; };
 
   // Базовая месячная сумма узла для Excel = amount + фиктивные платежи (без реальных дат).
   // Реальные датированные платежи идут отдельным блоком — чтобы сумма НЕ задваивалась при обратном импорте.
-  const baseSum=(catId,subId,k)=>{
-    const rec=budgetRec(k,catId,subId); if(!rec) return 0;
-    const amt=Math.round(+rec.amount||0);
-    const fictSum=(rec.payments||[]).filter(p=>p.fict).reduce((a,p)=>a+Math.round(+p.amount||0),0);
-    return amt+fictSum;
-  };
+  // Сумма статьи для Excel = ПОЛНЫЙ план (getBudget = max(amount, сумма всех платежей)).
+  // Excel планирует суммами; платежи (даты) живут в приложении и при импорте не трогаются,
+  // поэтому задвоения нет — импорт берёт сумму строки как план, а даты платежей оставляет как есть.
+  const baseSum=(catId,subId,k)=>{ const v=getBudget(k,catId,subId); return v!=null?Math.round(v):0; };
   // владелец узла (для колонки «Бюджет»)
   const ownerLabel=(scopeVal,ownerId)=>{ if((scopeVal||'shared')!=='personal') return "Общий"; const m=ownerId?memberById(ownerId):null; return m?("Личный · "+m.name):"Личный"; };
 
@@ -7272,68 +7317,57 @@ function buildPlanTemplateSheets(){
   rows.push(["РАЗДЕЛ","ДОХОДЫ","","",...tail()]);
   const incRowNums=[];
   (state.incomeSources||[]).forEach(s=>{
-    if(scope.joined){ if(srcOwner(s)!==scope.meId) return; } else { const own=srcOwner(s); if(!(own===null||own===scope.meId)) return; }
+    if(scope.joined && srcOwner(s)!==scope.meId) return;  // участник — только свои; мастер — все
     const r=["ДОХОД-ИСТОЧНИК", s.name, s.id, ownerLabel(s.scope, s.ownerId), ...tail()];
     let any=false;
     months.forEach((k,mi)=>{ const v=baseSum(s.id,null,k); if(v>0){ r[sumCol(mi)]=v; any=true; } });
     rows.push(r); incRowNums.push(rows.length);
   });
   const incTotalRow=rows.length+1;
-  { const r=["ИТОГО","ИТОГО ДОХОД","","",...tail()]; if(incRowNums.length){ const f=Math.min(...incRowNums),t=Math.max(...incRowNums); months.forEach((k,mi)=>{ r[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); } rows.push(r); }
+  { const r=["ИТОГО","ИТОГО ДОХОД","","",...tail()]; months.forEach((k,mi)=>{ r[sumCol(mi)]=sumRows(sumCol(mi),incRowNums); }); rows.push(r); }
   rows.push(["","","","",...tail()]);
 
   // ------- РАСХОДЫ -------
   rows.push(["РАЗДЕЛ","РАСХОДЫ","","",...tail()]);
-  const leafRowNums=[];
+  const groupRowNums=[];  // строки ГРУПП — для ИТОГО РАСХОД
   expenseGroups().forEach(g=>{
-    const cats=catsOf(g.id).filter(c=>{ if(scope.joined) return c.scope==='personal'&&c.ownerId===scope.meId; return (c.scope||'shared')==='shared'||(c.scope==='personal'&&c.ownerId===scope.meId); });
+    const cats=catsOf(g.id).filter(c=>{ if(scope.joined) return c.scope==='personal'&&c.ownerId===scope.meId; return true; });
     if(!cats.length) return;
     const grpIdx=rows.length; rows.push(null);
-    const grpNums=[];
+    const catRowNums=[];  // строки КАТЕГОРИЙ этой группы — для суммы группы
     cats.forEach(c=>{
       const catIdx=rows.length; rows.push(null);
-      const catNums=[];
+      const catChildNums=[];  // прямые дети категории (подкат верхнего уровня + прямой бюджет)
       subsOf(c.id).forEach(su=>{
         const kids=childSubsOf(su.id);
         if(kids.length){
           const subIdx=rows.length; rows.push(null);
           const kidNums=[];
-          kids.forEach(ch=>{ rows.push(nodeRow(ch,true)); const rn=rows.length; kidNums.push(rn); leafRowNums.push(rn); });
+          kids.forEach(ch=>{ rows.push(nodeRow(ch,true)); kidNums.push(rows.length); });
           const shr=["ПОДКАТЕГОРИЯ", su.name, su.id, ownerLabel(c.scope,c.ownerId), ...tail()];
-          if(kidNums.length){ const f=Math.min(...kidNums),t=Math.max(...kidNums); months.forEach((k,mi)=>{ shr[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); }
+          months.forEach((k,mi)=>{ shr[sumCol(mi)]=sumRows(sumCol(mi),kidNums); });  // родитель = сумма детей
           rows[subIdx]=shr;
-          catNums.push(...kidNums); grpNums.push(...kidNums);
+          catChildNums.push(subIdx+1);  // в сумму категории идёт строка-родитель (не сами дети)
         } else {
-          rows.push(nodeRow(su,false)); const rn=rows.length; catNums.push(rn); grpNums.push(rn); leafRowNums.push(rn);
+          rows.push(nodeRow(su,false)); catChildNums.push(rows.length);
         }
       });
-      const dr=catDirectRow(c); if(dr){ rows.push(dr); const rn=rows.length; catNums.push(rn); grpNums.push(rn); leafRowNums.push(rn); }
+      const dr=catDirectRow(c); if(dr){ rows.push(dr); catChildNums.push(rows.length); }
       const hr=["КАТЕГОРИЯ", (c.icon?c.icon+" ":"")+c.name, c.id, ownerLabel(c.scope,c.ownerId), ...tail()];
-      if(catNums.length){ const f=Math.min(...catNums),t=Math.max(...catNums); months.forEach((k,mi)=>{ hr[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); }
-      rows[catIdx]=hr;
+      months.forEach((k,mi)=>{ hr[sumCol(mi)]=sumRows(sumCol(mi),catChildNums); });  // категория = сумма прямых детей
+      rows[catIdx]=hr; catRowNums.push(catIdx+1);
     });
     const hr=["ГРУППА", g.name, g.id, "", ...tail()];
-    if(grpNums.length){ const f=Math.min(...grpNums),t=Math.max(...grpNums); months.forEach((k,mi)=>{ hr[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); }
-    rows[grpIdx]=hr;
+    months.forEach((k,mi)=>{ hr[sumCol(mi)]=sumRows(sumCol(mi),catRowNums); });  // группа = сумма категорий
+    rows[grpIdx]=hr; groupRowNums.push(grpIdx+1);
   });
   const expTotalRow=rows.length+1;
-  { const r=["ИТОГО","ИТОГО РАСХОД","","",...tail()]; if(leafRowNums.length){ const f=Math.min(...leafRowNums),t=Math.max(...leafRowNums); months.forEach((k,mi)=>{ r[sumCol(mi)]=sumFormula(sumCol(mi),f,t); }); } rows.push(r); }
+  { const r=["ИТОГО","ИТОГО РАСХОД","","",...tail()]; months.forEach((k,mi)=>{ r[sumCol(mi)]=sumRows(sumCol(mi),groupRowNums); }); rows.push(r); }
   rows.push(["","","","",...tail()]);
   { const r=["ИТОГО","БАЛАНС (доход − расход)","","",...tail()]; months.forEach((k,mi)=>{ const L=colLetter(sumCol(mi)); r[sumCol(mi)]={f:`${L}${incTotalRow}-${L}${expTotalRow}`}; }); rows.push(r); }
 
-  // ------- ПЛАТЕЖИ ПО ДАТАМ (только реальные, не fict) -------
-  const payLines=[];
-  const collectPays=(catId,subId,label)=>{ months.forEach(k=>{ budgetPayments(k,catId,subId).forEach(p=>{ if(p.fict) return; payLines.push([ "ПЛАТЁЖ", p.label||label, (subId||('cat:'+catId)), "", ymHeader(k), Math.round(+p.amount||0), p.day||"" ]); }); }); };
-  (state.incomeSources||[]).forEach(s=>collectPays(s.id,null,s.name));
-  expenseGroups().forEach(g=>catsOf(g.id).forEach(c=>{
-    allSubsOfCat(c.id).forEach(su=>collectPays(null,su.id,su.name));
-    collectPays(c.id,null,c.name);
-  }));
-  rows.push(["","","","",...tail()]);
-  rows.push(["РАЗДЕЛ","ПЛАТЕЖИ ПО ДАТАМ (для прогноза потока)","","",...tail()]);
-  rows.push(["Тип строки","Название","ID узла","","Месяц","Сумма","День"]);
-  if(payLines.length){ payLines.forEach(l=>rows.push(l)); }
-  else { rows.push(["ПЛАТЁЖ","(пример: Аренда — заполните и добавьте строки ниже)","","",ymHeader(months[0]),0,5]); }
+  // Платежи в Excel не показываются вообще — они живут только в приложении.
+  // Планирование в Excel — чистыми суммами статей. Импорт платежи не трогает.
 
   // ----- Справочник -----
   const who = scope.joined ? "личный бюджет" : "общий и личный бюджет";
@@ -7362,7 +7396,7 @@ function buildPlanTemplateSheets(){
     [""],
     ["ДОХОДЫ — строка ДОХОД-ИСТОЧНИК с суммами по месяцам (одна на источник)."],
     [""],
-    ["ПЛАТЕЖИ ПО ДАТАМ (блок внизу) — когда именно уходят/приходят деньги, для прогноза «хватит ли до зарплаты» и напоминаний."],
+    ["ПЛАТЕЖИ ПО ДАТАМ (аренда, кредиты) задаются только в приложении: План → тап по сумме → «Платежи по датам». В Excel их нет — здесь вы планируете суммами, а даты платежей приложение сохраняет само."],
     ["Как добавить платёж: в блоке ПЛАТЕЖИ впишите строку — Тип «ПЛАТЁЖ», Название (напр. Аренда), ID узла (скопируйте из колонки ID нужной статьи), Месяц (как в шапке, напр. «июл 26»), Сумма, День (1–31)."],
     ["Удалить платёж: удалите его строку. Платежи в блоке — только с реальными датами; они НЕ прибавляются к плану, а лишь размечают даты."],
     [""],
@@ -7467,22 +7501,12 @@ async function importPlanTemplate(e){
     const name=String(r[1]||"").trim();
     const id=String(r[2]||"").trim();
     if(!rowType && !name) continue;
+    // справочные строки платежей (только для чтения) — игнорируем полностью
+    if(/ПЛАТ[ЁЕ]Ж\s*\(СПРАВОЧНО\)/i.test(rowType) || rowType.indexOf("⋯")>=0) continue;
 
-    if(rowType==="РАЗДЕЛ" && /ПЛАТЕЖИ ПО ДАТ/i.test(name)){ inPayments=true; continue; }
     if(rowType==="РАЗДЕЛ"){ inPayments=false; curCatId=null; curSubParent=null; continue; }
     if(rowType==="ТИП СТРОКИ") continue;
     if(rowType==="ИТОГО"||rowType==="ГРУППА") continue;
-
-    if(inPayments){
-      if(rowType!=="ПЛАТЁЖ" && rowType!=="ПЛАТЕЖ") continue;
-      // колонки: 0 ПЛАТЁЖ,1 Название,2 ID узла,3 (пусто),4 Месяц,5 Сумма,6 День
-      const nodeKey=id; const amt=parseAmt(r[5]);
-      const mh=String(r[4]||"").trim().toLowerCase(); const mk=monthByHeader[mh]||null;
-      const day=parseInt(String(r[6]).replace(/\D/g,""),10);
-      if(!nodeKey || amt<=0 || !mk) continue;
-      payFile.push({key:nodeKey, ym:mk, amount:amt, day:(day>=1&&day<=31?day:25), label:name});
-      continue;
-    }
 
     // читаем суммы месяцев
     const amounts={}; let hasAny=false;
@@ -7530,7 +7554,7 @@ async function importPlanTemplate(e){
   }
 
   // --- классификация: новые / изменённые / без изменений (по базовой сумме) ---
-  const baseSumNow=(catId,subId,k)=>{ const rec=budgetRec(k,catId,subId); if(!rec)return 0; const amt=Math.round(+rec.amount||0); const fs=(rec.payments||[]).filter(p=>p.fict).reduce((a,p)=>a+Math.round(+p.amount||0),0); return amt+fs; };
+  const baseSumNow=(catId,subId,k)=>{ const v=getBudget(k,catId,subId); return v!=null?Math.round(v):0; };
   let cntNew=0, cntUpd=0, cntSame=0;
   budgetChanges.forEach(bc=>{
     if(bc.newSub||bc.newSrc){ cntNew++; return; }
@@ -7632,11 +7656,14 @@ function applyPlanImport(d){
     let realPays=[];
     if(rec && typeof rec==='object' && Array.isArray(rec.payments)) realPays=rec.payments.filter(p=>!p.fict);
     const amt=Math.round(+amount||0);
-    if(amt<=0 && !realPays.length){ if(state.budgets[key]) delete state.budgets[key][k]; }
+    if(amt<=0){
+      // Вариант A: пользователь стёр сумму в Excel → плана нет, включая платежи этой статьи в этом месяце
+      if(state.budgets[key]) delete state.budgets[key][k];
+    }
     else { if(!state.budgets[key]) state.budgets[key]={}; state.budgets[key][k]= realPays.length? {amount:amt, payments:realPays} : amt; }
     if(state.budgets[key] && !Object.keys(state.budgets[key]).length) delete state.budgets[key];
   };
-  const baseSumNow=(catId,subId,k)=>{ const rec=budgetRec(k,catId,subId); if(!rec)return 0; const a=Math.round(+rec.amount||0); const fs=(rec.payments||[]).filter(p=>p.fict).reduce((x,p)=>x+Math.round(+p.amount||0),0); return a+fs; };
+  const baseSumNow=(catId,subId,k)=>{ const v=getBudget(k,catId,subId); return v!=null?Math.round(v):0; };
 
   // 1. удаления (подтверждённые) — статья целиком по всем месяцам окна
   (removed||[]).forEach(rd=>{
@@ -7681,35 +7708,8 @@ function applyPlanImport(d){
     months.forEach(k=>{ const nv=bc.amounts[k]||0; const cur=baseSumNow(catId,subId,k); if(cur!==nv){ setBase(catId,subId,k,nv); if(!bc.newSub&&!bc.newSrc) updated++; } });
   });
 
-  // 5. синхронизация платежей: заменяем ВСЕ реальные платежи узлов из файла.
-  // Сначала собираем платежи файла по ключу+месяцу, затем для каждого затронутого узла/месяца заменяем реальные.
-  const payByKeyMonth={};
-  (payFile||[]).forEach(p=>{ const kk=p.key+"|"+p.ym; (payByKeyMonth[kk]=payByKeyMonth[kk]||[]).push({day:p.day,amount:p.amount,label:p.label}); });
-  // множество узлов, которые вообще фигурируют в файле (для очистки исчезнувших платежей)
-  const fileNodeKeys=new Set();
-  budgetChanges.forEach(bc=>{ if(bc.subId)fileNodeKeys.add(bc.subId); else if(bc.catId)fileNodeKeys.add('cat:'+bc.catId); });
-  (payFile||[]).forEach(p=>fileNodeKeys.add(p.key));
-  // применяем: для каждого узла из файла и каждого месяца — реальные платежи = из файла (или пусто)
-  fileNodeKeys.forEach(nodeKey=>{
-    const catId = nodeKey.startsWith('cat:')?nodeKey.slice(4):null;
-    const subId = nodeKey.startsWith('cat:')?null:nodeKey;
-    months.forEach(k=>{
-      const filePays=(payByKeyMonth[nodeKey+"|"+k]||[]);
-      const rec=state.budgets[nodeKey] && state.budgets[nodeKey][k];
-      const hadReal = rec && typeof rec==='object' && Array.isArray(rec.payments) && rec.payments.some(p=>!p.fict);
-      if(!filePays.length && !hadReal) return; // нечего менять
-      // текущий amount и фиктивные платежи сохраняем
-      let amt=0, fictPays=[];
-      if(rec && typeof rec==='object'){ amt=Math.round(+rec.amount||0); fictPays=(rec.payments||[]).filter(p=>p.fict); }
-      else if(typeof rec==='number'){ amt=Math.round(rec); }
-      const newPayments=fictPays.concat(filePays.map(p=>({day:p.day,amount:p.amount,label:p.label,fict:false})));
-      if(!state.budgets[nodeKey]) state.budgets[nodeKey]={};
-      if(amt>0 || newPayments.length) state.budgets[nodeKey][k]= newPayments.length? {amount:amt,payments:newPayments} : amt;
-      else delete state.budgets[nodeKey][k];
-      if(filePays.length!==(hadReal?rec.payments.filter(p=>!p.fict).length:0)) updated++;
-    });
-    if(state.budgets[nodeKey] && !Object.keys(state.budgets[nodeKey]).length) delete state.budgets[nodeKey];
-  });
+  // 5. Платежи (даты) при импорте из Excel НЕ трогаются — они живут в приложении.
+  //    Excel планирует только суммами статей; setBase сохраняет реальные платежи как есть.
 
   save(); render_current();
   toast(`Готово: +${created} · изменено ${updated}${renamed?` · переименовано ${renamed}`:''}${deleted?` · удалено ${deleted}`:''}`);
